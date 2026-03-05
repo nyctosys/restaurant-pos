@@ -1,0 +1,139 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  /* Soot Shoot Brand Colors — from Branding v1.pdf */
+  --color-brand-900: #0f3d33;
+  --color-brand-800: #155347;
+  --color-brand-700: #1a5c4e;
+  --color-brand-600: #237a67;
+  --color-brand-500: #2d9b82;
+  --color-brand-400: #5eb8a4;
+  --color-brand-300: #93d1c2;
+  --color-brand-200: #c4e7df;
+  --color-brand-100: #e8f5f1;
+  --color-brand-50: #f3faf8;
+
+  /* Gold accent from branding */
+  --color-gold-500: #c8a97e;
+  --color-gold-400: #d4bb97;
+  --color-gold-300: #e0cdb0;
+  --color-gold-600: #b89460;
+  --color-gold-700: #a07b45;
+
+  /* Neutrals */
+  --color-neutral-950: #0a0a0a;
+  --color-neutral-900: #171717;
+  --color-neutral-800: #262626;
+  --color-neutral-700: #404040;
+  --color-neutral-600: #525252;
+  --color-neutral-500: #737373;
+  --color-neutral-400: #a3a3a3;
+  --color-neutral-300: #d4d4d4;
+  --color-neutral-200: #e5e5e5;
+  --color-neutral-100: #f5f5f5;
+  --color-neutral-50: #fafafa;
+
+  /* Semantic */
+  --color-surface: #ffffff;
+  --color-canvas: #f3f4f6;
+  --color-white: #ffffff;
+
+  /* Legacy aliases */
+  --color-soot-900: #171717;
+  --color-soot-800: #262626;
+  --color-soot-700: #404040;
+  --color-soot-600: #525252;
+  --color-soot-500: #737373;
+  --color-soot-400: #a3a3a3;
+  --color-soot-300: #d4d4d4;
+  --color-soot-200: #e5e5e5;
+  --color-soot-100: #f5f5f5;
+  --color-soot-50: #ffffff;
+  --color-soot-accent: #c8a97e;
+
+  --font-sans: Inter, system-ui, sans-serif;
+}
+
+@layer base {
+  body {
+    @apply bg-canvas text-neutral-900 font-sans antialiased;
+  }
+
+  /* ── Dark Mode: swap all semantic + aliased colors ── */
+  .dark {
+    --color-canvas: #0f0f0f;
+    --color-surface: #181818;
+    --color-white: #181818;
+
+    /* Invert soot palette (light ↔ dark) */
+    --color-soot-900: #f0f0f0;
+    --color-soot-800: #d4d4d4;
+    --color-soot-700: #b0b0b0;
+    --color-soot-600: #8a8a8a;
+    --color-soot-500: #6a6a6a;
+    --color-soot-400: #484848;
+    --color-soot-300: #363636;
+    --color-soot-200: #2a2a2a;
+    --color-soot-100: #1f1f1f;
+    --color-soot-50:  #181818;
+
+    /* Invert neutral palette */
+    --color-neutral-950: #fafafa;
+    --color-neutral-900: #f0f0f0;
+    --color-neutral-800: #d4d4d4;
+    --color-neutral-700: #b0b0b0;
+    --color-neutral-600: #8a8a8a;
+    --color-neutral-500: #6a6a6a;
+    --color-neutral-400: #484848;
+    --color-neutral-300: #363636;
+    --color-neutral-200: #2a2a2a;
+    --color-neutral-100: #1f1f1f;
+    --color-neutral-50:  #181818;
+
+    /* Soften brand tones for dark surfaces */
+    --color-brand-50:  #0d2a23;
+    --color-brand-100: #133b32;
+
+    color-scheme: dark;
+  }
+}
+
+/* ── Receipt Preview: force light theme regardless of dark mode ── */
+.receipt-paper {
+  --color-soot-900: #171717 !important;
+  --color-soot-800: #262626 !important;
+  --color-soot-700: #404040 !important;
+  --color-soot-600: #525252 !important;
+  --color-soot-500: #737373 !important;
+  --color-soot-400: #a3a3a3 !important;
+  --color-soot-300: #d4d4d4 !important;
+  --color-soot-200: #e5e5e5 !important;
+  --color-soot-100: #f5f5f5 !important;
+  --color-soot-50:  #ffffff !important;
+  color: #171717 !important;
+  background-color: #ffffff !important;
+}
+
+@layer utilities {
+  .touch-target {
+    @apply min-h-[44px] min-w-[44px] sm:min-h-[48px] sm:min-w-[48px];
+  }
+}
+
+/* Toast / Confirm animations */
+@keyframes slideIn {
+  from { opacity: 0; transform: translateX(80px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.92); }
+  to { opacity: 1; transform: scale(1); }
+}
+.animate-slide-in {
+  animation: slideIn 0.25s ease-out;
+}
+.animate-scale-in {
+  animation: scaleIn 0.2s ease-out;
+}

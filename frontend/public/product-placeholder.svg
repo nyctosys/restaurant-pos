@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" fill="none">
+  <rect width="120" height="120" fill="#e8f5f1"/>
+  <!-- T-shirt shape: shoulders, neck, body -->
+  <path d="M30 38 L30 52 L90 52 L90 38 L78 38 L78 32 C78 26 69 22 60 22 C51 22 42 26 42 32 L42 38 Z" fill="#c4e7df" stroke="#5eb8a4" stroke-width="1.5"/>
+  <path d="M38 54 L38 92 L82 92 L82 54 L60 68 Z" fill="#93d1c2" stroke="#2d9b82" stroke-width="1.2"/>
+</svg>

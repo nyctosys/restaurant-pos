@@ -1,0 +1,20 @@
+# Backend env (secrets)
+backend/.env
+
+# Python
+backend/venv
+__pycache__
+*.pyc
+.pytest_cache
+
+# Logs
+*.log
+backend/logs
+
+# Axon code intelligence graph (local index)
+.axon/
+
+# OS / editor
+.DS_Store
+.idea
+.vscode
