@@ -40,12 +40,16 @@ function StockInput({ initialStock, onUpdate }: { initialStock: number, onUpdate
   return (
     <input
       type="number"
+      inputMode="numeric"
+      min={0}
+      step={1}
       value={val}
       onChange={e => setVal(e.target.value)}
       onBlur={handleBlur}
       onKeyDown={handleKeyDown}
-      className="w-16 text-xl font-bold text-center border-b-2 border-transparent focus:border-brand-500 bg-transparent focus:outline-none focus:ring-0 p-0 m-0 transition-colors"
+      className="w-16 min-h-[44px] text-xl font-bold text-center border-b-2 border-transparent focus:border-brand-500 bg-transparent focus:outline-none focus:ring-0 px-1 m-0 transition-colors touch-target"
       style={{ MozAppearance: 'textfield' }}
+      aria-label="Quantity"
     />
   );
 }
@@ -465,6 +469,7 @@ export default function Inventory() {
                 <label className="block text-sm font-medium text-neutral-700 mb-1">SKU <span className="text-red-400">*</span></label>
                 <input
                   type="text"
+                  inputMode="text"
                   value={formSku}
                   onChange={e => setFormSku(e.target.value)}
                   placeholder="e.g. SHIRT-001"
@@ -477,6 +482,7 @@ export default function Inventory() {
                 <label className="block text-sm font-medium text-neutral-700 mb-1">Product Name <span className="text-red-400">*</span></label>
                 <input
                   type="text"
+                  inputMode="text"
                   value={formTitle}
                   onChange={e => setFormTitle(e.target.value)}
                   placeholder="e.g. Classic Oxford Shirt"
@@ -489,6 +495,7 @@ export default function Inventory() {
                 <label className="block text-sm font-medium text-neutral-700 mb-1">Base Price <span className="text-red-400">*</span></label>
                 <input
                   type="number"
+                  inputMode="decimal"
                   step="0.01"
                   min="0"
                   value={formPrice}
@@ -510,6 +517,7 @@ export default function Inventory() {
                   <div className="flex-1 space-y-2">
                     <input
                       type="url"
+                      inputMode="url"
                       value={formImageUrl.startsWith('data:') ? '' : formImageUrl}
                       onChange={e => setFormImageUrl(e.target.value)}
                       placeholder="Image URL (or upload below)"
@@ -607,16 +615,16 @@ export default function Inventory() {
 
       {/* ────── Adjust Stock Modal (variants / quantities) ────── */}
       {stockEditingProduct && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-neutral-200 bg-neutral-50">
-              <h3 className="text-lg font-bold text-neutral-900">Manage Stock: {stockEditingProduct.title}</h3>
-              <button onClick={() => setStockEditingProduct(null)} className="p-1.5 rounded-lg hover:bg-neutral-200 transition-colors">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm overflow-y-auto">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[calc(100vh-2rem)] flex flex-col overflow-hidden my-auto">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-neutral-200 bg-neutral-50 shrink-0">
+              <h3 className="text-lg font-bold text-neutral-900 truncate pr-2">Manage Stock: {stockEditingProduct.title}</h3>
+              <button onClick={() => setStockEditingProduct(null)} className="p-1.5 rounded-lg hover:bg-neutral-200 transition-colors shrink-0">
                 <X className="w-5 h-5 text-neutral-500" />
               </button>
             </div>
             
-            <div className="p-6 space-y-4">
+            <div className="p-6 space-y-4 overflow-y-auto min-h-0 flex-1">
               {(!stockEditingProduct.variants || stockEditingProduct.variants.length === 0) ? (
                 // No variants
                 <div className="flex items-center justify-between bg-neutral-50 p-4 rounded-xl border border-neutral-200">
@@ -668,7 +676,7 @@ export default function Inventory() {
               )}
             </div>
 
-            <div className="px-6 pb-6 flex justify-end">
+            <div className="px-6 pb-6 flex justify-end border-t border-neutral-100 bg-white shrink-0">
               <button
                 type="button"
                 onClick={() => {

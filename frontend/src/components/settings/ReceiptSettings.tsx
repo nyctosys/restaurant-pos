@@ -169,6 +169,7 @@ export default function ReceiptSettings() {
               <label className="block text-sm font-semibold text-soot-800 mb-1">Business Name (optional)</label>
               <input
                 type="text"
+                inputMode="text"
                 value={businessName}
                 onChange={(e) => setBusinessName(e.target.value)}
                 className="w-full px-4 py-3 border border-soot-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:outline-none"
@@ -191,6 +192,7 @@ export default function ReceiptSettings() {
                   <label className="block text-sm font-semibold text-soot-800 mb-1">Phone Number</label>
                   <input
                     type="text"
+                    inputMode="tel"
                     value={businessPhone}
                     onChange={(e) => setBusinessPhone(e.target.value)}
                     className="w-full px-4 py-3 border border-soot-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:outline-none text-sm"
@@ -309,9 +311,9 @@ export default function ReceiptSettings() {
             <div className="border-t border-soot-200 pt-5">
               <p className="text-sm font-semibold text-soot-800 mb-3">Extra footer lines</p>
               <p className="text-xs text-soot-500 mb-2">Optional lines below the main footer (e.g. website, branch code, terms).</p>
-              <input type="text" value={footerLine1} onChange={(e) => setFooterLine1(e.target.value)} placeholder="e.g. Visit: https://example.com" className="w-full px-4 py-2 border border-soot-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none mb-2" />
-              <input type="text" value={footerLine2} onChange={(e) => setFooterLine2(e.target.value)} placeholder="e.g. Branch code: 820989" className="w-full px-4 py-2 border border-soot-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none mb-2" />
-              <input type="text" value={footerLine3} onChange={(e) => setFooterLine3(e.target.value)} placeholder="e.g. Terms and conditions: Discount valid 30 days" className="w-full px-4 py-2 border border-soot-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none" />
+              <input type="text" inputMode="text" value={footerLine1} onChange={(e) => setFooterLine1(e.target.value)} placeholder="e.g. Visit: https://example.com" className="w-full px-4 py-2 border border-soot-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none mb-2" />
+              <input type="text" inputMode="text" value={footerLine2} onChange={(e) => setFooterLine2(e.target.value)} placeholder="e.g. Branch code: 820989" className="w-full px-4 py-2 border border-soot-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none mb-2" />
+              <input type="text" inputMode="text" value={footerLine3} onChange={(e) => setFooterLine3(e.target.value)} placeholder="e.g. Terms and conditions: Discount valid 30 days" className="w-full px-4 py-2 border border-soot-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none" />
             </div>
 
             <div className="border-t border-soot-200 pt-5">
@@ -320,31 +322,31 @@ export default function ReceiptSettings() {
               <div className="grid grid-cols-2 gap-3 mb-3">
                 <div>
                   <label className="block text-xs font-medium text-soot-600 mb-0.5">GST#</label>
-                  <input type="text" value={gstNumber} onChange={(e) => setGstNumber(e.target.value)} placeholder="e.g. 3277876276814" className="w-full px-4 py-2 border border-soot-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none" />
+                  <input type="text" inputMode="numeric" value={gstNumber} onChange={(e) => setGstNumber(e.target.value)} placeholder="e.g. 3277876276814" className="w-full px-4 py-2 border border-soot-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none" />
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-soot-600 mb-0.5">NTN#</label>
-                  <input type="text" value={ntnNumber} onChange={(e) => setNtnNumber(e.target.value)} placeholder="e.g. 4555916-4" className="w-full px-4 py-2 border border-soot-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none" />
+                  <input type="text" inputMode="text" value={ntnNumber} onChange={(e) => setNtnNumber(e.target.value)} placeholder="e.g. 4555916-4" className="w-full px-4 py-2 border border-soot-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none" />
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-3 mb-2">
                 <div>
                   <label className="block text-xs font-medium text-soot-600 mb-0.5">Custom 1 label</label>
-                  <input type="text" value={customId1Label} onChange={(e) => setCustomId1Label(e.target.value)} placeholder="e.g. FBR Invoice" className="w-full px-4 py-2 border border-soot-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none" />
+                  <input type="text" inputMode="text" value={customId1Label} onChange={(e) => setCustomId1Label(e.target.value)} placeholder="e.g. FBR Invoice" className="w-full px-4 py-2 border border-soot-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none" />
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-soot-600 mb-0.5">Custom 1 value</label>
-                  <input type="text" value={customId1Value} onChange={(e) => setCustomId1Value(e.target.value)} placeholder="e.g. 174747EISK5376524" className="w-full px-4 py-2 border border-soot-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none" />
+                  <input type="text" inputMode="text" value={customId1Value} onChange={(e) => setCustomId1Value(e.target.value)} placeholder="e.g. 174747EISK5376524" className="w-full px-4 py-2 border border-soot-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none" />
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-soot-600 mb-0.5">Custom 2 label</label>
-                  <input type="text" value={customId2Label} onChange={(e) => setCustomId2Label(e.target.value)} placeholder="e.g. CHK" className="w-full px-4 py-2 border border-soot-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none" />
+                  <input type="text" inputMode="text" value={customId2Label} onChange={(e) => setCustomId2Label(e.target.value)} placeholder="e.g. CHK" className="w-full px-4 py-2 border border-soot-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none" />
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-soot-600 mb-0.5">Custom 2 value</label>
-                  <input type="text" value={customId2Value} onChange={(e) => setCustomId2Value(e.target.value)} placeholder="e.g. 1935-2-20250925" className="w-full px-4 py-2 border border-soot-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none" />
+                  <input type="text" inputMode="text" value={customId2Value} onChange={(e) => setCustomId2Value(e.target.value)} placeholder="e.g. 1935-2-20250925" className="w-full px-4 py-2 border border-soot-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none" />
                 </div>
               </div>
             </div>
@@ -352,7 +354,7 @@ export default function ReceiptSettings() {
             <div className="border-t border-soot-200 pt-5">
               <p className="text-sm font-semibold text-soot-800 mb-1">QR code on receipt</p>
               <p className="text-xs text-soot-500 mb-2">URL or text to encode as a QR code (e.g. invoice URL, store link). Printed below footer when set.</p>
-              <input type="text" value={qrCodeContent} onChange={(e) => setQrCodeContent(e.target.value)} placeholder="e.g. https://example.com/invoice" className="w-full px-4 py-3 border border-soot-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:outline-none text-sm" />
+              <input type="text" inputMode="url" value={qrCodeContent} onChange={(e) => setQrCodeContent(e.target.value)} placeholder="e.g. https://example.com/invoice" className="w-full px-4 py-3 border border-soot-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:outline-none text-sm" />
             </div>
 
             <button 

@@ -23,8 +23,12 @@ def token_required(f):
             current_user = User.query.get(data['user_id'])
             if not current_user:
                 return jsonify({'message': 'User not found!'}), 401
-        except Exception as e:
-            return jsonify({'message': 'Token is invalid!', 'error': str(e)}), 401
+        except jwt.ExpiredSignatureError:
+            return jsonify({'message': 'Session expired. Please log in again.', 'code': 'token_expired'}), 401
+        except jwt.InvalidTokenError:
+            return jsonify({'message': 'Invalid session. Please log in again.', 'code': 'token_invalid'}), 401
+        except Exception:
+            return jsonify({'message': 'Invalid session. Please log in again.'}), 401
 
         return f(current_user, *args, **kwargs)
 

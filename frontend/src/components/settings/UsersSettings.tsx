@@ -300,6 +300,7 @@ export default function UsersSettings() {
                 <label className="block text-sm font-medium text-soot-700 mb-1">Username</label>
                 <input
                   type="text"
+                  inputMode="text"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   className="w-full px-4 py-2 bg-soot-50 border border-soot-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:outline-none"
@@ -311,6 +312,7 @@ export default function UsersSettings() {
                 <label className="block text-sm font-medium text-soot-700 mb-1">Password {editingUser && '(Leave blank to keep)'}</label>
                 <input
                   type="password"
+                  inputMode="text"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="w-full px-4 py-2 bg-soot-50 border border-soot-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:outline-none"

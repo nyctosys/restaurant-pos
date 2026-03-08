@@ -66,7 +66,9 @@ export default function Login() {
             <label className="block text-sm font-medium text-neutral-700 mb-1.5">Operator ID</label>
             <input 
               required
-              type="text" 
+              type="text"
+              inputMode="text"
+              autoComplete="username"
               name="username"
               value={formData.username}
               onChange={handleChange}
@@ -78,7 +80,9 @@ export default function Login() {
             <label className="block text-sm font-medium text-neutral-700 mb-1.5">Passcode</label>
             <input 
               required
-              type="password" 
+              type="password"
+              inputMode="text"
+              autoComplete="current-password"
               name="password"
               value={formData.password}
               onChange={handleChange}

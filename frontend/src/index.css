@@ -61,6 +61,13 @@
     @apply bg-canvas text-neutral-900 font-sans antialiased;
   }
 
+  /* Touch: ensure inputs open virtual keyboard when focused (no 300ms delay, tap = focus) */
+  input:not([type="checkbox"]):not([type="radio"]),
+  textarea,
+  select {
+    touch-action: manipulation;
+  }
+
   /* ── Dark Mode: swap all semantic + aliased colors ── */
   .dark {
     --color-canvas: #0f0f0f;

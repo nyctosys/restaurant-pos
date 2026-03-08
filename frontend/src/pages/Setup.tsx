@@ -69,7 +69,9 @@ export default function Setup() {
             <label className="block text-sm font-medium text-neutral-700 mb-1.5">Owner Username</label>
             <input 
               required
-              type="text" 
+              type="text"
+              inputMode="text"
+              autoComplete="username"
               name="username"
               value={formData.username}
               onChange={handleChange}
@@ -81,7 +83,9 @@ export default function Setup() {
             <label className="block text-sm font-medium text-neutral-700 mb-1.5">Password</label>
             <input 
               required
-              type="password" 
+              type="password"
+              inputMode="text"
+              autoComplete="new-password"
               name="password"
               value={formData.password}
               onChange={handleChange}
@@ -98,7 +102,9 @@ export default function Setup() {
             <label className="block text-sm font-medium text-neutral-700 mb-1.5">Branch Name</label>
             <input 
               required
-              type="text" 
+              type="text"
+              inputMode="text"
+              autoComplete="organization"
               name="branch_name"
               value={formData.branch_name}
               onChange={handleChange}

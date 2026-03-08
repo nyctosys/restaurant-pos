@@ -21,6 +21,19 @@ export default function App() {
       document.documentElement.classList.remove('dark');
     }
   }, []);
+
+  // On touch devices: scroll focused input/textarea into view so the virtual keyboard opens reliably
+  useEffect(() => {
+    const handleFocus = (e: FocusEvent) => {
+      const el = e.target;
+      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+        el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      }
+    };
+    document.addEventListener('focusin', handleFocus, true);
+    return () => document.removeEventListener('focusin', handleFocus, true);
+  }, []);
+
   return (
     <BrowserRouter>
       <ScannerProvider>

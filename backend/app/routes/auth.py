@@ -58,7 +58,7 @@ def initial_setup():
             'user_id': new_owner.id,
             'role': new_owner.role,
             'branch_id': new_branch.id,
-            'exp': datetime.utcnow() + timedelta(hours=24)
+            'exp': datetime.utcnow() + timedelta(days=30)
         }, SECRET_KEY, algorithm="HS256")
 
         return jsonify({
@@ -94,7 +94,7 @@ def login():
         'user_id': user.id,
         'role': user.role,
         'branch_id': user.branch_id,
-        'exp': datetime.utcnow() + timedelta(hours=24)
+        'exp': datetime.utcnow() + timedelta(days=30)
     }, SECRET_KEY, algorithm="HS256")
 
     branch_name = ''

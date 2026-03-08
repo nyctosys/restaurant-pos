@@ -73,7 +73,21 @@ export async function request<T = unknown>(
       message: bodyJson.message ?? bodyJson.error ?? `Request failed (${res.status})`,
       details: (bodyJson as ApiErrorBody).details,
     };
-    throw new ApiError(res.status, errBody);
+    const apiError = new ApiError(res.status, errBody);
+
+    // Session expired or invalid: clear auth and redirect to login so user can re-authenticate without restarting.
+    if (res.status === 401 && token && !options.skipAuth) {
+      const pathLower = path.toLowerCase();
+      const isAuthRoute = pathLower.includes('/auth/login') || pathLower.includes('/auth/setup');
+      if (!isAuthRoute) {
+        localStorage.removeItem('auth_token');
+        localStorage.removeItem('user');
+        log.info('API', 'Session expired or invalid → cleared auth, redirecting to login');
+        window.location.href = '/login';
+      }
+    }
+
+    throw apiError;
   }
 
   return bodyJson as T;

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useScanner } from '../hooks/useScanner';
-import { ShoppingBag, Plus, Minus, Trash2, Search, Loader2, CreditCard, Banknote, Smartphone, LayoutGrid, List, X, Printer, Usb, Tag, ChevronDown, CheckCircle, XCircle } from 'lucide-react';
+import { ShoppingBag, Plus, Minus, Trash2, Search, Loader2, CreditCard, Banknote, Smartphone, LayoutGrid, List, X, Printer, Usb, Tag, ChevronDown, ChevronRight, CheckCircle, XCircle } from 'lucide-react';
 import { formatCurrency } from '../utils/formatCurrency';
 import { get, post, getUserMessage } from '../api';
 
@@ -60,6 +60,8 @@ export default function Dashboard() {
   const [activeCoupon, setActiveCoupon] = useState<DiscountPreset | null>(null);
   const [couponDropdownOpen, setCouponDropdownOpen] = useState(false);
   const [customCouponInput, setCustomCouponInput] = useState('');
+  const [couponSectionExpanded, setCouponSectionExpanded] = useState(true);
+  const [paymentMethodSectionExpanded, setPaymentMethodSectionExpanded] = useState(true);
 
   const ACTIVE_COUPON_STORAGE_KEY = 'pos_active_coupon';
 
@@ -333,6 +335,7 @@ export default function Dashboard() {
               <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4.5 h-4.5 text-neutral-400" />
               <input 
                 type="text"
+                inputMode="search"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search Products"
@@ -384,15 +387,15 @@ export default function Dashboard() {
                   key={product.id}
                   onClick={() => handleProductClick(product)}
                   className={`bg-surface border overflow-hidden transition-all duration-200 group text-left ${
-                    layoutView === 'grid' ? 'rounded-2xl flex-col' : 'rounded-xl flex items-center p-3'
+                    layoutView === 'grid' ? 'flex flex-col rounded-2xl' : 'rounded-xl flex items-center p-3'
                   } ${
                     (!product.variants || product.variants.length === 0) && (inventory[product.id.toString()]?.[''] || 0) <= 0
                       ? 'opacity-50 grayscale cursor-not-allowed border-neutral-200'
                       : 'border-neutral-100 hover:shadow-md hover:border-neutral-200 active:scale-[0.97]'
                   }`}
                 >
-                  {/* Product Image Area */}
-                  <div className={`${layoutView === 'grid' ? 'aspect-square w-full' : 'w-16 h-16 shrink-0 rounded-lg'} flex items-center justify-center overflow-hidden transition-colors ${
+                  {/* Product Image Area — aspect-square so size scales with card width (responsive), consistent across all cards */}
+                  <div className={`${layoutView === 'grid' ? 'w-full aspect-square shrink-0' : 'w-16 h-16 shrink-0 rounded-lg'} flex items-center justify-center overflow-hidden transition-colors ${
                     (!product.variants || product.variants.length === 0) && (inventory[product.id.toString()]?.[''] || 0) <= 0
                       ? 'bg-neutral-100'
                       : 'bg-gradient-to-br from-brand-50 to-brand-100 group-hover:from-brand-100 group-hover:to-brand-200'
@@ -513,10 +516,24 @@ export default function Dashboard() {
 
         {/* Order Summary + CTA */}
         <div className="p-5 border-t border-neutral-100 bg-neutral-50/50">
-          {/* Apply coupon */}
+          {/* Coupon / Discount — collapsible */}
           <div className="mb-4 relative">
-            <h3 className="text-sm font-semibold text-neutral-800 mb-2">Coupon / Discount</h3>
-            <div className="relative">
+            <button
+              type="button"
+              onClick={() => setCouponSectionExpanded(prev => !prev)}
+              className="w-full flex items-center justify-between gap-2 py-1 -mx-1 rounded-lg hover:bg-neutral-100/80 text-left"
+              aria-expanded={couponSectionExpanded}
+            >
+              <h3 className="text-sm font-semibold text-neutral-800">Coupon / Discount</h3>
+              {couponSectionExpanded ? (
+                <ChevronDown className="w-4 h-4 shrink-0 text-neutral-500" />
+              ) : (
+                <ChevronRight className="w-4 h-4 shrink-0 text-neutral-500" />
+              )}
+            </button>
+            {couponSectionExpanded && (
+            <>
+            <div className="relative mt-2">
               <button
                 type="button"
                 onClick={() => setCouponDropdownOpen(prev => !prev)}
@@ -544,6 +561,7 @@ export default function Dashboard() {
                     <div className="flex gap-2">
                       <input
                         type="text"
+                        inputMode="text"
                         value={customCouponInput}
                         onChange={e => setCustomCouponInput(e.target.value)}
                         onKeyDown={e => e.key === 'Enter' && applyCustomCoupon()}
@@ -611,11 +629,27 @@ export default function Dashboard() {
                 </button>
               )}
             </div>
+            </>
+            )}
           </div>
 
-          {/* Payment Method Selector */}
+          {/* Payment Method — collapsible */}
           <div className="mb-4">
-            <h3 className="text-sm font-semibold text-neutral-800 mb-2">Payment Method</h3>
+            <button
+              type="button"
+              onClick={() => setPaymentMethodSectionExpanded(prev => !prev)}
+              className="w-full flex items-center justify-between gap-2 py-1 -mx-1 rounded-lg hover:bg-neutral-100/80 text-left"
+              aria-expanded={paymentMethodSectionExpanded}
+            >
+              <h3 className="text-sm font-semibold text-neutral-800">Payment Method</h3>
+              {paymentMethodSectionExpanded ? (
+                <ChevronDown className="w-4 h-4 shrink-0 text-neutral-500" />
+              ) : (
+                <ChevronRight className="w-4 h-4 shrink-0 text-neutral-500" />
+              )}
+            </button>
+            {paymentMethodSectionExpanded && (
+            <div className="mt-2">
             <div className="grid grid-cols-3 gap-2">
               <button
                 onClick={() => setPaymentMethod('Cash')}
@@ -639,6 +673,8 @@ export default function Dashboard() {
                 <span className="text-[11px] font-bold whitespace-nowrap">Online</span>
               </button>
             </div>
+            </div>
+            )}
           </div>
 
           {/* Breakdown */}

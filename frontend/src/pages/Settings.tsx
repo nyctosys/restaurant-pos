@@ -395,7 +395,8 @@ export default function Settings() {
                    <div>
                      <label className="block text-sm font-medium text-soot-800 mb-1">USB Vendor ID</label>
                      <input 
-                       type="text" 
+                       type="text"
+                       inputMode="text"
                        value={hardware.printer_vendor_id}
                        onChange={e => setHardware({ ...hardware, printer_vendor_id: e.target.value })}
                        placeholder="e.g. 0x04b8" 
@@ -406,7 +407,8 @@ export default function Settings() {
                    <div>
                      <label className="block text-sm font-medium text-soot-800 mb-1">USB Product ID</label>
                      <input 
-                       type="text" 
+                       type="text"
+                       inputMode="text"
                        value={hardware.printer_product_id}
                        onChange={e => setHardware({ ...hardware, printer_product_id: e.target.value })}
                        placeholder="e.g. 0x0202" 
@@ -486,6 +488,7 @@ export default function Settings() {
             <div className="flex gap-2 mb-6">
               <input
                 type="text"
+                inputMode="text"
                 value={newSection}
                 onChange={e => setNewSection(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && handleAddSection()}
@@ -596,6 +599,7 @@ export default function Settings() {
                         <div className="flex items-center gap-2">
                           <input
                             type="number"
+                            inputMode="decimal"
                             step="0.01"
                             min="0"
                             value={taxRatesByPaymentMethod[method] ?? 0}
@@ -647,6 +651,7 @@ export default function Settings() {
             <div className="flex flex-wrap gap-3 mb-6 items-end">
               <input
                 type="text"
+                inputMode="text"
                 value={newDiscount.name}
                 onChange={e => setNewDiscount(prev => ({ ...prev, name: e.target.value }))}
                 onKeyDown={e => e.key === 'Enter' && handleAddDiscount()}
@@ -664,6 +669,7 @@ export default function Settings() {
               <div className="flex items-center gap-1">
                 <input
                   type="number"
+                  inputMode="decimal"
                   min={0}
                   max={newDiscount.type === 'percent' ? 100 : undefined}
                   step={newDiscount.type === 'percent' ? 1 : 0.01}
@@ -716,6 +722,7 @@ export default function Settings() {
                         <div className="flex flex-wrap gap-2 items-center flex-1">
                           <input
                             type="text"
+                            inputMode="text"
                             value={editingDraft.name}
                             onChange={e => setEditingDraft(prev => prev ? { ...prev, name: e.target.value } : null)}
                             className="px-3 py-1.5 border border-soot-200 rounded text-sm w-32"
@@ -730,6 +737,7 @@ export default function Settings() {
                           </select>
                           <input
                             type="number"
+                            inputMode="decimal"
                             min={0}
                             max={editingDraft.type === 'percent' ? 100 : undefined}
                             step={editingDraft.type === 'percent' ? 1 : 0.01}
