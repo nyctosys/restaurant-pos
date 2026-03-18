@@ -9,7 +9,7 @@ import {
 
 const baseNavItems = [
   { icon: ShoppingBag, path: '/dashboard', label: 'Order', allowedRoles: ['owner', 'manager', 'cashier'] },
-  { icon: Package, path: '/inventory', label: 'Inventory', allowedRoles: ['owner', 'manager', 'cashier', 'inventory_manager'] },
+  { icon: Package, path: '/inventory', label: 'Stock', allowedRoles: ['owner', 'manager', 'cashier', 'inventory_manager'] },
   { icon: BarChart3, path: '/reports', label: 'Reports', allowedRoles: ['owner'] },
   { icon: Settings, path: '/settings', label: 'Settings', allowedRoles: ['owner', 'manager'] },
 ];

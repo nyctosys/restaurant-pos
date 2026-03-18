@@ -66,6 +66,22 @@ class Inventory(db.Model):
         CheckConstraint('stock_level >= 0', name='ck_inventory_stock_non_neg'),
     )
 
+
+class InventoryTransaction(db.Model):
+    """Ledger of stock level changes for reporting (day/week/month/year/custom)."""
+    __tablename__ = 'inventory_transactions'
+    id = db.Column(db.Integer, primary_key=True)
+    branch_id = db.Column(db.Integer, db.ForeignKey('branches.id'), nullable=False)
+    product_id = db.Column(db.Integer, db.ForeignKey('products.id'), nullable=False)
+    variant_sku_suffix = db.Column(db.String(50), default='')
+    delta = db.Column(db.Integer, nullable=False)  # positive = in, negative = out
+    reason = db.Column(db.String(32), nullable=False)  # 'adjustment', 'sale', 'refund'
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    reference_type = db.Column(db.String(32), nullable=True)  # 'sale', 'sale_refund', or None
+    reference_id = db.Column(db.Integer, nullable=True)  # e.g. sale_id
+    created_at = db.Column(db.DateTime(timezone=True), default=datetime.utcnow)
+
+
 class Sale(db.Model):
     __tablename__ = 'sales'
     __table_args__ = (

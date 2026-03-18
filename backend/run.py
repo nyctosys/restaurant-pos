@@ -27,6 +27,7 @@ if __name__ == '__main__':
     debug = os.environ.get('FLASK_DEBUG', '').lower() in ('1', 'true', 'yes')
     if not debug and os.environ.get('FLASK_ENV', '').lower() == 'development':
         debug = True
+
     socketio.run(
         app,
         host='0.0.0.0',

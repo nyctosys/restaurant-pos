@@ -28,9 +28,9 @@ describe('request', () => {
       text: () => Promise.resolve('{}'),
       headers: new Headers(),
     });
-    await get('/products/');
+    await get('/menu-items/');
     expect(mockFetch).toHaveBeenCalledWith(
-      expect.stringContaining('/api/products/'),
+      expect.stringContaining('/api/menu-items/'),
       expect.objectContaining({
         headers: expect.objectContaining({ Authorization: 'Bearer fake-token' }),
       })
@@ -46,7 +46,7 @@ describe('request', () => {
     });
     const { ApiError } = await import('../api/errors');
     try {
-      await request('/sales/checkout', { method: 'POST', body: {} });
+      await request('/orders/checkout', { method: 'POST', body: {} });
       expect.fail('should have thrown');
     } catch (e) {
       expect(e).toBeInstanceOf(ApiError);
@@ -63,13 +63,13 @@ describe('request', () => {
       headers: new Headers(),
     });
     const { ApiError } = await import('../api/errors');
-    await expect(get('/products/')).rejects.toThrow(ApiError);
+    await expect(get('/menu-items/')).rejects.toThrow(ApiError);
   });
 
   it('throws on network failure', async () => {
     mockFetch.mockRejectedValueOnce(new Error('Failed to fetch'));
     const { ApiError } = await import('../api/errors');
-    await expect(get('/products/')).rejects.toThrow(ApiError);
+    await expect(get('/menu-items/')).rejects.toThrow(ApiError);
   });
 
   it('returns parsed JSON on success', async () => {
@@ -78,7 +78,7 @@ describe('request', () => {
       text: () => Promise.resolve(JSON.stringify({ products: [{ id: 1 }] })),
       headers: new Headers(),
     });
-    const data = await get<{ products: { id: number }[] }>('/products/');
+    const data = await get<{ products: { id: number }[] }>('/menu-items/');
     expect(data.products).toHaveLength(1);
     expect(data.products[0].id).toBe(1);
   });
@@ -91,7 +91,7 @@ describe('post', () => {
       text: () => Promise.resolve('{}'),
       headers: new Headers(),
     });
-    await post('/sales/checkout', { items: [], payment_method: 'Cash' });
+    await post('/orders/checkout', { items: [], payment_method: 'Cash' });
     expect(mockFetch).toHaveBeenCalledWith(
       expect.any(String),
       expect.objectContaining({

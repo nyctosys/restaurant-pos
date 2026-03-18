@@ -49,7 +49,7 @@ def test_checkout_success(client, app):
     pid = _create_product_and_inventory(app, bid, "Widget", 10)
 
     r = client.post(
-        "/api/sales/checkout",
+        "/api/orders/checkout",
         headers={"Authorization": f"Bearer {token}"},
         json={
             "items": [{"product_id": pid, "quantity": 2}],
@@ -70,7 +70,7 @@ def test_checkout_empty_cart(client, app):
     )
     token = _get_token(client)
     r = client.post(
-        "/api/sales/checkout",
+        "/api/orders/checkout",
         headers={"Authorization": f"Bearer {token}"},
         json={"items": [], "payment_method": "Cash", "branch_id": 1},
     )
@@ -85,7 +85,7 @@ def test_checkout_missing_payment_method(client, app):
     )
     token = _get_token(client)
     r = client.post(
-        "/api/sales/checkout",
+        "/api/orders/checkout",
         headers={"Authorization": f"Bearer {token}"},
         json={"items": [{"product_id": 1, "quantity": 1}], "branch_id": 1},
     )
@@ -102,7 +102,7 @@ def test_checkout_invalid_product_id(client, app):
         b = Branch.query.filter_by(name="Main").first()
         bid = b.id
     r = client.post(
-        "/api/sales/checkout",
+        "/api/orders/checkout",
         headers={"Authorization": f"Bearer {token}"},
         json={
             "items": [{"product_id": 99999, "quantity": 1}],
@@ -126,7 +126,7 @@ def test_checkout_insufficient_stock(client, app):
     pid = _create_product_and_inventory(app, bid, "Widget", 2)  # only 2 in stock
 
     r = client.post(
-        "/api/sales/checkout",
+        "/api/orders/checkout",
         headers={"Authorization": f"Bearer {token}"},
         json={
             "items": [{"product_id": pid, "quantity": 5}],
@@ -150,7 +150,7 @@ def test_checkout_negative_quantity_rejected(client, app):
     pid = _create_product_and_inventory(app, bid, "Widget", 10)
 
     r = client.post(
-        "/api/sales/checkout",
+        "/api/orders/checkout",
         headers={"Authorization": f"Bearer {token}"},
         json={
             "items": [{"product_id": pid, "quantity": -1}],
@@ -174,7 +174,7 @@ def test_checkout_zero_quantity_rejected(client, app):
     pid = _create_product_and_inventory(app, bid, "Widget", 10)
 
     r = client.post(
-        "/api/sales/checkout",
+        "/api/orders/checkout",
         headers={"Authorization": f"Bearer {token}"},
         json={
             "items": [{"product_id": pid, "quantity": 0}],
@@ -196,7 +196,7 @@ def test_refund_success(client, app):
         bid = b.id
     pid = _create_product_and_inventory(app, bid, "Widget", 10)
     r = client.post(
-        "/api/sales/checkout",
+        "/api/orders/checkout",
         headers={"Authorization": f"Bearer {token}"},
         json={
             "items": [{"product_id": pid, "quantity": 2}],
@@ -208,7 +208,7 @@ def test_refund_success(client, app):
     sale_id = r.get_json()["sale_id"]
 
     r2 = client.post(
-        f"/api/sales/{sale_id}/rollback",
+        f"/api/orders/{sale_id}/rollback",
         headers={"Authorization": f"Bearer {token}"},
     )
     assert r2.status_code == 200
@@ -226,7 +226,7 @@ def test_refund_already_refunded_returns_400(client, app):
         bid = b.id
     pid = _create_product_and_inventory(app, bid, "Widget", 10)
     r = client.post(
-        "/api/sales/checkout",
+        "/api/orders/checkout",
         headers={"Authorization": f"Bearer {token}"},
         json={
             "items": [{"product_id": pid, "quantity": 1}],
@@ -235,10 +235,10 @@ def test_refund_already_refunded_returns_400(client, app):
         },
     )
     sale_id = r.get_json()["sale_id"]
-    client.post(f"/api/sales/{sale_id}/rollback", headers={"Authorization": f"Bearer {token}"})
+    client.post(f"/api/orders/{sale_id}/rollback", headers={"Authorization": f"Bearer {token}"})
 
     r2 = client.post(
-        f"/api/sales/{sale_id}/rollback",
+        f"/api/orders/{sale_id}/rollback",
         headers={"Authorization": f"Bearer {token}"},
     )
     assert r2.status_code == 400
@@ -252,7 +252,7 @@ def test_refund_nonexistent_sale_returns_404(client, app):
     )
     token = _get_token(client)
     r = client.post(
-        "/api/sales/99999/rollback",
+        "/api/orders/99999/rollback",
         headers={"Authorization": f"Bearer {token}"},
     )
     assert r.status_code == 404

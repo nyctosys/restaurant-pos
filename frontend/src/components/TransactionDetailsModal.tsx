@@ -52,7 +52,7 @@ export default function TransactionDetailsModal({ saleId, onClose, onRefresh, ca
     try {
       setLoading(true);
       setError('');
-      const data = await get<TransactionDetails>(`/sales/${saleId}`);
+      const data = await get<TransactionDetails>(`/orders/${saleId}`);
       setDetails(data ?? null);
     } catch (err) {
       setError(getUserMessage(err));
@@ -75,7 +75,7 @@ export default function TransactionDetailsModal({ saleId, onClose, onRefresh, ca
     try {
       setActionLoading('rollback');
       setError('');
-      await post(`/sales/${saleId}/rollback`, null);
+      await post(`/orders/${saleId}/rollback`, null);
       showToast('Transaction rolled back successfully.', 'success');
       onRefresh();
       onClose();
@@ -92,7 +92,7 @@ export default function TransactionDetailsModal({ saleId, onClose, onRefresh, ca
     try {
       setActionLoading('print');
       setError('');
-      await post(`/sales/${saleId}/print`, null);
+      await post(`/orders/${saleId}/print`, null);
       showToast('Receipt sent to printer.', 'success');
     } catch (err) {
       const msg = getUserMessage(err);
@@ -107,7 +107,7 @@ export default function TransactionDetailsModal({ saleId, onClose, onRefresh, ca
     try {
       setActionLoading('archive');
       setError('');
-      await patch(`/sales/${saleId}/archive`, null);
+      await patch(`/orders/${saleId}/archive`, null);
       showToast('Transaction archived.', 'success');
       fetchDetails();
       onRefresh();
@@ -123,7 +123,7 @@ export default function TransactionDetailsModal({ saleId, onClose, onRefresh, ca
     try {
       setActionLoading('unarchive');
       setError('');
-      await patch(`/sales/${saleId}/unarchive`, null);
+      await patch(`/orders/${saleId}/unarchive`, null);
       showToast('Transaction restored.', 'success');
       fetchDetails();
       onRefresh();
@@ -147,7 +147,7 @@ export default function TransactionDetailsModal({ saleId, onClose, onRefresh, ca
     try {
       setActionLoading('delete');
       setError('');
-      await del(`/sales/${saleId}`);
+      await del(`/orders/${saleId}`);
       showToast('Transaction deleted permanently.', 'success');
       onRefresh();
       onClose();

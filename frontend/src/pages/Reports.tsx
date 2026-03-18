@@ -1,9 +1,21 @@
 import { useState, useEffect } from 'react';
-import { Calendar, Loader2, RefreshCw } from 'lucide-react';
+import { Calendar, Loader2, RefreshCw, Package } from 'lucide-react';
 import TransactionDetailsModal from '../components/TransactionDetailsModal';
 import { formatCurrency } from '../utils/formatCurrency';
 import { get, getUserMessage } from '../api';
 import { showToast } from '../components/Toast';
+
+type StockTransactionInfo = {
+  id: number;
+  product_id: number;
+  product_title: string | null;
+  variant_sku_suffix: string;
+  delta: number;
+  reason: string;
+  reference_type: string | null;
+  reference_id: number | null;
+  created_at: string;
+};
 
 type SaleInfo = {
   id: number;
@@ -32,6 +44,8 @@ export default function Reports() {
   const [branches, setBranches] = useState<{id: number, name: string}[]>([]);
   const [branchFilter, setBranchFilter] = useState<string>(localStorage.getItem('active_branch_id') ?? 'all');
   const [includeArchived, setIncludeArchived] = useState(false);
+  const [stockTransactions, setStockTransactions] = useState<StockTransactionInfo[]>([]);
+  const [stockLoading, setStockLoading] = useState(false);
   const userStr = localStorage.getItem('user');
   const user = userStr ? JSON.parse(userStr) : null;
   const isOwner = user?.role === 'owner';
@@ -75,8 +89,8 @@ export default function Reports() {
 
     try {
       const [sData, aData] = await Promise.all([
-        get<{ sales?: SaleInfo[] }>(`/sales/${queryParams}`),
-        get<Analytics>(`/sales/analytics${queryParams}`),
+        get<{ sales?: SaleInfo[] }>(`/orders/${queryParams}`),
+        get<Analytics>(`/orders/analytics${queryParams}`),
       ]);
       setSales(sData?.sales ?? []);
       setAnalytics(aData ?? null);
@@ -88,6 +102,27 @@ export default function Reports() {
       setLoading(false);
     }
   };
+
+  const fetchStockTransactions = async () => {
+    if (timeFilter === 'custom' && (!customStart || !customEnd)) return;
+    setStockLoading(true);
+    let q = `?time_filter=${timeFilter}`;
+    if (timeFilter === 'custom') q += `&start_date=${customStart}&end_date=${customEnd}`;
+    if (branchFilter !== 'all') q += `&branch_id=${branchFilter}`;
+    try {
+      const data = await get<{ transactions?: StockTransactionInfo[] }>(`/stock/transactions${q}`);
+      setStockTransactions(data?.transactions ?? []);
+    } catch {
+      setStockTransactions([]);
+    } finally {
+      setStockLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (timeFilter === 'custom' && (!customStart || !customEnd)) return;
+    fetchStockTransactions();
+  }, [timeFilter, customStart, customEnd, branchFilter]);
 
   const getFormatDate = (iso: string) => {
     const d = new Date(iso);
@@ -101,7 +136,7 @@ export default function Reports() {
         {/* Header & Filters */}
         <div className="p-6 border-b border-soot-200 flex flex-col sm:flex-row sm:justify-between sm:items-center bg-soot-50 gap-4">
           <h2 className="text-xl font-bold text-soot-900 flex items-center gap-2">
-            <Calendar className="w-5 h-5 text-soot-500" /> Sales & Reporting
+            <Calendar className="w-5 h-5 text-soot-500" /> Orders & reporting
           </h2>
           
           <div className="flex items-center gap-2 flex-wrap">
@@ -152,7 +187,7 @@ export default function Reports() {
               </div>
             )}
 
-            <button onClick={fetchData} className="p-2 ml-1 text-soot-500 hover:text-brand-600 hover:bg-brand-50 rounded-lg transition-colors border border-transparent hover:border-brand-100">
+            <button onClick={() => { fetchData(); fetchStockTransactions(); }} className="p-2 ml-1 text-soot-500 hover:text-brand-600 hover:bg-brand-50 rounded-lg transition-colors border border-transparent hover:border-brand-100">
               <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
             </button>
           </div>
@@ -173,7 +208,7 @@ export default function Reports() {
             </div>
           </div>
           <div className="bg-soot-50 p-6 rounded-xl border border-soot-200 shadow-sm relative overflow-hidden flex flex-col justify-center">
-            <div className="text-soot-500 font-semibold mb-1 uppercase tracking-widest text-xs">Top Selling Product</div>
+            <div className="text-soot-500 font-semibold mb-1 uppercase tracking-widest text-xs">Top selling item</div>
             <div className="text-xl font-bold text-brand-700 truncate" title={analytics?.most_selling_product?.title}>
               {loading ? '...' : (analytics?.most_selling_product ? analytics.most_selling_product.title : 'None')}
             </div>
@@ -227,6 +262,49 @@ export default function Reports() {
                         <td className={`py-3 px-4 text-right font-medium text-soot-900 ${sale.status === 'refunded' ? 'line-through' : ''}`}>
                           {formatCurrency(sale.total_amount)}
                         </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* Stock transactions */}
+          <div className="col-span-full mt-8">
+            <h3 className="text-lg font-bold text-soot-900 mb-4 flex items-center gap-2">
+              <Package className="w-5 h-5 text-soot-500" /> Stock movements
+            </h3>
+            {stockLoading && stockTransactions.length === 0 ? (
+              <div className="py-12 flex justify-center text-soot-400">
+                <Loader2 className="w-6 h-6 animate-spin" />
+              </div>
+            ) : stockTransactions.length === 0 ? (
+              <div className="text-center py-12 text-soot-400 bg-soot-50 rounded-xl border border-soot-200">
+                <p className="font-medium">No stock movements for this period.</p>
+              </div>
+            ) : (
+              <div className="border border-soot-200 rounded-xl overflow-hidden bg-white">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-soot-50 border-b border-soot-200 text-xs uppercase text-soot-500 font-semibold tracking-wider">
+                      <th className="py-3 px-4">Date & time</th>
+                      <th className="py-3 px-4">Item</th>
+                      <th className="py-3 px-4">Option</th>
+                      <th className="py-3 px-4 text-right">Change</th>
+                      <th className="py-3 px-4">Reason</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {stockTransactions.map((tx) => (
+                      <tr key={tx.id} className="border-b border-soot-100 hover:bg-soot-50">
+                        <td className="py-3 px-4 text-sm text-soot-600">{getFormatDate(tx.created_at)}</td>
+                        <td className="py-3 px-4 text-sm font-medium text-soot-900">{tx.product_title ?? `#${tx.product_id}`}</td>
+                        <td className="py-3 px-4 text-sm text-soot-600">{tx.variant_sku_suffix || '—'}</td>
+                        <td className={`py-3 px-4 text-right text-sm font-medium ${tx.delta >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                          {tx.delta >= 0 ? '+' : ''}{tx.delta}
+                        </td>
+                        <td className="py-3 px-4 text-sm text-soot-600 capitalize">{tx.reason}</td>
                       </tr>
                     ))}
                   </tbody>

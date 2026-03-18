@@ -66,7 +66,7 @@ def test_login_invalid_credentials(client, app):
 
 def test_token_required_rejects_missing_token(client):
     # Use trailing slash to match Flask route and avoid 308 redirect
-    r = client.get("/api/products/")
+    r = client.get("/api/menu-items/")
     assert r.status_code == 401
     data = r.get_json()
     assert "token" in (data.get("message") or "").lower() or "missing" in (data.get("message") or "").lower()
@@ -74,7 +74,7 @@ def test_token_required_rejects_missing_token(client):
 
 def test_token_required_rejects_invalid_token(client):
     r = client.get(
-        "/api/products/",
+        "/api/menu-items/",
         headers={"Authorization": "Bearer invalid-token"},
     )
     assert r.status_code == 401
@@ -109,7 +109,7 @@ def test_token_valid_but_user_deleted_returns_401(client, app):
         db.session.commit()
 
     r = client.get(
-        "/api/products/",
+        "/api/menu-items/",
         headers={"Authorization": f"Bearer {token}"},
     )
     assert r.status_code == 401

@@ -23,13 +23,13 @@ def _auth_headers(client, app):
 
 
 def test_products_list_requires_auth(client):
-    r = client.get("/api/products/")
+    r = client.get("/api/menu-items/")
     assert r.status_code == 401
 
 
 def test_products_list_empty(client, app):
     h = _auth_headers(client, app)
-    r = client.get("/api/products/", headers=h)
+    r = client.get("/api/menu-items/", headers=h)
     assert r.status_code == 200
     data = r.get_json()
     assert isinstance(data, list) or "products" in data or len(data) >= 0
@@ -39,7 +39,7 @@ def test_product_update_404(client, app):
     """Update non-existent product returns 404 from get_or_404."""
     h = _auth_headers(client, app)
     r = client.put(
-        "/api/products/99999",
+        "/api/menu-items/99999",
         headers=h,
         json={"sku": "X", "title": "Y", "base_price": 1},
     )

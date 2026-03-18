@@ -6,7 +6,7 @@ import { showConfirm } from '../components/ConfirmDialog';
 import { useScanner } from '../hooks/useScanner';
 import { formatCurrency } from '../utils/formatCurrency';
 import { get, post, put, patch, del, getUserMessage } from '../api';
-const ALL_VARIANTS = ['XS', 'S', 'M', 'L', 'XL', 'XXL'];
+const FALLBACK_VARIANT_OPTIONS = ['Standard', 'Spicy', 'Mild', 'Large', 'Small'];
 
 type Product = {
   id: number;
@@ -57,6 +57,7 @@ function StockInput({ initialStock, onUpdate }: { initialStock: number, onUpdate
 export default function Inventory() {
   const [products, setProducts] = useState<Product[]>([]);
   const [sections, setSections] = useState<string[]>([]);
+  const [variantOptions, setVariantOptions] = useState<string[]>(FALLBACK_VARIANT_OPTIONS);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [stockEditingProduct, setStockEditingProduct] = useState<Product | null>(null);
@@ -102,12 +103,12 @@ export default function Inventory() {
   const fetchData = async () => {
     setLoading(true);
     const activeBranchId = localStorage.getItem('active_branch_id') ?? '1';
-    const productQuery = includeArchived ? '/products/?include_archived=1' : '/products/';
+    const productQuery = includeArchived ? '/menu-items/?include_archived=1' : '/menu-items/';
     try {
       const [prodData, settingsData, invData] = await Promise.all([
         get<{ products?: Product[] }>(productQuery),
-        get<{ config?: { sections?: string[] } }>(`/settings/?branch_id=${activeBranchId}`),
-        get<{ inventory?: Record<string, Record<string, number>> }>(`/inventory/?branch_id=${activeBranchId}`),
+        get<{ config?: { sections?: string[]; variants?: string[] } }>(`/settings/?branch_id=${activeBranchId}`),
+        get<{ inventory?: Record<string, Record<string, number>> }>(`/stock/?branch_id=${activeBranchId}`),
       ]);
       const productsList = prodData?.products ?? [];
       setProducts(productsList);
@@ -116,6 +117,12 @@ export default function Inventory() {
         ? configSections
         : [...new Set(productsList.map(p => p?.section).filter(Boolean))] as string[];
       setSections(sectionsList);
+      const configVariants = settingsData?.config?.variants;
+      setVariantOptions(
+        Array.isArray(configVariants) && configVariants.length > 0
+          ? configVariants
+          : FALLBACK_VARIANT_OPTIONS
+      );
       setInventory(invData?.inventory ?? {});
     } catch (e) {
       showToast(getUserMessage(e), 'error');
@@ -186,7 +193,7 @@ export default function Inventory() {
     setFormError('');
 
     if (!formSku.trim() || !formTitle.trim() || !formPrice.trim() || !formSection) {
-      setFormError('SKU, Title, Base Price, and Section are required.');
+      setFormError('SKU, Title, Base Price, and Category are required.');
       return;
     }
     const parsedPrice = parseFloat(formPrice);
@@ -207,9 +214,9 @@ export default function Inventory() {
         image_url: formImageUrl.trim() || '',
       };
       if (editingProduct) {
-        await put(`/products/${editingProduct.id}`, body);
+        await put(`/menu-items/${editingProduct.id}`, body);
       } else {
-        await post('/products/', body);
+        await post('/menu-items/', body);
       }
       setShowModal(false);
       fetchData();
@@ -222,7 +229,7 @@ export default function Inventory() {
 
   const handleArchive = async (p: Product) => {
     try {
-      await patch(`/products/${p.id}/archive`, null);
+      await patch(`/menu-items/${p.id}/archive`, null);
       showToast('Product archived', 'success');
       fetchData();
     } catch (e) {
@@ -232,7 +239,7 @@ export default function Inventory() {
 
   const handleUnarchive = async (p: Product) => {
     try {
-      await patch(`/products/${p.id}/unarchive`, null);
+      await patch(`/menu-items/${p.id}/unarchive`, null);
       showToast('Product restored', 'success');
       fetchData();
     } catch (e) {
@@ -245,15 +252,15 @@ export default function Inventory() {
       title: 'Permanently delete product?',
       message: `"${p.title}" will be removed forever. This cannot be undone.`,
       relatedEffects: [
-        'All inventory records for this product will be deleted.',
-        'Sale history will be kept; line items will show as "Unknown product".',
+        'All stock records for this item will be deleted.',
+        'Order history will be kept; line items will show as "Unknown item".',
       ],
       confirmLabel: 'Delete permanently',
       variant: 'danger',
     });
     if (!confirmed) return;
     try {
-      await del(`/products/${p.id}`);
+      await del(`/menu-items/${p.id}`);
       showToast('Product deleted permanently', 'success');
       fetchData();
     } catch (e) {
@@ -274,7 +281,7 @@ export default function Inventory() {
     
     try {
       const activeBranchId = localStorage.getItem('active_branch_id') ?? '1';
-      await post('/inventory/update', {
+      await post('/stock/update', {
         product_id: productId,
         variant_sku_suffix: variantSuffix,
         stock_delta: delta,
@@ -297,7 +304,7 @@ export default function Inventory() {
       <div className="flex flex-col h-full bg-white rounded-xl shadow-sm border border-soot-200">
         {/* Header */}
         <div className="p-6 border-b border-soot-200 flex flex-wrap justify-between items-center gap-4 bg-soot-50">
-          <h2 className="text-xl font-bold text-soot-900">Inventory Management</h2>
+          <h2 className="text-xl font-bold text-soot-900">Menu & Stock</h2>
           <div className="flex items-center gap-4">
             <label className="flex items-center gap-2 cursor-pointer select-none">
               <input
@@ -332,7 +339,7 @@ export default function Inventory() {
               className="flex items-center gap-2 bg-brand-700 text-white px-4 py-2 rounded-lg font-medium hover:bg-brand-600 touch-target transition-colors"
             >
               <Plus className="w-4 h-4" />
-              Add Product
+              Add menu item
             </button>
           </div>
         </div>
@@ -341,21 +348,21 @@ export default function Inventory() {
         <div className="p-6 flex-1 overflow-auto">
           {loading ? (
             <div className="flex items-center justify-center py-20 text-soot-400 gap-2">
-              <Loader2 className="w-5 h-5 animate-spin" /> Loading inventory…
+              <Loader2 className="w-5 h-5 animate-spin" /> Loading stock…
             </div>
           ) : products.length === 0 ? (
             <div className="text-center py-20 text-soot-400">
-              <p className="text-lg font-medium mb-1">No products yet</p>
-              <p className="text-sm">Click "Add Product" to get started.</p>
+              <p className="text-lg font-medium mb-1">No menu items yet</p>
+              <p className="text-sm">Click "Add menu item" to get started.</p>
             </div>
           ) : (
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="border-b-2 border-soot-200 text-sm uppercase text-soot-500 font-semibold tracking-wider">
                   <th className="py-3 px-4">SKU</th>
-                  <th className="py-3 px-4">Product Name</th>
-                  <th className="py-3 px-4">Section</th>
-                  <th className="py-3 px-4">Variants</th>
+                  <th className="py-3 px-4">Item name</th>
+                  <th className="py-3 px-4">Category</th>
+                  <th className="py-3 px-4">Options</th>
                   <th className="py-3 px-4">Base Price</th>
                   <th className="py-3 px-4 text-right">Actions</th>
                 </tr>
@@ -402,7 +409,7 @@ export default function Inventory() {
                          <button 
                            onClick={() => handleOpenEditModal(p)}
                            className="p-2 flex items-center justify-center text-neutral-400 hover:text-brand-600 hover:bg-brand-50 rounded-lg transition-colors"
-                           title="Edit Product"
+                           title="Edit item"
                          >
                            <Pencil className="w-4 h-4" />
                          </button>
@@ -444,13 +451,13 @@ export default function Inventory() {
         </div>
       </div>
 
-      {/* ────── Add Product Modal ────── */}
+      {/* Add menu item modal */}
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm overflow-y-auto">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg my-auto flex flex-col max-h-[90vh] overflow-hidden">
             {/* Modal Header */}
             <div className="flex items-center justify-between px-6 py-4 border-b border-neutral-200 bg-neutral-50 shrink-0">
-              <h3 className="text-lg font-bold text-neutral-900">{editingProduct ? 'Edit Product' : 'Add New Product'}</h3>
+              <h3 className="text-lg font-bold text-neutral-900">{editingProduct ? 'Edit menu item' : 'Add menu item'}</h3>
               <button onClick={() => setShowModal(false)} className="p-1.5 rounded-lg hover:bg-neutral-200 transition-colors">
                 <X className="w-5 h-5 text-neutral-500" />
               </button>
@@ -472,20 +479,20 @@ export default function Inventory() {
                   inputMode="text"
                   value={formSku}
                   onChange={e => setFormSku(e.target.value)}
-                  placeholder="e.g. SHIRT-001"
+                  placeholder="e.g. BURGER-001"
                   className="w-full px-4 py-2.5 border border-neutral-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none"
                 />
               </div>
 
               {/* Title */}
               <div>
-                <label className="block text-sm font-medium text-neutral-700 mb-1">Product Name <span className="text-red-400">*</span></label>
+                <label className="block text-sm font-medium text-neutral-700 mb-1">Item name <span className="text-red-400">*</span></label>
                 <input
                   type="text"
                   inputMode="text"
                   value={formTitle}
                   onChange={e => setFormTitle(e.target.value)}
-                  placeholder="e.g. Classic Oxford Shirt"
+                  placeholder="e.g. Classic Cheeseburger"
                   className="w-full px-4 py-2.5 border border-neutral-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none"
                 />
               </div>
@@ -507,7 +514,7 @@ export default function Inventory() {
 
               {/* Product Image */}
               <div>
-                <label className="block text-sm font-medium text-neutral-700 mb-1">Product Image</label>
+                <label className="block text-sm font-medium text-neutral-700 mb-1">Item image</label>
                 <div className="flex items-start gap-3">
                   {formImageUrl && (
                     <div className="w-16 h-16 rounded-lg border border-neutral-200 bg-neutral-50 overflow-hidden shrink-0">
@@ -546,14 +553,14 @@ export default function Inventory() {
 
               {/* Section Dropdown */}
               <div>
-                <label className="block text-sm font-medium text-neutral-700 mb-1">Section <span className="text-red-400">*</span></label>
+                <label className="block text-sm font-medium text-neutral-700 mb-1">Category <span className="text-red-400">*</span></label>
                 <div className="relative">
                   <select
                     value={formSection}
                     onChange={handleSectionChange}
                     className="w-full appearance-none px-4 py-2.5 pr-10 border border-neutral-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none bg-white"
                   >
-                    <option value="">— No Section —</option>
+                    <option value="">— No category —</option>
                     {sections.map(s => (
                       <option key={s} value={s}>{s}</option>
                     ))}
@@ -561,15 +568,15 @@ export default function Inventory() {
                   <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-400 pointer-events-none" />
                 </div>
                 {sections.length === 0 && (
-                  <p className="text-xs text-neutral-400 mt-1">No sections defined yet. Add them in Settings → Sections.</p>
+                  <p className="text-xs text-neutral-400 mt-1">No categories yet. Add them in Settings → Categories.</p>
                 )}
               </div>
 
-              {/* Variant Checkboxes */}
+              {/* Option checkboxes (from Settings → Variants when configured; include current product variants so they stay editable) */}
               <div>
-                <label className="block text-sm font-medium text-neutral-700 mb-2">Variants</label>
+                <label className="block text-sm font-medium text-neutral-700 mb-2">Options</label>
                 <div className="flex flex-wrap gap-2">
-                  {ALL_VARIANTS.map(v => {
+                  {[...new Set([...variantOptions, ...formVariants])].map(v => {
                     const selected = formVariants.includes(v);
                     return (
                       <button
@@ -588,6 +595,7 @@ export default function Inventory() {
                     );
                   })}
                 </div>
+                <p className="mt-1 text-xs text-neutral-500">Manage option names in Settings → Variants.</p>
               </div>
 
               {/* Actions */}
@@ -605,7 +613,7 @@ export default function Inventory() {
                   className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-brand-700 text-white rounded-lg text-sm font-medium hover:bg-brand-600 disabled:opacity-50 transition-colors"
                 >
                   {submitting && <Loader2 className="w-4 h-4 animate-spin" />}
-                  {submitting ? 'Saving…' : (editingProduct ? 'Save Changes' : 'Add Product')}
+                  {submitting ? 'Saving…' : (editingProduct ? 'Save Changes' : 'Add menu item')}
                 </button>
               </div>
             </form>
@@ -613,7 +621,7 @@ export default function Inventory() {
         </div>
       )}
 
-      {/* ────── Adjust Stock Modal (variants / quantities) ────── */}
+      {/* Adjust stock modal (options / quantities) */}
       {stockEditingProduct && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm overflow-y-auto">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[calc(100vh-2rem)] flex flex-col overflow-hidden my-auto">

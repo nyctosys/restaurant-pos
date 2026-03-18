@@ -62,7 +62,10 @@ def create_app():
 
     # Configure Database
     # Defaulting to a local postgres instance if not specified in .env
-    app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'postgresql://localhost/sootshoot')
+    app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get(
+        'DATABASE_URL',
+        'postgresql://restaurant_pos:password123@127.0.0.1:5432/restaurant_pos',
+    )
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev_secret_key_change_in_production')
 
@@ -113,11 +116,11 @@ def create_app():
     from app.routes.printer import printer_bp
     
     app.register_blueprint(auth_bp, url_prefix='/api/auth')
-    app.register_blueprint(products_bp, url_prefix='/api/products')
-    app.register_blueprint(sales_bp, url_prefix='/api/sales')
+    app.register_blueprint(products_bp, url_prefix='/api/menu-items')
+    app.register_blueprint(sales_bp, url_prefix='/api/orders')
     app.register_blueprint(scanner_bp, url_prefix='/api/scanner')
     app.register_blueprint(settings_bp, url_prefix='/api/settings')
-    app.register_blueprint(inventory_bp, url_prefix='/api/inventory')
+    app.register_blueprint(inventory_bp, url_prefix='/api/stock')
     app.register_blueprint(users_bp, url_prefix='/api/users')
     app.register_blueprint(branches_bp, url_prefix='/api/branches')
     app.register_blueprint(printer_bp, url_prefix='/api/printer')

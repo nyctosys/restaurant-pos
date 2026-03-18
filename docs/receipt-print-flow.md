@@ -12,7 +12,7 @@ flowchart LR
 
   subgraph API["Backend"]
     D[GET/PUT /settings]
-    E[GET /sales/:id/print]
+    E[GET /orders/:id/print]
     F[PrinterService.print_receipt]
   end
 
@@ -51,7 +51,7 @@ flowchart LR
 | 2 | **ReceiptSettings.tsx** | On Save → `put(/settings)` with `receipt_settings: { businessName, businessAddress, businessPhone, ... }`. |
 | 3 | **Settings API** | Persists `config.receipt_settings` (e.g. in Setting table, branch_id = null or branch). |
 | 4 | **User** | Triggers print (e.g. from Transaction details or Sale complete). |
-| 5 | **Frontend** | `POST /sales/:sale_id/print` with sale context. |
+| 5 | **Frontend** | `POST /orders/:sale_id/print` with sale context. |
 | 6 | **sales.py** | Builds `receipt_data` (items, totals, operator, branch), calls `PrinterService().print_receipt(receipt_data)`. |
 | 7 | **printer_service.py** | `print_receipt()` → `_get_receipt_settings(branch_id)` loads same keys as UI (businessName, businessAddress, businessPhone, etc.). |
 | 8 | **printer_service.py** | **Header block (aligned with preview):** `align='center'`, print business name; then address as **one line** (no comma→newline split), then phone; then separator. |

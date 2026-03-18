@@ -23,7 +23,7 @@ def _auth_headers(client, app, role="owner"):
 
 
 def test_inventory_list_requires_auth(client):
-    r = client.get("/api/inventory/")
+    r = client.get("/api/stock/")
     assert r.status_code == 401
 
 
@@ -39,10 +39,24 @@ def test_inventory_update_success(client, app):
         db.session.commit()
         bid, pid = b.id, p.id
     r = client.post(
-        "/api/inventory/update",
+        "/api/stock/update",
         headers=h,
         json={"branch_id": bid, "product_id": pid, "stock_delta": 3},
     )
     assert r.status_code == 200
     data = r.get_json()
     assert data.get("stock_level") == 8
+
+
+def test_stock_transactions_requires_auth(client):
+    r = client.get("/api/stock/transactions?time_filter=today")
+    assert r.status_code == 401
+
+
+def test_stock_transactions_returns_list(client, app):
+    h = _auth_headers(client, app)
+    r = client.get("/api/stock/transactions?time_filter=today", headers=h)
+    assert r.status_code == 200
+    data = r.get_json()
+    assert "transactions" in data
+    assert isinstance(data["transactions"], list)

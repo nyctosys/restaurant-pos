@@ -1,7 +1,7 @@
 from flask import Blueprint, request, jsonify
 from sqlalchemy import func
 from datetime import datetime, timedelta, time
-from app.models import db, Sale, SaleItem, Inventory, Product, Setting
+from app.models import db, Sale, SaleItem, Inventory, InventoryTransaction, Product, Setting
 from app.utils.auth_decorators import token_required, owner_required
 from app.errors import error_response
 
@@ -13,6 +13,9 @@ def checkout(current_user):
     data = request.get_json()
     if not data or 'items' not in data or 'payment_method' not in data:
         return error_response("Bad Request", "Missing necessary checkout data", 400)
+
+    # Optional restaurant metadata (order_type, notes) accepted and ignored if present; no breaking change to payload
+    _ = data.get('order_type'), data.get('notes')
 
     items = data['items']
     if not items:
@@ -92,7 +95,17 @@ def checkout(current_user):
 
             # Deduct Inventory
             inventory.stock_level -= item['quantity']
-            
+            db.session.add(InventoryTransaction(
+                branch_id=branch_id,
+                product_id=product.id,
+                variant_sku_suffix=item.get('variant_sku_suffix', ''),
+                delta=-item['quantity'],
+                reason='sale',
+                user_id=current_user.id,
+                reference_type='sale',
+                reference_id=new_sale.id,
+            ))
+
             unit_price = float(product.base_price)  # Ignoring variant pricing delta for now
             subtotal = unit_price * item['quantity']
             total_amount += subtotal
@@ -383,10 +396,20 @@ def rollback_sale(current_user, sale_id):
             inventory = Inventory.query.filter_by(
                 branch_id=sale.branch_id,
                 product_id=item.product_id,
-                variant_sku_suffix=item.variant_sku_suffix
+                variant_sku_suffix=item.variant_sku_suffix or ''
             ).first()
             if inventory is not None:
                 inventory.stock_level += item.quantity
+                db.session.add(InventoryTransaction(
+                    branch_id=sale.branch_id,
+                    product_id=item.product_id,
+                    variant_sku_suffix=item.variant_sku_suffix or '',
+                    delta=item.quantity,
+                    reason='refund',
+                    user_id=current_user.id,
+                    reference_type='sale_refund',
+                    reference_id=sale_id,
+                ))
         db.session.commit()
         return jsonify({"message": "Sale rolled back successfully"}), 200
     except Exception as e:

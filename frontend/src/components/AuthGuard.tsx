@@ -25,8 +25,11 @@ export default function AuthGuard() {
 
         log.info('AuthGuard', 'Authenticated successfully');
         setStatus('authenticated');
-      } catch {
-        setStatus('needs_login');
+      } catch (error) {
+        // If the backend or database is not ready yet, keep showing a loading state
+        // instead of falling back to the login page.
+        log.error('AuthGuard', 'Failed to verify system status; backend may be unavailable.', error);
+        setStatus('loading');
       }
     };
 

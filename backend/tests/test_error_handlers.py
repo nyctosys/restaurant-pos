@@ -49,7 +49,7 @@ def test_400_from_route_has_standard_shape(client, app):
     )
     token = r.get_json()["token"]
     r2 = client.post(
-        "/api/sales/checkout",
+        "/api/orders/checkout",
         headers={"Authorization": f"Bearer {token}"},
         json={"items": [], "payment_method": "Cash"},
     )

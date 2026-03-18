@@ -36,7 +36,7 @@ export default function Dashboard() {
   const { lastScannedBarcode, clearBarcode, scannerStatus } = useScanner();
   const [printerStatus, setPrinterStatus] = useState<'checking' | 'connected' | 'disconnected' | 'error'>('checking');
   const [cart, setCart] = useState<CartItem[]>([]);
-  const [activeCategory, setActiveCategory] = useState('All Products');
+  const [activeCategory, setActiveCategory] = useState('All Items');
   const [searchQuery, setSearchQuery] = useState('');
   const [layoutView, setLayoutView] = useState<'grid' | 'list'>('grid');
   const [products, setProducts] = useState<Product[]>([]);
@@ -60,8 +60,8 @@ export default function Dashboard() {
   const [activeCoupon, setActiveCoupon] = useState<DiscountPreset | null>(null);
   const [couponDropdownOpen, setCouponDropdownOpen] = useState(false);
   const [customCouponInput, setCustomCouponInput] = useState('');
-  const [couponSectionExpanded, setCouponSectionExpanded] = useState(true);
-  const [paymentMethodSectionExpanded, setPaymentMethodSectionExpanded] = useState(true);
+  const [couponSectionExpanded, setCouponSectionExpanded] = useState(false);
+  const [paymentMethodSectionExpanded, setPaymentMethodSectionExpanded] = useState(false);
 
   const ACTIVE_COUPON_STORAGE_KEY = 'pos_active_coupon';
 
@@ -73,9 +73,9 @@ export default function Dashboard() {
     const activeBranchId = localStorage.getItem('active_branch_id') ?? user?.branch_id ?? '1';
     try {
       const [prodData, settingsData, invData] = await Promise.all([
-        get<{ products?: Product[] }>(`/products/`),
+        get<{ products?: Product[] }>(`/menu-items/`),
         get<{ config?: Record<string, unknown> }>(`/settings/?branch_id=${activeBranchId}`),
-        get<{ inventory?: Record<string, Record<string, number>> }>(`/inventory/?branch_id=${activeBranchId}`),
+        get<{ inventory?: Record<string, Record<string, number>> }>(`/stock/?branch_id=${activeBranchId}`),
       ]);
       setProducts(prodData?.products ?? []);
       const config = settingsData?.config ?? {};
@@ -106,7 +106,7 @@ export default function Dashboard() {
       }
 
       try {
-        const salesData = await get<{ sales?: { id: number }[] }>(`/sales/?limit=1&branch_id=${activeBranchId}`);
+        const salesData = await get<{ sales?: { id: number }[] }>(`/orders/?limit=1&branch_id=${activeBranchId}`);
         const latestId = salesData?.sales?.length ? salesData.sales[0]?.id ?? 0 : 0;
         setOrderId(`#ORD-${String(latestId + 1).padStart(4, '0')}`);
       } catch {
@@ -136,7 +136,7 @@ export default function Dashboard() {
   }, []);
 
   // Categories come from the sections defined in Settings
-  const categories = ['All Products', ...sections];
+  const categories = ['All Items', ...sections];
 
   useEffect(() => {
     if (lastScannedBarcode) {
@@ -204,11 +204,12 @@ export default function Dashboard() {
 
     try {
       const activeBranchId = localStorage.getItem('active_branch_id') ?? user?.branch_id ?? '1';
-      const data = await post<{ sale_id?: number; total?: number; message?: string; print_success?: boolean }>('/sales/checkout', {
+      const data = await post<{ sale_id?: number; total?: number; message?: string; print_success?: boolean }>('/orders/checkout', {
         payment_method: paymentMethod,
         items,
         branch_id: parseInt(activeBranchId, 10),
         discount: appliedDiscount ? { id: appliedDiscount.id, name: appliedDiscount.name, type: appliedDiscount.type, value: appliedDiscount.value } : null,
+        order_type: 'counter',
       });
       const saleId = data?.sale_id ?? 0;
       
@@ -222,7 +223,7 @@ export default function Dashboard() {
       setCart([]);
       setAppliedDiscount(activeCoupon);
       setOrderId(`#ORD-${String(saleId + 1).padStart(4, '0')}`);
-      fetchData(); // Refresh inventory
+      fetchData(); // Refresh stock
     } catch (e) {
       setNotification({ type: 'error', msg: getUserMessage(e) });
       setTimeout(() => setNotification(null), 4000);
@@ -273,7 +274,7 @@ export default function Dashboard() {
   const total = discountedSubtotal + tax;
 
   const filteredProducts = products.filter(p => {
-    const matchesCategory = activeCategory === 'All Products' || p.section === activeCategory;
+    const matchesCategory = activeCategory === 'All Items' || p.section === activeCategory;
     const matchesSearch = p.title.toLowerCase().includes(searchQuery.toLowerCase());
     return matchesCategory && matchesSearch;
   });
@@ -295,7 +296,7 @@ export default function Dashboard() {
         </div>
       )}
       
-      {/* Center: Product Grid */}
+      {/* Center: Menu grid */}
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Header */}
         <div className="p-5 pb-0">
@@ -338,7 +339,7 @@ export default function Dashboard() {
                 inputMode="search"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search Products"
+                placeholder="Search menu"
                 className="w-full pl-11 pr-4 py-2.5 bg-surface border border-neutral-200 rounded-xl text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 focus:outline-none transition-shadow"
               />
             </div>
@@ -351,7 +352,7 @@ export default function Dashboard() {
             </button>
           </div>
 
-          {/* Category Tabs — dynamic from existing sections */}
+          {/* Category tabs — from Settings → Categories */}
           <div className="flex items-center gap-1 border-b border-neutral-200 overflow-x-auto no-scrollbar">
             {categories.map(cat => (
               <button
@@ -369,16 +370,16 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Product Grid */}
+        {/* Menu grid */}
         <div className="flex-1 overflow-auto p-5">
           {loading ? (
             <div className="flex items-center justify-center py-20 text-neutral-400 gap-2">
-              <Loader2 className="w-5 h-5 animate-spin" /> Loading products…
+              <Loader2 className="w-5 h-5 animate-spin" /> Loading menu…
             </div>
           ) : filteredProducts.length === 0 ? (
             <div className="text-center py-20 text-neutral-400">
-              <p className="text-lg font-medium">No products found</p>
-              <p className="text-sm mt-1">Add products in the Inventory page.</p>
+              <p className="text-lg font-medium">No menu items found</p>
+              <p className="text-sm mt-1">Add items in the Stock page.</p>
             </div>
           ) : (
             <div className={layoutView === 'grid' ? "grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4" : "flex flex-col gap-3"}>
@@ -464,7 +465,7 @@ export default function Dashboard() {
             <div className="h-full flex flex-col items-center justify-center text-neutral-300">
               <ShoppingBag className="w-16 h-16 mb-3 stroke-1" />
               <p className="text-sm font-medium text-neutral-400">No items yet</p>
-              <p className="text-xs text-neutral-300 mt-1">Tap a product to add it</p>
+              <p className="text-xs text-neutral-300 mt-1">Tap an item to add it</p>
             </div>
           ) : (
             cart.map(item => (
@@ -714,12 +715,12 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Touch-Friendly Variant Modal */}
+      {/* Option selection modal */}
       {productForVariants && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm px-4 pb-8 sm:p-0">
           <div className="bg-white rounded-t-3xl sm:rounded-2xl shadow-xl w-full max-w-sm overflow-hidden animate-slide-up sm:animate-none">
             <div className="p-6 border-b border-soot-200 flex justify-between items-center bg-soot-50">
-              <h3 className="text-lg font-bold text-soot-900">Select Variant</h3>
+              <h3 className="text-lg font-bold text-soot-900">Select option</h3>
               <button 
                 onClick={() => setProductForVariants(null)} 
                 className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-soot-200 transition-colors text-soot-500"

@@ -10,6 +10,6 @@ def test_health_route_does_not_require_request_id(client):
 
 
 def test_api_returns_request_id(client):
-    r = client.get("/api/products/")
+    r = client.get("/api/menu-items/")
     assert "X-Request-ID" in r.headers
     assert len(r.headers["X-Request-ID"]) > 0
