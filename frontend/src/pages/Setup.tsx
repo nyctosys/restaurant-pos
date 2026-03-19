@@ -49,13 +49,20 @@ export default function Setup() {
         
         {/* Brand Header */}
         <div className="bg-brand-900 py-6 flex flex-col items-center justify-center border-b border-white/10">
-          <img src="/logo_full.png" alt="Soot Shoot Logo" className="w-80 h-auto object-contain drop-shadow-xl" />
+          <img
+            src="/app-logo.svg"
+            alt=""
+            width={320}
+            height={320}
+            className="h-28 w-auto max-w-[85%] object-contain drop-shadow-xl"
+            decoding="async"
+          />
         </div>
         
         <div className="p-8">
           <h2 className="text-2xl font-bold text-center text-neutral-900 mb-1">First-Time Setup</h2>
           <p className="text-sm text-neutral-500 text-center mb-6">
-            Welcome to Soot Shoot POS. Register the owner account to get started.
+            Welcome to your restaurant POS. Register the owner account to get started.
           </p>
 
         {error && (

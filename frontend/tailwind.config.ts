@@ -8,7 +8,7 @@ export default {
   theme: {
     extend: {
       colors: {
-        // Soot Shoot Brand Colors mapped from Branding v1.pdf references
+        // Legacy soot palette (tailwind v3 config; v4 uses @theme in index.css)
         soot: {
           900: '#1a1a1a', // Deep charcoal / near black focus
           800: '#2d2d2d', // Medium charcoal

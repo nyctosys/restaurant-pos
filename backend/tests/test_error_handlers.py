@@ -11,12 +11,8 @@ def test_404_returns_json(client):
     assert "Not Found" in data.get("error", "")
 
 
-def test_500_returns_json(app, client):
-    @app.route("/api/test-raise")
-    def raise_error():
-        raise RuntimeError("test error")
-
-    # Flask might convert unhandled to 500 by our handler
+def test_500_returns_json(client):
+    # Route is provided by FastAPI app for error-handler verification.
     r = client.get("/api/test-raise")
     assert r.status_code == 500
     data = r.get_json()

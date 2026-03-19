@@ -50,12 +50,15 @@ export default function BaseLayout() {
     <div className="h-screen flex bg-canvas text-neutral-900 font-sans overflow-hidden">
       {/* Vertical Icon Sidebar */}
       <aside className="w-[72px] bg-brand-900 flex flex-col items-center py-5 shrink-0">
-        {/* Logo */}
+        {/* App mark */}
         <div className="mb-8">
-          <img 
-            src="/small_logo.png" 
-            alt="Soot Shoot" 
-            className="w-16 h-16 object-contain"
+          <img
+            src="/app-logo.svg"
+            alt=""
+            width={64}
+            height={64}
+            className="w-16 h-16 object-contain drop-shadow-md"
+            decoding="async"
           />
         </div>
 

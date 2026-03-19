@@ -1,4 +1,12 @@
-import { useState, useEffect } from 'react';
+import {
+  useState,
+  useEffect,
+  useRef,
+  useCallback,
+  useImperativeHandle,
+  forwardRef,
+  type ReactNode,
+} from 'react';
 import { Plus, X, Loader2, ChevronDown, Check, Trash2, PackagePlus, Minus, Pencil, ScanBarcode, Upload, Archive, ArchiveRestore } from 'lucide-react';
 import BarcodeModal from '../components/BarcodeModal';
 import { showToast } from '../components/Toast';
@@ -19,40 +27,207 @@ type Product = {
   archived_at?: string | null;
 };
 
-function StockInput({ initialStock, onUpdate }: { initialStock: number, onUpdate: (delta: number) => void }) {
-  const [val, setVal] = useState(initialStock.toString());
+/** Units to add in one step; Enter or Add applies a positive delta and clears the field. */
+function RestockAmountInput({ onAdd }: { onAdd: (amount: number) => void }) {
+  const [val, setVal] = useState('');
+  const valRef = useRef('');
 
-  useEffect(() => {
-    setVal(initialStock.toString());
-  }, [initialStock]);
-
-  const handleBlur = () => {
-    const num = parseInt(val) || 0;
-    if (num !== initialStock) {
-      onUpdate(num - initialStock);
+  const apply = () => {
+    const raw = valRef.current.trim();
+    if (raw === '') return;
+    const n = Number.parseInt(raw, 10);
+    if (!Number.isFinite(n) || n <= 0) {
+      showToast('Enter a positive whole number of units', 'error');
+      return;
     }
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') handleBlur();
+    onAdd(n);
+    setVal('');
+    valRef.current = '';
   };
 
   return (
-    <input
-      type="number"
-      inputMode="numeric"
-      min={0}
-      step={1}
-      value={val}
-      onChange={e => setVal(e.target.value)}
-      onBlur={handleBlur}
-      onKeyDown={handleKeyDown}
-      className="w-16 min-h-[44px] text-xl font-bold text-center border-b-2 border-transparent focus:border-brand-500 bg-transparent focus:outline-none focus:ring-0 px-1 m-0 transition-colors touch-target"
-      style={{ MozAppearance: 'textfield' }}
-      aria-label="Quantity"
-    />
+    <div className="flex items-center gap-2">
+      <input
+        type="number"
+        inputMode="numeric"
+        min={1}
+        step={1}
+        value={val}
+        placeholder="0"
+        onChange={e => {
+          const v = e.target.value;
+          valRef.current = v;
+          setVal(v);
+        }}
+        onKeyDown={e => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            apply();
+          }
+        }}
+        className="w-14 min-h-[40px] text-base font-semibold text-center border border-neutral-200 rounded-lg focus:border-brand-500 bg-white focus:outline-none focus:ring-2 focus:ring-brand-500/30 px-1 py-1.5 touch-target"
+        style={{ MozAppearance: 'textfield' }}
+        aria-label="Units to add"
+      />
+      <button
+        type="button"
+        onClick={apply}
+        className="min-h-[40px] px-3 rounded-lg bg-brand-600 text-white text-sm font-semibold hover:bg-brand-700 active:bg-brand-800 touch-target whitespace-nowrap"
+      >
+        Add
+      </button>
+    </div>
   );
 }
+
+type StockInputHandle = {
+  /** Single API/update: current field value (or baseline) ± delta. Avoids flush + click double-counting. */
+  applyStepDelta: (delta: number) => void;
+};
+
+function StockRowControls({
+  label,
+  currentStock,
+  onDelta,
+}: {
+  label: ReactNode;
+  currentStock: number;
+  onDelta: (delta: number) => void;
+}) {
+  const onHandRef = useRef<StockInputHandle>(null);
+
+  const applyStep = (delta: number) => {
+    if (onHandRef.current) {
+      onHandRef.current.applyStepDelta(delta);
+    } else {
+      onDelta(delta);
+    }
+  };
+
+  return (
+    <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 bg-neutral-50 p-4 rounded-xl border border-neutral-200">
+      <div className="shrink-0 pt-0.5">{label}</div>
+      <div className="flex flex-col gap-3 w-full sm:w-auto sm:items-end">
+        <div className="flex flex-col items-stretch sm:items-end gap-1.5">
+          <span className="text-xs font-semibold uppercase tracking-wide text-neutral-500">On hand</span>
+          <div className="flex items-center justify-end gap-3">
+            <button
+              type="button"
+              onPointerDown={e => {
+                if (e.button !== 0) return;
+                e.preventDefault();
+              }}
+              onClick={() => applyStep(-1)}
+              className="w-10 h-10 flex items-center justify-center rounded-lg bg-white border border-neutral-300 text-neutral-600 hover:bg-neutral-100 touch-target active:bg-neutral-200"
+            >
+              <Minus className="w-5 h-5" />
+            </button>
+            <StockInput ref={onHandRef} initialStock={currentStock} onUpdate={onDelta} />
+            <button
+              type="button"
+              onPointerDown={e => {
+                if (e.button !== 0) return;
+                e.preventDefault();
+              }}
+              onClick={() => applyStep(1)}
+              className="w-10 h-10 flex items-center justify-center rounded-lg bg-white border border-neutral-300 text-neutral-600 hover:bg-neutral-100 touch-target active:bg-neutral-200"
+            >
+              <Plus className="w-5 h-5" />
+            </button>
+          </div>
+        </div>
+        <div className="flex flex-col items-stretch sm:items-end gap-1.5">
+          <span className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Restock (add)</span>
+          <RestockAmountInput onAdd={onDelta} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const StockInput = forwardRef<StockInputHandle, { initialStock: number; onUpdate: (delta: number) => void }>(
+  function StockInput({ initialStock, onUpdate }, ref) {
+    const [val, setVal] = useState(initialStock.toString());
+    /** Mirrors the input text on every onChange so blur/Save/+/- cannot read stale React state (batched behind the last keystroke). */
+    const valRef = useRef(val);
+    /**
+     * Last known committed on-hand count for this row (stays in sync with props via effect, bumped locally on ± / blur
+     * so a quick blur after ± doesn’t compare against stale props and fire a second update).
+     */
+    const baselineRef = useRef(initialStock);
+
+    useEffect(() => {
+      baselineRef.current = initialStock;
+      const s = initialStock.toString();
+      setVal(s);
+      valRef.current = s;
+    }, [initialStock]);
+
+    const parseQty = (raw: string) => {
+      const n = Number.parseInt(raw, 10);
+      return Number.isFinite(n) ? n : 0;
+    };
+
+    const commitIfChanged = useCallback(() => {
+      const num = parseQty(valRef.current);
+      const baseline = baselineRef.current;
+      if (num !== baseline) {
+        onUpdate(num - baseline);
+        baselineRef.current = num;
+      }
+    }, [onUpdate]);
+
+    const applyStepDelta = useCallback(
+      (delta: number) => {
+        const parsed = Number.parseInt(valRef.current, 10);
+        const typed = Number.isFinite(parsed) ? parsed : baselineRef.current;
+        const baseline = baselineRef.current;
+        const newTotal = typed + delta;
+        if (newTotal < 0) return;
+        const diff = newTotal - baseline;
+        if (diff === 0) return;
+        onUpdate(diff);
+        const s = String(newTotal);
+        valRef.current = s;
+        setVal(s);
+        baselineRef.current = newTotal;
+      },
+      [onUpdate]
+    );
+
+    useImperativeHandle(ref, () => ({ applyStepDelta }), [applyStepDelta]);
+
+    const handleBlur = () => {
+      commitIfChanged();
+    };
+
+    const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+      if (e.key === 'Enter') {
+        e.currentTarget.blur();
+      }
+    };
+
+    return (
+      <input
+        type="number"
+        inputMode="numeric"
+        min={0}
+        step={1}
+        value={val}
+        onChange={e => {
+          const v = e.target.value;
+          valRef.current = v;
+          setVal(v);
+        }}
+        onBlur={handleBlur}
+        onKeyDown={handleKeyDown}
+        className="w-16 min-h-[44px] text-xl font-bold text-center border-b-2 border-transparent focus:border-brand-500 bg-transparent focus:outline-none focus:ring-0 px-1 m-0 transition-colors touch-target"
+        style={{ MozAppearance: 'textfield' }}
+        aria-label="On-hand quantity"
+      />
+    );
+  }
+);
 
 export default function Inventory() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -382,19 +557,33 @@ export default function Inventory() {
                       )}
                     </td>
                     <td className="py-3 px-4">
-                      {p.variants && p.variants.length > 0 ? (
-                        <div className="flex flex-wrap gap-1">
-                          {p.variants.map((v: string) => (
-                            <span key={v} className="inline-block px-2 py-0.5 bg-neutral-100 text-neutral-600 rounded text-xs font-medium border border-neutral-200">
-                              {v} <span className="text-neutral-400 font-bold ml-1">({inventory[p.id.toString()]?.[v] || 0})</span>
-                            </span>
-                          ))}
-                        </div>
-                      ) : (
-                        <span className="inline-block px-2 py-0.5 bg-neutral-100 text-neutral-600 rounded text-xs font-medium border border-neutral-200">
-                          Standard <span className="text-neutral-400 font-bold ml-1">({inventory[p.id.toString()]?.[''] || 0})</span>
-                        </span>
-                      )}
+                      <button
+                        type="button"
+                        disabled={!!p.archived_at}
+                        onClick={() => setStockEditingProduct(p)}
+                        title={p.archived_at ? undefined : 'Manage stock'}
+                        className={`w-full min-h-[44px] text-left rounded-lg -m-1 p-1.5 transition-colors ${
+                          p.archived_at
+                            ? 'cursor-not-allowed opacity-80'
+                            : 'hover:bg-brand-50/70 active:bg-brand-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 cursor-pointer'
+                        }`}
+                      >
+                        {p.variants && p.variants.length > 0 ? (
+                          <div className="flex flex-wrap gap-1">
+                            {p.variants.map((v: string) => (
+                              <span key={v} className="inline-block px-2 py-0.5 bg-neutral-100 text-neutral-600 rounded text-xs font-medium border border-neutral-200 pointer-events-none">
+                                {v}{' '}
+                                <span className="text-neutral-400 font-bold ml-1">({inventory[p.id.toString()]?.[v] || 0})</span>
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
+                          <span className="inline-block px-2 py-0.5 bg-neutral-100 text-neutral-600 rounded text-xs font-medium border border-neutral-200 pointer-events-none">
+                            Standard{' '}
+                            <span className="text-neutral-400 font-bold ml-1">({inventory[p.id.toString()]?.[''] || 0})</span>
+                          </span>
+                        )}
+                      </button>
                     </td>
                     <td className="py-3 px-4 font-semibold">{formatCurrency(p.base_price)}</td>
                     <td className="py-3 px-4 text-right">
@@ -624,7 +813,7 @@ export default function Inventory() {
       {/* Adjust stock modal (options / quantities) */}
       {stockEditingProduct && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm overflow-y-auto">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[calc(100vh-2rem)] flex flex-col overflow-hidden my-auto">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[calc(100vh-2rem)] flex flex-col overflow-hidden my-auto">
             <div className="flex items-center justify-between px-6 py-4 border-b border-neutral-200 bg-neutral-50 shrink-0">
               <h3 className="text-lg font-bold text-neutral-900 truncate pr-2">Manage Stock: {stockEditingProduct.title}</h3>
               <button onClick={() => setStockEditingProduct(null)} className="p-1.5 rounded-lg hover:bg-neutral-200 transition-colors shrink-0">
@@ -634,52 +823,23 @@ export default function Inventory() {
             
             <div className="p-6 space-y-4 overflow-y-auto min-h-0 flex-1">
               {(!stockEditingProduct.variants || stockEditingProduct.variants.length === 0) ? (
-                // No variants
-                <div className="flex items-center justify-between bg-neutral-50 p-4 rounded-xl border border-neutral-200">
-                  <span className="font-medium text-neutral-800">Standard</span>
-                  <div className="flex items-center gap-4">
-                    <button 
-                      onClick={() => handleAdjustStock(stockEditingProduct.id, '', -1)}
-                      className="w-10 h-10 flex items-center justify-center rounded-lg bg-white border border-neutral-300 text-neutral-600 hover:bg-neutral-100 touch-target active:bg-neutral-200"
-                    >
-                      <Minus className="w-5 h-5" />
-                    </button>
-                    <StockInput 
-                      initialStock={inventory[stockEditingProduct.id.toString()]?.[''] || 0}
-                      onUpdate={(delta) => handleAdjustStock(stockEditingProduct.id, '', delta)}
-                    />
-                    <button 
-                      onClick={() => handleAdjustStock(stockEditingProduct.id, '', 1)}
-                      className="w-10 h-10 flex items-center justify-center rounded-lg bg-white border border-neutral-300 text-neutral-600 hover:bg-neutral-100 touch-target active:bg-neutral-200"
-                    >
-                      <Plus className="w-5 h-5" />
-                    </button>
-                  </div>
-                </div>
+                <StockRowControls
+                  label={<span className="font-medium text-neutral-800">Standard</span>}
+                  currentStock={inventory[stockEditingProduct.id.toString()]?.[''] || 0}
+                  onDelta={(delta) => handleAdjustStock(stockEditingProduct.id, '', delta)}
+                />
               ) : (
-                // With variants
                 stockEditingProduct.variants.map(v => (
-                  <div key={v} className="flex items-center justify-between bg-neutral-50 p-4 rounded-xl border border-neutral-200">
-                    <span className="font-semibold text-neutral-800 bg-white px-2 py-1 rounded text-sm border border-neutral-200">{v}</span>
-                    <div className="flex items-center gap-4">
-                      <button 
-                        onClick={() => handleAdjustStock(stockEditingProduct.id, v, -1)}
-                        className="w-10 h-10 flex items-center justify-center rounded-lg bg-white border border-neutral-300 text-neutral-600 hover:bg-neutral-100 touch-target active:bg-neutral-200"
-                      >
-                        <Minus className="w-5 h-5" />
-                      </button>
-                      <StockInput 
-                        initialStock={inventory[stockEditingProduct.id.toString()]?.[v] || 0}
-                        onUpdate={(delta) => handleAdjustStock(stockEditingProduct.id, v, delta)}
-                      />
-                      <button 
-                        onClick={() => handleAdjustStock(stockEditingProduct.id, v, 1)}
-                        className="w-10 h-10 flex items-center justify-center rounded-lg bg-white border border-neutral-300 text-neutral-600 hover:bg-neutral-100 touch-target active:bg-neutral-200"
-                      >
-                        <Plus className="w-5 h-5" />
-                      </button>
-                    </div>
-                  </div>
+                  <StockRowControls
+                    key={v}
+                    label={
+                      <span className="font-semibold text-neutral-800 bg-white px-2 py-1 rounded text-sm border border-neutral-200 inline-block">
+                        {v}
+                      </span>
+                    }
+                    currentStock={inventory[stockEditingProduct.id.toString()]?.[v] || 0}
+                    onDelta={(delta) => handleAdjustStock(stockEditingProduct.id, v, delta)}
+                  />
                 ))
               )}
             </div>

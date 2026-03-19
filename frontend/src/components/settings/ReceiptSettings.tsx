@@ -173,7 +173,7 @@ export default function ReceiptSettings() {
                 value={businessName}
                 onChange={(e) => setBusinessName(e.target.value)}
                 className="w-full px-4 py-3 border border-soot-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:outline-none"
-                placeholder="e.g. Soot Shoot POS"
+                placeholder="e.g. Main Street Kitchen"
               />
             </div>
             

@@ -12,6 +12,8 @@ pyusb>=1.2.1
 Flask-SocketIO==5.3.6
 eventlet==0.35.1
 gunicorn==21.2.0
+fastapi==0.115.8
+uvicorn==0.34.0
 axoniq
 pytest>=7.0.0
 pytest-cov>=4.0.0

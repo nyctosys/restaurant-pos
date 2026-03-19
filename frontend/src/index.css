@@ -3,7 +3,7 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme {
-  /* Soot Shoot Brand Colors — from Branding v1.pdf */
+  /* App brand palette */
   --color-brand-900: #0f3d33;
   --color-brand-800: #155347;
   --color-brand-700: #1a5c4e;
