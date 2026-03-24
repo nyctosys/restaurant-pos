@@ -45,7 +45,7 @@ export default function Login() {
       <div className="glass-floating max-w-md w-full overflow-hidden">
         
         {/* Brand Header */}
-        <div className="py-6 flex flex-col items-center justify-center border-b border-white/20 bg-[linear-gradient(160deg,rgba(45,155,130,0.44),rgba(15,61,51,0.55))] dark:border-white/10 dark:bg-[linear-gradient(168deg,rgba(194,74,54,0.42),rgba(26,14,12,0.92))]">
+        <div className="py-6 flex flex-col items-center justify-center border-b border-white/20 bg-[linear-gradient(160deg,rgba(194,74,54,0.40),rgba(61,21,16,0.58))] dark:border-white/10 dark:bg-[linear-gradient(168deg,rgba(194,74,54,0.42),rgba(26,14,12,0.92))]">
           <img
             src="/app-logo.svg"
             alt=""
