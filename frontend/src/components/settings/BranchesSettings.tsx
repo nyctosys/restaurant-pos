@@ -205,7 +205,7 @@ export default function BranchesSettings() {
       </div>
 
       {/* Branch List */}
-      <div className="bg-white rounded-xl border border-soot-200 overflow-hidden">
+      <div className="glass-card overflow-hidden">
         {loading ? (
           <div className="p-8 flex justify-center text-soot-400">
             <Loader2 className="w-6 h-6 animate-spin" />
@@ -219,7 +219,7 @@ export default function BranchesSettings() {
             {branches.map((branch) => (
               <div key={branch.id}>
                 {/* Branch Row */}
-                <div className={`flex items-center gap-4 px-6 py-4 hover:bg-soot-50/50 transition-colors ${branch.archived_at ? 'bg-soot-50/70 opacity-90' : ''}`}>
+                <div className={`flex items-center gap-4 px-6 py-4 hover:bg-white/25 transition-colors ${branch.archived_at ? 'bg-white/20 opacity-90' : ''}`}>
                   {/* Expand Toggle */}
                   <button
                     onClick={() => toggleExpand(branch.id)}
@@ -267,7 +267,7 @@ export default function BranchesSettings() {
                     )}
                     {branch.archived_at ? (
                       <>
-                        <button onClick={() => handleRestore(branch)} className="p-1.5 text-soot-400 hover:text-emerald-600 hover:bg-emerald-50 rounded transition-colors" title="Restore">
+                        <button onClick={() => handleRestore(branch)} className="p-1.5 text-soot-400 hover:text-brand-600 hover:bg-brand-50 rounded transition-colors" title="Restore">
                           <ArchiveRestore className="w-4 h-4" />
                         </button>
                         <button onClick={() => handleDelete(branch)} className="p-1.5 text-soot-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors" title="Delete permanently">
@@ -302,7 +302,7 @@ export default function BranchesSettings() {
                     ) : (
                       <div className="space-y-1.5">
                         {branchUsers.map((u) => (
-                          <div key={u.id} className="flex items-center justify-between bg-white px-4 py-2.5 rounded-lg border border-soot-100">
+                          <div key={u.id} className="flex items-center justify-between glass-card px-4 py-2.5 rounded-lg">
                             <span className="text-sm font-medium text-soot-800">{u.username}</span>
                             {roleBadge(u.role)}
                           </div>
@@ -319,18 +319,18 @@ export default function BranchesSettings() {
 
       {/* Create / Edit Modal */}
       {modalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md animate-scale-in">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-soot-100">
+        <div className="fixed inset-0 z-50 flex items-center justify-center glass-overlay p-4 lg:p-6">
+          <div className="glass-floating w-full max-w-md lg:max-w-lg animate-scale-in max-h-[min(90vh,720px)] overflow-y-auto flex flex-col">
+            <div className="flex items-center justify-between px-5 lg:px-6 py-4 border-b border-soot-100 shrink-0">
               <h3 className="text-lg font-bold text-soot-900">
                 {editingBranch ? 'Edit Branch' : 'New Branch'}
               </h3>
-              <button onClick={closeModal} className="text-soot-400 hover:text-soot-600 p-1 rounded-lg hover:bg-soot-100">
+              <button type="button" onClick={closeModal} className="min-w-[44px] min-h-[44px] flex items-center justify-center text-soot-400 hover:text-soot-600 rounded-lg hover:bg-soot-100" aria-label="Close">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="p-6 space-y-4">
+            <div className="p-5 lg:p-6 space-y-4">
               <div>
                 <label className="block text-sm font-medium text-soot-700 mb-1">Branch Name *</label>
                 <input
@@ -338,7 +338,7 @@ export default function BranchesSettings() {
                   inputMode="text"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  className="w-full px-4 py-2 bg-soot-50 border border-soot-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:outline-none"
+                  className="w-full px-4 py-2 glass-card focus:ring-2 focus:ring-brand-500 focus:outline-none"
                   placeholder="e.g. Downtown Store"
                 />
               </div>
@@ -349,7 +349,7 @@ export default function BranchesSettings() {
                   inputMode="text"
                   value={address}
                   onChange={(e) => setAddress(e.target.value)}
-                  className="w-full px-4 py-2 bg-soot-50 border border-soot-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:outline-none"
+                  className="w-full px-4 py-2 glass-card focus:ring-2 focus:ring-brand-500 focus:outline-none"
                   placeholder="123 Main St, City"
                 />
               </div>
@@ -360,24 +360,26 @@ export default function BranchesSettings() {
                   inputMode="tel"
                   value={phone}
                   onChange={(e) => setPhone(e.target.value)}
-                  className="w-full px-4 py-2 bg-soot-50 border border-soot-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:outline-none"
+                  className="w-full px-4 py-2 glass-card focus:ring-2 focus:ring-brand-500 focus:outline-none"
                   placeholder="+92 300 1234567"
                 />
               </div>
             </div>
 
-            <div className="px-6 py-4 bg-soot-50 border-t border-soot-100 flex justify-end gap-3 rounded-b-2xl">
+            <div className="px-5 lg:px-6 py-4 bg-white/20 border-t border-soot-100 flex flex-col-reverse sm:flex-row justify-end gap-2 sm:gap-3 rounded-b-2xl shrink-0">
               <button
+                type="button"
                 onClick={closeModal}
-                className="px-4 py-2 text-soot-700 font-medium hover:bg-soot-200 rounded-lg transition-colors"
+                className="min-h-[44px] px-5 py-2.5 text-soot-700 font-medium hover:bg-soot-200 rounded-lg transition-colors"
                 disabled={saving}
               >
                 Cancel
               </button>
               <button
+                type="button"
                 onClick={handleSave}
                 disabled={saving || !name.trim()}
-                className="flex items-center gap-2 bg-brand-700 text-white px-6 py-2 rounded-lg font-medium hover:bg-brand-600 disabled:opacity-50 transition-colors"
+                className="flex items-center justify-center gap-2 min-h-[44px] bg-brand-700 text-white px-6 py-2.5 rounded-lg font-medium hover:bg-brand-600 disabled:opacity-50 transition-colors"
               >
                 {saving && <Loader2 className="w-4 h-4 animate-spin" />}
                 {editingBranch ? 'Save Changes' : 'Create Branch'}

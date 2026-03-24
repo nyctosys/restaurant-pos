@@ -41,6 +41,16 @@ class DiscountPayload(BaseModel):
     value: float | int | None = 0
 
 
+class OrderSnapshotPayload(BaseModel):
+    """Dine-in: table_name. Delivery: customer_name, phone, address."""
+
+    model_config = ConfigDict(extra="ignore")
+    table_name: str | None = None
+    customer_name: str | None = None
+    phone: str | None = None
+    address: str | None = None
+
+
 class CheckoutRequest(BaseModel):
     model_config = ConfigDict(extra="ignore")
     items: list[CheckoutItem]
@@ -48,4 +58,5 @@ class CheckoutRequest(BaseModel):
     branch_id: int | None = None
     discount: DiscountPayload | None = None
     order_type: str | None = None
+    order_snapshot: OrderSnapshotPayload | None = None
     notes: str | None = None

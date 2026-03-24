@@ -293,6 +293,13 @@ class PrinterService:
             self.printer.text(f"Store: {branch}\n")
             dt_line = f"{receipt_date}  {receipt_time}"
             self.printer.text(dt_line.rjust(self.RECEIPT_WIDTH) + "\n")
+
+            order_type_raw = (sale_data.get("order_type") or "").strip().lower()
+            if order_type_raw:
+                order_labels = {"dine_in": "Dine-in", "delivery": "Delivery", "takeaway": "Takeaway"}
+                order_label = order_labels.get(order_type_raw, order_type_raw)
+                self.printer.text(f"Order: {order_label}\n")
+
             self.printer.text(thin + "\n")
 
             # ----- Item header -----
@@ -390,6 +397,76 @@ class PrinterService:
                 )
             else:
                 print(f"Receipt printing failed: {e}")
+            return False
+
+    def print_kot(self, kot_data: dict) -> bool:
+        """Kitchen order ticket for KDS / prep station (no prices, no tax)."""
+        if not self.printer:
+            if not self.connect():
+                return False
+        if not self.printer:
+            return False
+        settings = self._get_receipt_settings(kot_data.get("branch_id"))
+        from datetime import datetime
+
+        now = datetime.utcnow()
+        dt_line = f"{now.strftime('%m/%d/%Y')}  {now.strftime('%I:%M %p').lstrip('0')}"
+        sep = "=" * self.RECEIPT_WIDTH
+        thin = "-" * self.RECEIPT_WIDTH
+        sale_id = kot_data.get("sale_id", "")
+        table = (kot_data.get("table_name") or "").strip()
+        branch = (kot_data.get("branch") or "").strip()
+        operator = (kot_data.get("operator") or "").strip()
+        items = kot_data.get("items") or []
+        if not isinstance(items, list):
+            items = []
+
+        try:
+            self._set_font_scale(2)
+            self.printer.set(align="center", bold=True)
+            self.printer.text("KITCHEN ORDER\n")
+            self.printer.set(bold=False)
+            self._set_font_scale(1)
+            self.printer.text(sep + "\n")
+            self.printer.set(align="left")
+            self.printer.text(f"Order #{sale_id}\n")
+            if table:
+                self.printer.text(f"Table: {table}\n")
+            if branch:
+                self.printer.text(f"Store: {branch}\n")
+            if operator:
+                self.printer.text(f"Server: {operator}\n")
+            self.printer.text(dt_line.rjust(self.RECEIPT_WIDTH) + "\n")
+            self.printer.text(thin + "\n")
+            self.printer.set(bold=True)
+            self.printer.text("ITEMS\n")
+            self.printer.set(bold=False)
+            self.printer.text(thin + "\n")
+            for raw in items:
+                if not isinstance(raw, dict):
+                    continue
+                title = (raw.get("title") or "Item").strip()
+                try:
+                    qty = int(raw.get("quantity") or 1)
+                except (TypeError, ValueError):
+                    qty = 1
+                variant = (raw.get("variant") or "").strip()
+                line = f"{qty}x {title}"
+                if variant:
+                    line = f"{line} ({variant})"
+                while len(line) > self.RECEIPT_WIDTH:
+                    self.printer.text(line[: self.RECEIPT_WIDTH] + "\n")
+                    line = line[self.RECEIPT_WIDTH :]
+                self.printer.text(line + "\n")
+            self.printer.text(thin + "\n")
+            self.printer.set(align="center")
+            self.printer.text("— KDS / Prep —\n\n")
+            self.printer.cut()
+            self._disconnect()
+            return True
+        except Exception as e:
+            print(f"KOT printing failed: {e}")
+            self._disconnect()
             return False
 
     def print_barcode_label(self, sku: str, title: str = '') -> bool:

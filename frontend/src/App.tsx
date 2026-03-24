@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import BaseLayout from './layouts/BaseLayout';
 import AuthGuard from './components/AuthGuard';
 import Setup from './pages/Setup';
@@ -8,6 +8,11 @@ import Dashboard from './pages/Dashboard';
 import Inventory from './pages/Inventory';
 import Reports from './pages/Reports';
 import Settings from './pages/Settings';
+import ActiveDineIn from './pages/ActiveDineIn';
+import KitchenKds from './pages/KitchenKds';
+import RequirePosRole from './components/RequirePosRole';
+import RequireKitchenRole from './components/RequireKitchenRole';
+import AppHomeRedirect from './components/AppHomeRedirect';
 import { ScannerProvider } from './hooks/useScanner';
 import ToastContainer from './components/Toast';
 import ConfirmDialogProvider from './components/ConfirmDialog';
@@ -45,12 +50,18 @@ export default function App() {
           
           {/* Protected Routes */}
           <Route element={<AuthGuard />}>
-            <Route path="/" element={<Navigate to="/dashboard" replace />} />
-            <Route path="/dashboard" element={<Dashboard />} />
-            <Route path="/inventory" element={<Inventory />} />
-            <Route path="/reports" element={<Reports />} />
-            <Route path="/settings" element={<Settings />} />
-            <Route path="*" element={<div className="p-4 text-center">Under Construction</div>} />
+            <Route element={<RequireKitchenRole />}>
+              <Route path="/kitchen" element={<KitchenKds />} />
+            </Route>
+            <Route element={<RequirePosRole />}>
+              <Route path="/" element={<AppHomeRedirect />} />
+              <Route path="/dashboard" element={<Dashboard />} />
+              <Route path="/dine-in" element={<ActiveDineIn />} />
+              <Route path="/inventory" element={<Inventory />} />
+              <Route path="/reports" element={<Reports />} />
+              <Route path="/settings" element={<Settings />} />
+              <Route path="*" element={<div className="p-4 text-center">Under Construction</div>} />
+            </Route>
           </Route>
         </Route>
       </Routes>

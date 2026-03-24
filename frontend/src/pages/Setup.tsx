@@ -44,11 +44,11 @@ export default function Setup() {
   };
 
   return (
-    <div className="flex items-center justify-center min-h-screen bg-canvas">
-      <div className="bg-surface rounded-2xl shadow-2xl border border-neutral-100 max-w-md w-full overflow-hidden">
+    <div className="flex items-center justify-center w-full p-4">
+      <div className="glass-floating max-w-md w-full overflow-hidden">
         
         {/* Brand Header */}
-        <div className="bg-brand-900 py-6 flex flex-col items-center justify-center border-b border-white/10">
+        <div className="py-6 flex flex-col items-center justify-center border-b border-white/20 bg-[linear-gradient(160deg,rgba(45,155,130,0.44),rgba(15,61,51,0.55))] dark:border-white/10 dark:bg-[linear-gradient(168deg,rgba(194,74,54,0.42),rgba(26,14,12,0.92))]">
           <img
             src="/app-logo.svg"
             alt=""
@@ -82,7 +82,7 @@ export default function Setup() {
               name="username"
               value={formData.username}
               onChange={handleChange}
-              className="w-full px-4 py-3 border border-neutral-200 rounded-xl focus:ring-2 focus:ring-brand-500 focus:border-brand-500 focus:outline-none transition-shadow"
+              className="w-full px-4 py-3 glass-card focus:ring-2 focus:ring-brand-500 focus:border-brand-500 focus:outline-none transition-shadow"
               placeholder="admin"
             />
           </div>
@@ -96,7 +96,7 @@ export default function Setup() {
               name="password"
               value={formData.password}
               onChange={handleChange}
-              className="w-full px-4 py-3 border border-neutral-200 rounded-xl focus:ring-2 focus:ring-brand-500 focus:border-brand-500 focus:outline-none transition-shadow"
+              className="w-full px-4 py-3 glass-card focus:ring-2 focus:ring-brand-500 focus:border-brand-500 focus:outline-none transition-shadow"
               placeholder="••••••••"
             />
           </div>
@@ -115,7 +115,7 @@ export default function Setup() {
               name="branch_name"
               value={formData.branch_name}
               onChange={handleChange}
-              className="w-full px-4 py-3 border border-neutral-200 rounded-xl focus:ring-2 focus:ring-brand-500 focus:border-brand-500 focus:outline-none transition-shadow"
+              className="w-full px-4 py-3 glass-card focus:ring-2 focus:ring-brand-500 focus:border-brand-500 focus:outline-none transition-shadow"
             />
           </div>
           

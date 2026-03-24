@@ -25,7 +25,7 @@ class User(db.Model):
     username = db.Column(db.String(100), unique=True, nullable=False)
     password_hash = db.Column(db.String(255), nullable=False)
     pin_hash = db.Column(db.String(255))
-    role = db.Column(db.String(50), default='cashier') # owner, cashier
+    role = db.Column(db.String(50), default='cashier')  # owner, manager, cashier, inventory_manager, kitchen, ...
     created_at = db.Column(db.DateTime(timezone=True), default=datetime.utcnow)
     archived_at = db.Column(db.DateTime(timezone=True), nullable=True)
 
@@ -87,7 +87,7 @@ class Sale(db.Model):
     __table_args__ = (
         CheckConstraint('total_amount >= 0', name='ck_sale_total_non_neg'),
         CheckConstraint('tax_amount >= 0', name='ck_sale_tax_non_neg'),
-        CheckConstraint("status IN ('completed', 'refunded')", name='ck_sale_status_valid'),
+        CheckConstraint("status IN ('completed', 'refunded', 'open')", name='ck_sale_status_valid'),
     )
     id = db.Column(db.Integer, primary_key=True)
     branch_id = db.Column(db.Integer, db.ForeignKey('branches.id'), nullable=False)
@@ -101,6 +101,8 @@ class Sale(db.Model):
     discount_id = db.Column(db.String(64), nullable=True)
     discount_snapshot = db.Column(db.JSON, nullable=True)  # { name, type, value } for receipt/audit
     archived_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    order_type = db.Column(db.String(20), nullable=True)  # takeaway, dine_in, delivery
+    order_snapshot = db.Column(db.JSON, nullable=True)  # dine_in: { table_name }; delivery: { customer_name, phone, address }
 
     items = db.relationship('SaleItem', backref='sale', lazy=True, cascade="all, delete-orphan")
 

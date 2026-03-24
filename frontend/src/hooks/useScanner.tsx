@@ -9,6 +9,71 @@ interface ScannerContextType {
 
 const ScannerContext = createContext<ScannerContextType | undefined>(undefined);
 
+type ScanHandler = (barcode: string) => void;
+
+// React 18/19 StrictMode can mount/unmount components immediately in dev.
+// To avoid "closed before connection is established" WebSocket noise, keep a shared socket and
+// only register/unregister scan handlers per provider instance.
+let sharedWs: WebSocket | null = null;
+let sharedWsUrl: string | null = null;
+let sharedHandlers: Set<ScanHandler> = new Set();
+let sharedPageOrigin: string | null = null;
+
+function ensureSharedScannerSocket(wsUrl: string, pageOrigin: string): WebSocket {
+  // If already open/connecting to the same URL, reuse it.
+  if (
+    sharedWs &&
+    sharedWsUrl === wsUrl &&
+    (sharedWs.readyState === WebSocket.OPEN || sharedWs.readyState === WebSocket.CONNECTING)
+  ) {
+    return sharedWs;
+  }
+
+  // Close the old socket if we’re switching URLs.
+  if (sharedWs) {
+    try {
+      sharedWs.close();
+    } catch {
+      // ignore
+    }
+    sharedWs = null;
+  }
+
+  sharedWsUrl = wsUrl;
+  sharedPageOrigin = pageOrigin;
+
+  const ws = new WebSocket(wsUrl);
+  sharedWs = ws;
+
+  ws.onopen = () => {
+    ws.send('ping');
+  };
+
+  ws.onerror = () => {
+  };
+
+  ws.onclose = (evt) => {
+    // If connection drops, allow recreation on next handler registration.
+    if (sharedWs === ws) {
+      sharedWs = null;
+      sharedWsUrl = null;
+    }
+  };
+
+  ws.onmessage = (evt) => {
+    try {
+      const data = JSON.parse(evt.data) as { type?: string; barcode?: string };
+      if (data?.type === 'scan_event' && data.barcode) {
+        for (const handler of sharedHandlers) handler(data.barcode);
+      }
+    } catch {
+      // Ignore malformed realtime messages.
+    }
+  };
+
+  return ws;
+}
+
 export const ScannerProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [lastScannedBarcode, setLastScannedBarcode] = useState<string | null>(null);
   
@@ -72,25 +137,21 @@ export const ScannerProvider: React.FC<{ children: React.ReactNode }> = ({ child
   useEffect(() => {
     const apiBase = API_BASE.startsWith('http') ? API_BASE : window.location.origin + API_BASE;
     const wsBase = apiBase.replace(/^http/i, 'ws');
-    const ws = new WebSocket(`${wsBase}/scanner/ws`);
+    const wsUrl = `${wsBase}/scanner/ws`;
 
-    ws.onopen = () => {
-      ws.send('ping');
+    const handler: ScanHandler = (barcode) => {
+      setLastScannedBarcode(barcode);
+      markActive();
     };
-    ws.onmessage = (evt) => {
-      try {
-        const data = JSON.parse(evt.data) as { type?: string; barcode?: string };
-        if (data?.type === 'scan_event' && data.barcode) {
-          setLastScannedBarcode(data.barcode);
-          markActive();
-        }
-      } catch {
-        // Ignore malformed realtime messages.
-      }
-    };
+
+    // Register the current provider’s handler for scan events.
+    sharedHandlers.add(handler);
+
+    // Create (or reuse) the shared socket; it will call all registered handlers.
+    ensureSharedScannerSocket(wsUrl, window.location.origin);
 
     return () => {
-      ws.close();
+      sharedHandlers.delete(handler);
     };
   }, []);
 

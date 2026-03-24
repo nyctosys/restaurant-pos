@@ -3,6 +3,7 @@ import { Plus, Trash2, Loader2, Moon, Sun, ScrollText, Copy, Trash, Download, Ch
 import UsersSettings from '../components/settings/UsersSettings';
 import ReceiptSettings from '../components/settings/ReceiptSettings';
 import BranchesSettings from '../components/settings/BranchesSettings';
+import TablesSettings from '../components/settings/TablesSettings';
 import appLogger, { type LogEntry } from '../utils/logger';
 import { get, put, post, getUserMessage } from '../api';
 import { showConfirm } from '../components/ConfirmDialog';
@@ -73,7 +74,7 @@ export default function Settings() {
   const user = userStr ? JSON.parse(userStr) : null;
   const isOwner = user?.role === 'owner';
   
-  const tabs = ['General', 'Receipt', 'Hardware', 'Categories', 'Variants', 'Tax & Rates', 'Discounts'];
+  const tabs = ['General', 'Receipt', 'Hardware', 'Categories', 'Variants', 'Tables', 'Tax & Rates', 'Discounts'];
   if (isOwner) {
     tabs.push('Users');
     tabs.push('Branches');
@@ -397,17 +398,18 @@ export default function Settings() {
   };
 
   return (
-    <div className="flex h-full bg-white dark:bg-soot-50 rounded-xl shadow-sm border border-soot-200 overflow-hidden">
+    <div className="flex flex-col lg:flex-row h-full min-h-0 bg-transparent overflow-hidden">
       
-      {/* Sidebar Nav */}
-      <div className="w-64 bg-soot-50 dark:bg-soot-100 border-r border-soot-200 p-4">
-        <h2 className="text-lg font-bold text-soot-900 mb-6 px-4">System Settings</h2>
+      {/* Sidebar Nav — scrollable on short viewports; xl+ wider rail */}
+      <div className="w-full lg:w-56 xl:w-64 shrink-0 glass-card border-b lg:border-b-0 lg:border-r border-white/20 p-3 lg:p-4 overflow-y-auto max-h-[min(50vh,420px)] lg:max-h-none lg:min-h-0 m-0 lg:m-2">
+        <h2 className="text-lg font-bold text-soot-900 mb-4 lg:mb-6 px-2 lg:px-4">System Settings</h2>
         <nav className="space-y-1">
           {tabs.map(tab => (
             <button
               key={tab}
+              type="button"
               onClick={() => setActiveTab(tab.toLowerCase().replace(/ & | /g, ''))}
-              className={`w-full text-left px-4 py-3 rounded-lg font-medium transition-colors ${
+              className={`w-full text-left px-4 py-3 min-h-[44px] rounded-lg font-medium transition-colors ${
                 activeTab === tab.toLowerCase().replace(/ & | /g, '')
                   ? 'bg-soot-200 text-soot-900'
                   : 'text-soot-600 hover:bg-soot-100'
@@ -420,13 +422,13 @@ export default function Settings() {
       </div>
 
       {/* Main Settings Area */}
-      <div className="flex-1 p-8 overflow-auto">
+      <div className="flex-1 min-w-0 min-h-0 page-padding lg:py-6 xl:py-8 overflow-auto">
         
         {activeTab === 'general' && (
-          <div className="max-w-2xl">
+          <div className="max-w-2xl xl:max-w-3xl">
             <h3 className="text-2xl font-bold text-soot-900 mb-6">General Settings</h3>
             <div className="space-y-6">
-              <div className="bg-soot-50 p-6 rounded-xl border border-soot-200 flex items-center justify-between">
+              <div className="glass-card p-6 flex items-center justify-between">
                 <div>
                   <h4 className="font-semibold text-soot-900 mb-1">Global Theme</h4>
                   <p className="text-sm text-soot-500">Toggle between light and dark modes across the app.</p>
@@ -444,7 +446,7 @@ export default function Settings() {
                         setIsDark(true);
                      }
                   }}
-                  className="p-3 bg-white dark:bg-soot-100 border border-soot-200 rounded-lg text-soot-700 hover:bg-soot-100 transition-colors shadow-sm"
+                  className="p-3 glass-card text-soot-700 hover:bg-white/35 transition-colors"
                   title="Toggle Theme"
                 >
                   {isDark ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
@@ -457,12 +459,13 @@ export default function Settings() {
         {activeTab === 'receipt' && <ReceiptSettings />}
         {activeTab === 'users' && <UsersSettings />}
         {activeTab === 'branches' && <BranchesSettings />}
+        {activeTab === 'tables' && <TablesSettings />}
 
         {activeTab === 'hardware' && (
-          <div className="max-w-2xl">
+          <div className="max-w-2xl xl:max-w-3xl">
             <h3 className="text-2xl font-bold text-soot-900 mb-6">Hardware Configuration</h3>
             <div className="space-y-6">
-              <div className="bg-soot-50 p-6 rounded-xl border border-soot-200">
+              <div className="glass-card p-6">
                 <h4 className="font-semibold text-soot-900 mb-4">Thermal Printer (USB ESC/POS)</h4>
                 
                 {hardwareLoading ? (
@@ -482,7 +485,7 @@ export default function Settings() {
                        value={hardware.printer_vendor_id}
                        onChange={e => setHardware({ ...hardware, printer_vendor_id: e.target.value })}
                        placeholder="e.g. 0x04b8" 
-                       className="w-full px-4 py-3 border border-soot-200 rounded-lg font-mono focus:ring-2 focus:ring-brand-500 focus:outline-none" 
+                       className="w-full px-4 py-3 glass-card font-mono focus:ring-2 focus:ring-brand-500 focus:outline-none"
                      />
                      <p className="text-xs text-soot-400 mt-1">Hex value, e.g. 0x04b8 for Epson</p>
                    </div>
@@ -494,7 +497,7 @@ export default function Settings() {
                        value={hardware.printer_product_id}
                        onChange={e => setHardware({ ...hardware, printer_product_id: e.target.value })}
                        placeholder="e.g. 0x0202" 
-                       className="w-full px-4 py-3 border border-soot-200 rounded-lg font-mono focus:ring-2 focus:ring-brand-500 focus:outline-none" 
+                       className="w-full px-4 py-3 glass-card font-mono focus:ring-2 focus:ring-brand-500 focus:outline-none"
                      />
                      <p className="text-xs text-soot-400 mt-1">Hex value, e.g. 0x0202 for TM-T88</p>
                    </div>
@@ -505,7 +508,7 @@ export default function Settings() {
                      <select 
                        value={hardware.paper_width}
                        onChange={e => setHardware({ ...hardware, paper_width: e.target.value })}
-                       className="w-full px-4 py-3 border border-soot-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:outline-none"
+                       className="w-full px-4 py-3 glass-card focus:ring-2 focus:ring-brand-500 focus:outline-none"
                      >
                        <option value="80mm">80mm</option>
                        <option value="58mm">58mm</option>
@@ -545,7 +548,7 @@ export default function Settings() {
               )}
               </div>
 
-              <div className="bg-soot-50 p-6 rounded-xl border border-soot-200 text-sm">
+              <div className="glass-card p-6 text-sm">
                 <h4 className="font-semibold text-soot-900 mb-2 border-b border-soot-200 pb-2">Barcode Scanner Tips</h4>
                 <p className="text-soot-600 mb-3">
                   This POS supports standard USB barcode scanners acting as a <strong>keyboard wedge</strong>. 
@@ -562,7 +565,7 @@ export default function Settings() {
 
         {/* ───────── Sections Management ───────── */}
         {activeTab === 'categories' && (
-          <div className="max-w-2xl">
+          <div className="max-w-2xl xl:max-w-3xl">
             <h3 className="text-2xl font-bold text-soot-900 mb-2">Menu Categories</h3>
             <p className="text-sm text-soot-500 mb-6">Manage the menu categories that appear on the Order and Stock pages.</p>
 
@@ -613,7 +616,7 @@ export default function Settings() {
                 {sections.map(sec => (
                   <div
                     key={sec}
-                    className="flex items-center justify-between px-4 py-3 bg-soot-50 rounded-lg border border-soot-100 group hover:border-soot-200 transition-colors"
+                    className="flex items-center justify-between px-4 py-3 glass-card group hover:border-soot-200 transition-colors"
                   >
                     <span className="font-medium text-soot-800">{sec}</span>
                     <button
@@ -633,7 +636,7 @@ export default function Settings() {
 
         {/* ───────── Variants Management ───────── */}
         {activeTab === 'variants' && (
-          <div className="max-w-2xl">
+          <div className="max-w-2xl xl:max-w-3xl">
             <h3 className="text-2xl font-bold text-soot-900 mb-2">Product Variants (Options)</h3>
             <p className="text-sm text-soot-500 mb-6">Manage variant names (e.g. Small, Medium, Large) used when adding or editing menu items. These options appear in Inventory when assigning variants to products.</p>
 
@@ -681,7 +684,7 @@ export default function Settings() {
                 {variants.map((v, index) => (
                   <div
                     key={`${v}-${index}`}
-                    className="flex items-center justify-between px-4 py-3 bg-soot-50 rounded-lg border border-soot-100 group hover:border-soot-200 transition-colors"
+                    className="flex items-center justify-between px-4 py-3 glass-card group hover:border-soot-200 transition-colors"
                   >
                     {editingVariantIndex === index ? (
                       <div className="flex items-center gap-2 flex-1">
@@ -743,7 +746,7 @@ export default function Settings() {
 
         {/* ───────── Tax & Rates Management ───────── */}
         {activeTab === 'taxrates' && (
-          <div className="max-w-2xl">
+          <div className="max-w-2xl xl:max-w-3xl">
             <h3 className="text-2xl font-bold text-soot-900 mb-2">Tax & Rates</h3>
             <p className="text-sm text-soot-500 mb-6">Enable or disable tax. When on, set a tax rate per payment method; tax is calculated at checkout and printed on receipts.</p>
 
@@ -755,7 +758,7 @@ export default function Settings() {
             ) : (
               <div className="space-y-6">
                 {/* Taxes on/off toggle */}
-                <div className="bg-soot-50 p-6 rounded-xl border border-soot-100">
+                <div className="glass-card p-6">
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="text-sm font-semibold text-soot-800">Taxes enabled</p>
@@ -782,7 +785,7 @@ export default function Settings() {
 
                 {/* Per–payment method rates (only when tax enabled) */}
                 {taxEnabled && (
-                  <div className="bg-soot-50 p-6 rounded-xl border border-soot-100 space-y-4">
+                  <div className="glass-card p-6 space-y-4">
                     <label className="block text-sm font-semibold text-soot-800">Tax rate by payment method (%)</label>
                     <p className="text-xs text-soot-500 -mt-2">Each payment method can have a different tax percentage.</p>
                     {PAYMENT_METHODS.map(method => (
@@ -830,7 +833,7 @@ export default function Settings() {
 
         {/* ───────── Discounts Management ───────── */}
         {activeTab === 'discounts' && (
-          <div className="max-w-2xl">
+          <div className="max-w-2xl xl:max-w-3xl">
             <h3 className="text-2xl font-bold text-soot-900 mb-2">Discounts</h3>
             <p className="text-sm text-soot-500 mb-6">Reusable discount presets for use at checkout.</p>
 
@@ -960,7 +963,7 @@ export default function Settings() {
                             )}
                             {d.archived ? (
                               <>
-                                <button onClick={() => handleRestoreDiscount(d)} disabled={discountsSaving} className="text-soot-400 hover:text-emerald-600 p-1 rounded text-sm" title="Restore"><ArchiveRestore className="w-4 h-4 inline" /></button>
+                                <button onClick={() => handleRestoreDiscount(d)} disabled={discountsSaving} className="text-soot-400 hover:text-brand-600 p-1 rounded text-sm" title="Restore"><ArchiveRestore className="w-4 h-4 inline" /></button>
                                 <button onClick={() => handlePermanentDeleteDiscount(d)} disabled={discountsSaving} className="text-soot-300 hover:text-red-500 p-1 rounded hover:bg-red-50" title="Delete permanently"><Trash2 className="w-4 h-4" /></button>
                               </>
                             ) : (
@@ -983,7 +986,7 @@ export default function Settings() {
         {activeTab === 'applogs' && <AppLogsPanel />}
 
         {/* Fallback for other tabs */}
-        {!['general', 'hardware', 'categories', 'variants', 'taxrates', 'receipt', 'users', 'branches', 'applogs', 'discounts'].includes(activeTab) && (
+        {!['general', 'hardware', 'categories', 'variants', 'tables', 'taxrates', 'receipt', 'users', 'branches', 'applogs', 'discounts'].includes(activeTab) && (
            <div className="text-soot-500">Settings panel for {activeTab} coming soon.</div>
         )}
 
@@ -1051,7 +1054,7 @@ function AppLogsPanel() {
   };
 
   return (
-    <div className="max-w-4xl">
+    <div className="max-w-4xl xl:max-w-5xl">
       <div className="flex items-center justify-between mb-6">
         <div>
           <h3 className="text-2xl font-bold text-soot-900 flex items-center gap-2">
@@ -1095,7 +1098,7 @@ function AppLogsPanel() {
       </div>
 
       {/* Log list */}
-      <div className="bg-soot-50 border border-soot-200 rounded-xl overflow-hidden">
+      <div className="glass-card overflow-hidden">
         {displayed.length === 0 ? (
           <div className="py-16 text-center text-soot-400">
             <ScrollText className="w-10 h-10 mx-auto mb-3 stroke-1" />
@@ -1130,7 +1133,7 @@ function LogRow({ entry, expanded, onToggle, formatTime }: { entry: LogEntry; ex
         )}
       </button>
       {expanded && hasData && (
-        <pre className="mx-4 mb-3 p-3 bg-soot-900 text-green-400 rounded-lg text-[11px] font-mono overflow-auto max-h-40">
+        <pre className="mx-4 mb-3 p-3 bg-soot-900 text-brand-400 rounded-lg text-[11px] font-mono overflow-auto max-h-40">
           {JSON.stringify(entry.data, null, 2)}
         </pre>
       )}

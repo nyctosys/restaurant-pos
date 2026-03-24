@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import JsBarcode from 'jsbarcode';
 import { X, Printer } from 'lucide-react';
 
@@ -83,6 +84,14 @@ export default function BarcodeModal({ sku, title, onClose }: BarcodeModalProps)
   const [printing, setPrinting] = useState(false);
   const [printError, setPrintError] = useState<string | null>(null);
   const isTauri = typeof import.meta.env.TAURI_ENV_PLATFORM !== 'undefined';
+
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, []);
 
   useEffect(() => {
     if (svgRef.current && sku) {
@@ -172,51 +181,64 @@ export default function BarcodeModal({ sku, title, onClose }: BarcodeModalProps)
     runIframePrint();
   };
 
-  return (
+  const modal = (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="barcode-modal-title"
+      className="fixed inset-0 z-[110] flex items-center justify-center glass-overlay p-4 lg:p-6"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
     >
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 overflow-hidden">
+      <div
+        className="glass-floating w-full max-w-md mx-auto overflow-hidden max-h-[min(90vh,640px)] flex flex-col shadow-2xl"
+        onClick={e => e.stopPropagation()}
+      >
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-neutral-200 bg-neutral-50">
-          <h3 className="text-base font-bold text-neutral-900">Barcode Label</h3>
+        <div className="flex items-center justify-between px-5 py-4 border-b border-white/30 bg-white/25 shrink-0">
+          <h3 id="barcode-modal-title" className="text-base font-bold text-neutral-900">
+            Barcode Label
+          </h3>
           <button
+            type="button"
             onClick={onClose}
-            className="p-1.5 rounded-lg hover:bg-neutral-200 transition-colors"
+            className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg bg-white/50 text-neutral-700 hover:bg-white/80 border border-neutral-300/80 transition-colors"
+            aria-label="Close"
           >
-            <X className="w-4 h-4 text-neutral-500" />
+            <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* Barcode */}
-        <div className="p-6 flex flex-col items-center gap-3">
-          <p className="text-sm font-semibold text-neutral-700 text-center">{title}</p>
-          <div className="border border-neutral-200 rounded-xl p-3 bg-white shadow-inner">
-            <svg ref={svgRef} />
+        {/* Barcode — SKU is rendered by JsBarcode (displayValue); no duplicate line below */}
+        <div className="p-6 flex flex-col items-center gap-4">
+          <p className="text-sm font-semibold text-neutral-800 text-center px-1">{title}</p>
+          <div className="border border-white/40 rounded-xl p-4 bg-white/50 shadow-inner w-full max-w-sm flex justify-center">
+            <svg ref={svgRef} className="max-w-full h-auto" />
           </div>
-          <p className="text-xs text-neutral-400 font-mono">{sku}</p>
         </div>
 
         {/* Actions */}
-        <div className="px-6 pb-6 flex flex-col gap-3">
+        <div className="px-6 pb-6 flex flex-col gap-3 border-t border-white/20 bg-white/10">
           {printError && (
             <p className="text-sm text-red-600 text-center">{printError}</p>
           )}
           <div className="flex gap-3">
             <button
+              type="button"
               onClick={onClose}
               disabled={printing}
-              className="flex-1 px-4 py-2.5 border border-neutral-200 rounded-lg text-sm font-medium text-neutral-600 hover:bg-neutral-50 transition-colors disabled:opacity-50"
+              className="flex-1 min-h-[44px] px-4 py-2.5 rounded-lg text-sm font-semibold border-2 border-neutral-700/25 text-neutral-800 bg-white/70 hover:bg-white hover:border-neutral-700/40 transition-colors disabled:opacity-50"
             >
               Close
             </button>
             <button
+              type="button"
               onClick={handlePrint}
               disabled={printing}
-              className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-brand-700 text-white rounded-lg text-sm font-medium hover:bg-brand-600 transition-colors disabled:opacity-50"
+              className="flex-1 flex items-center justify-center gap-2 min-h-[44px] px-4 py-2.5 bg-brand-700 text-white rounded-lg text-sm font-semibold hover:bg-brand-600 transition-colors disabled:opacity-50 shadow-sm"
             >
-              <Printer className="w-4 h-4" />
+              <Printer className="w-4 h-4 shrink-0" />
               {printing ? 'Printing…' : 'Print Label'}
             </button>
           </div>
@@ -224,4 +246,6 @@ export default function BarcodeModal({ sku, title, onClose }: BarcodeModalProps)
       </div>
     </div>
   );
+
+  return createPortal(modal, document.body);
 }

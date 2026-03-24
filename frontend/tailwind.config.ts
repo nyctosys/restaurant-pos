@@ -16,7 +16,7 @@ export default {
           100: '#f5f5f5', // Canvas white
           50: '#ffffff',  // Pure white
           // Accent colors based on standard premium luxury vibe
-          accent: '#c8a97e', // Subtle gold/bronze accent
+          accent: '#c49a6c', // Honey / bronze (matches @theme gold)
         }
       },
       fontFamily: {

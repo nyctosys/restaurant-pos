@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, time
 from app.models import db, Sale, SaleItem, Inventory, InventoryTransaction, Product, Setting
 from app.utils.auth_decorators import token_required, owner_required
 from app.errors import error_response
+from app.order_metadata import normalize_order_type_and_snapshot
 
 sales_bp = Blueprint('sales', __name__)
 
@@ -14,8 +15,7 @@ def checkout(current_user):
     if not data or 'items' not in data or 'payment_method' not in data:
         return error_response("Bad Request", "Missing necessary checkout data", 400)
 
-    # Optional restaurant metadata (order_type, notes) accepted and ignored if present; no breaking change to payload
-    _ = data.get('order_type'), data.get('notes')
+    _ = data.get('notes')
 
     items = data['items']
     if not items:
@@ -46,6 +46,10 @@ def checkout(current_user):
     if not branch_id:
         return error_response("Bad Request", "Branch ID must be provided or linked to the user", 400)
 
+    order_type_norm, order_snapshot_norm, order_err = normalize_order_type_and_snapshot(data)
+    if order_err:
+        return error_response("Bad Request", order_err, 400)
+
     total_amount = 0.0
     
     # Fetch tax settings: when tax_enabled is off, no tax; otherwise use rate for this payment method
@@ -71,7 +75,9 @@ def checkout(current_user):
             user_id=current_user.id,
             total_amount=0,  # temp
             tax_amount=0,    # temp
-            payment_method=data['payment_method']
+            payment_method=data['payment_method'],
+            order_type=order_type_norm,
+            order_snapshot=order_snapshot_norm,
         )
         db.session.add(new_sale)
         db.session.flush()  # Get Sale ID
@@ -187,6 +193,8 @@ def checkout(current_user):
             'branch': branch_name,
             'branch_id': branch_id,
             'items': receipt_items,
+            'order_type': order_type_norm,
+            'order_snapshot': order_snapshot_norm,
         }
         
         # We trigger printing sync for now, in a real app this should be a Celery background task

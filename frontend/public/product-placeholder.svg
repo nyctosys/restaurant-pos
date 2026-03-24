@@ -1,6 +1,21 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" fill="none">
-  <rect width="120" height="120" fill="#e8f5f1"/>
-  <!-- T-shirt shape: shoulders, neck, body -->
-  <path d="M30 38 L30 52 L90 52 L90 38 L78 38 L78 32 C78 26 69 22 60 22 C51 22 42 26 42 32 L42 38 Z" fill="#c4e7df" stroke="#5eb8a4" stroke-width="1.5"/>
-  <path d="M38 54 L38 92 L82 92 L82 54 L60 68 Z" fill="#93d1c2" stroke="#2d9b82" stroke-width="1.2"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" fill="none" aria-hidden="true">
+  <defs>
+    <linearGradient id="ph-bg" x1="0" y1="0" x2="120" y2="120" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#faf6f0"/>
+      <stop offset="1" stop-color="#f0e8dc"/>
+    </linearGradient>
+    <linearGradient id="ph-plate" x1="60" y1="52" x2="60" y2="88" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#f3ebe3"/>
+    </linearGradient>
+  </defs>
+  <rect width="120" height="120" fill="url(#ph-bg)"/>
+  <ellipse cx="60" cy="78" rx="40" ry="9" fill="#c9bdb0" opacity="0.28"/>
+  <ellipse cx="60" cy="70" rx="46" ry="20" fill="url(#ph-plate)" stroke="#d8cbbd" stroke-width="1.25"/>
+  <ellipse cx="60" cy="68" rx="36" ry="14" fill="#fffdfa" stroke="#e8dfd4" stroke-width="1"/>
+  <ellipse cx="60" cy="58" rx="26" ry="15" fill="#e8a87c" stroke="#d4956a" stroke-width="1"/>
+  <ellipse cx="54" cy="50" rx="10" ry="8" fill="#7cb87c"/>
+  <ellipse cx="68" cy="52" rx="8" ry="7" fill="#c4d96b"/>
+  <ellipse cx="60" cy="44" rx="6" ry="5" fill="#f4d58d"/>
+  <path d="M46 30c3-5 8-7 8-12M60 26c0-6 5-9 5-14M74 30c-3-5-8-7-8-12" stroke="#c4bbb0" stroke-width="1.5" stroke-linecap="round" fill="none" opacity="0.9"/>
 </svg>

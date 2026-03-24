@@ -37,7 +37,7 @@ export default function ToastContainer() {
 
   const icon = (type: ToastType) => {
     switch (type) {
-      case 'success': return <CheckCircle className="w-5 h-5 text-emerald-500 shrink-0" />;
+      case 'success': return <CheckCircle className="w-5 h-5 text-brand-500 shrink-0" />;
       case 'error': return <XCircle className="w-5 h-5 text-red-500 shrink-0" />;
       default: return <Info className="w-5 h-5 text-blue-500 shrink-0" />;
     }
@@ -45,7 +45,7 @@ export default function ToastContainer() {
 
   const bg = (type: ToastType) => {
     switch (type) {
-      case 'success': return 'bg-emerald-50 border-emerald-200';
+      case 'success': return 'bg-brand-50 border-brand-200';
       case 'error': return 'bg-red-50 border-red-200';
       default: return 'bg-blue-50 border-blue-200';
     }
