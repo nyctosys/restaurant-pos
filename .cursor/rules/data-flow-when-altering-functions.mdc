@@ -1,0 +1,40 @@
+---
+description: Trace complete data flow when altering a function to avoid breaking callers or callees
+alwaysApply: true
+---
+
+# Data Flow Before Altering Functions
+
+When changing any function (signature, return shape, behavior, or removal), trace the **complete data flow** so other functionality is not broken.
+
+## Before Making Changes
+
+1. **Callers** — Who calls this function? (UI handlers, other modules, API routes, tests.)
+2. **Callees** — What does it call? (APIs, services, DB, shared utils.) Changing those contracts affects this function.
+3. **Boundaries** — If it’s an API handler: request/response shape and status codes. If it’s a hook or component: props and return value.
+4. **Shared types** — Any shared DTOs, enums, or config that callers or callees depend on.
+
+## How to Trace
+
+- Search for the function name and any exported alias.
+- For API routes: check frontend `get/post/put/patch/del` calls to that path; check OpenAPI/specs if present.
+- For backend: follow decorators (e.g. `@token_required`), then call sites in other routes or services.
+- Use project tooling (e.g. Axon `context`/`impact`) when available to see call graphs.
+
+## Good Practice
+
+```text
+Before changing checkout():
+  → Find callers: Dashboard handleCheckout → post('/sales/checkout', body)
+  → Find callees: error_response, Setting.query, Sale/SaleItem/Inventory, PrinterService
+  → If response shape or status changes, update frontend and any tests.
+```
+
+## Avoid
+
+- Changing a function’s return type or response shape without updating all callers.
+- Removing or renaming parameters that callers pass.
+- Changing error handling (e.g. throwing vs returning) without checking callers’ expectations.
+- Altering a shared type or API contract in one place only.
+
+When in doubt, list callers and callees (or document “no callers”) before applying the change.
