@@ -515,7 +515,10 @@ def list_kitchen_orders(
         query = db.session.query(Sale).filter(Sale.kitchen_status.in_(statuses))
 
         if current_user.role != "owner":
-            query = query.filter(Sale.branch_id == current_user.branch_id)
+            if current_user.branch_id:
+                query = query.filter(Sale.branch_id == current_user.branch_id)
+            elif branch_id is not None:
+                query = query.filter(Sale.branch_id == int(branch_id))
         elif branch_id is not None:
             query = query.filter(Sale.branch_id == int(branch_id))
         elif current_user.branch_id:
@@ -777,10 +780,11 @@ def update_open_sale_items(sale_id: int, payload: dict[str, Any] | None = None, 
             product = Product.query.get(product_id)
             title = product.title + (f" ({variant})" if variant else "") if product else f"Item {product_id}"
             
-            if delta > 0:
-                events.append({"type": "add", "description": f"Add {delta}x {title}", "timestamp": now_iso, "product_title": title})
-            elif delta < 0:
-                events.append({"type": "remove", "description": f"Remove {abs(delta)}x {title}", "timestamp": now_iso, "product_title": title})
+            if kitchen_status == "preparing":
+                if delta > 0:
+                    events.append({"type": "add", "description": f"Add {delta}x {title}", "timestamp": now_iso, "product_title": title})
+                elif delta < 0:
+                    events.append({"type": "remove", "description": f"Remove {abs(delta)}x {title}", "timestamp": now_iso, "product_title": title})
                 
         # Apply Inventory Transactions and update SaleItems
         for key, delta in diffs.items():
@@ -830,6 +834,7 @@ def update_open_sale_items(sale_id: int, payload: dict[str, Any] | None = None, 
                             subtotal=unit_price * delta,
                         )
                     )
+                    sale.kitchen_status = "placed"  # Reset status so the new items route through kitchen again
             else:
                 # Modifying existing rows or adding new ones
                 existing_rows = [i for i in sale.items if (i.product_id, i.variant_sku_suffix or "") == key]
@@ -872,17 +877,61 @@ def update_open_sale_items(sale_id: int, payload: dict[str, Any] | None = None, 
         sale.discount_snapshot = None
         
         # Append events to modifications
-        if not getattr(sale, "modifications", None):
-            sale.modifications = []
-        sale.modifications = list(sale.modifications) + events
-        from sqlalchemy.orm.attributes import flag_modified
-        flag_modified(sale, "modifications")
+        if events:
+            if not getattr(sale, "modifications", None):
+                sale.modifications = []
+            sale.modifications = list(sale.modifications) + events
+            from sqlalchemy.orm.attributes import flag_modified
+            flag_modified(sale, "modifications")
 
         db.session.commit()
         return {"message": "Order updated with modifications", "sale_id": sale_id, "total_amount": float(total_amount), "events": events}
     except Exception as exc:
         db.session.rollback()
         return error_response("Bad Request", f"Update failed: {str(exc)}", 400)
+
+
+@orders_router.post("/{sale_id}/modifications")
+def add_manual_modification(sale_id: int, payload: dict[str, Any] | None = None, current_user: User = Depends(get_current_user)):
+    """Add a free-text modification to an order without changing cart items."""
+    sale = Sale.query.get(sale_id)
+    if not sale:
+        raise HTTPException(status_code=404, detail="Not Found")
+    if current_user.role != "owner" and sale.branch_id != current_user.branch_id:
+        return error_response("Forbidden", "Unauthorized", 403)
+    if getattr(sale, "status", "") != "open":
+        return error_response("Bad Request", "Order must be open", 400)
+        
+    data = payload or {}
+    mod_type = data.get("type", "update")
+    description = data.get("description", "").strip()
+    
+    if not description:
+        return error_response("Bad Request", "Description is required", 400)
+        
+    now_iso = datetime.utcnow().isoformat()
+    event = {
+        "type": mod_type,
+        "description": description,
+        "timestamp": now_iso,
+        "product_title": "Manual Note"
+    }
+    
+    if not getattr(sale, "modifications", None):
+        sale.modifications = []
+    sale.modifications = list(sale.modifications) + [event]
+    
+    # If the order was already served/ready, we must put it back into the kitchen queue
+    # so the chefs see the new modification note.
+    kitchen_status = getattr(sale, "kitchen_status", "none")
+    if kitchen_status in ("ready", "served"):
+        sale.kitchen_status = "placed"
+        
+    from sqlalchemy.orm.attributes import flag_modified
+    flag_modified(sale, "modifications")
+    
+    db.session.commit()
+    return {"message": "Modification added to order", "events": sale.modifications}
 
 
 @orders_router.post("/{sale_id}/finalize")

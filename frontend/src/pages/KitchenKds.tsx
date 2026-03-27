@@ -8,7 +8,7 @@ import { useNavigate } from 'react-router-dom';
 import { get, patch, getUserMessage } from '../api';
 import {
   Loader2, LogOut, ChefHat, Clock, UtensilsCrossed,
-  ShoppingBag, Truck, RotateCcw, Play, CheckCircle2, RefreshCw,
+  ShoppingBag, Truck, RotateCcw, Play, CheckCircle2, RefreshCw, AlertTriangle
 } from 'lucide-react';
 
 /* ── types ── */
@@ -80,9 +80,11 @@ export default function KitchenKds() {
   const load = useCallback(async () => {
     setError(null);
     try {
-      const bid = localStorage.getItem('active_branch_id') ?? user?.branch_id ?? '1';
-      const q = user?.role === 'owner' ? `?branch_id=${bid}&include_completed=1` : `?include_completed=1`;
-      const data = await get<{ orders?: KdsOrder[] }>(`/orders/kitchen${q}`);
+      const activeBranchId = localStorage.getItem('active_branch_id') || user?.branch_id || '1';
+      // The KDS only shows active orders, so include_completed is not needed here.
+      // If a 'completed' tab were added, this logic would need to be updated.
+      const url = `/orders/kitchen?branch_id=${activeBranchId}`;
+      const data = await get<{ orders?: KdsOrder[] }>(url);
       const fetched = data.orders ?? [];
       const newCount = fetched.filter(o => o.kitchen_status === 'placed').length;
       const modsCount = fetched.reduce((sum, o) => sum + (o.modifications?.length || 0), 0);
@@ -234,17 +236,28 @@ export default function KitchenKds() {
                       </div>
                     ))}
                     {order.modifications && order.modifications.length > 0 && (
-                      <div className="kds-modifications">
-                        <div className="kds-mods-title">MODIFICATIONS:</div>
-                        {order.modifications.map((mod, idx) => (
-                          <div key={idx} className={`kds-mod-row kds-mod-${mod.type}`}>
-                            <span className="kds-mod-time">{formatReceivedTime(mod.timestamp)}</span>
-                            <span className="kds-mod-desc">{mod.description}</span>
+                  <div className="mt-3.5 rounded-xl bg-amber-500/15 border border-amber-500/30 backdrop-blur-md p-3 shadow-inner">
+                    <div className="flex items-center gap-1.5 mb-2 font-bold text-amber-900 text-[11px] uppercase tracking-wider">
+                      <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+                      MODIFIED:
+                    </div>
+                    <ul className="space-y-1.5">
+                      {order.modifications.map((mod: any, i: number) => (
+                        <li key={i} className="flex gap-2 items-start text-sm font-semibold text-amber-950 bg-white/40 border border-white/50 rounded-lg p-2.5 shadow-sm">
+                          <span className="shrink-0 text-amber-700 font-black mt-0.5">
+                            {mod.type === 'add' ? '+' : mod.type === 'remove' ? '-' : '•'}
+                          </span>
+                          <div className="flex flex-col leading-tight">
+                            <span>{mod.description}</span>
+                            <span className="text-[10px] text-amber-700/80 font-medium mt-0.5">
+                              {new Date(mod.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </span>
                           </div>
-                        ))}
-                      </div>
-                    )}
+                        </li>
+                      ))}
+                    </ul>
                   </div>
+                )}  </div>
 
                   <div className="kds-card-actions">
                     {order.kitchen_status === 'placed' && (

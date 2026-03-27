@@ -412,6 +412,32 @@ export default function Dashboard() {
     }
   };
 
+  const submitUpdateOrder = async () => {
+    if (!editingOpenSaleId || checkoutSubmitting || cart.length === 0) return;
+    const items = cart.map(item => ({
+      product_id: item.id,
+      variant_sku_suffix: item.variant || '',
+      quantity: item.quantity,
+    }));
+    setCheckoutSubmitting(true);
+    try {
+      await patch(`/orders/${editingOpenSaleId}/items`, { items });
+      setNotification({ type: 'ok', msg: `Order #${editingOpenSaleId} updated — sent to kitchen` });
+      setTimeout(() => setNotification(null), 4000);
+      setCart([]);
+      setEditingOpenSaleId(null);
+      editOrderLoadedRef.current = null;
+      fetchData();
+      setDineInTable(null);
+      setOrderMetaSectionExpanded(false);
+    } catch (e) {
+      setNotification({ type: 'error', msg: getUserMessage(e) });
+      setTimeout(() => setNotification(null), 4000);
+    } finally {
+      setCheckoutSubmitting(false);
+    }
+  };
+
   const handleGenerateKot = () => {
     if (cart.length === 0 || checkoutSubmitting || editingOpenSaleId) return;
     if (tables.length === 0) {
@@ -1126,7 +1152,7 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* Payment / KOT — dine-in (new order): KOT + payment; editing open tab: payment only */}
+          {/* Payment / KOT — dine-in (new order): KOT + payment; editing open tab: update or payment */}
           {orderType === 'dine_in' && !editingOpenSaleId ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <button
@@ -1148,15 +1174,36 @@ export default function Dashboard() {
                 {checkoutSubmitting ? 'Processing…' : 'Proceed payment'}
               </button>
             </div>
+          ) : editingOpenSaleId ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={submitUpdateOrder}
+                disabled={cart.length === 0 || checkoutSubmitting}
+                className="w-full bg-white/90 border-2 border-amber-500 text-amber-800 hover:bg-amber-50 disabled:bg-neutral-200 disabled:text-neutral-400 disabled:border-neutral-200 disabled:cursor-not-allowed py-3.5 rounded-xl font-bold text-sm transition-all active:scale-[0.98] touch-target flex items-center justify-center gap-2"
+              >
+                <ClipboardList className="w-4.5 h-4.5" />
+                {checkoutSubmitting ? 'Working…' : 'Update Order'}
+              </button>
+              <button
+                type="button"
+                onClick={handleCheckout}
+                disabled={cart.length === 0 || checkoutSubmitting}
+                className="w-full bg-brand-700 hover:bg-brand-600 disabled:bg-neutral-200 disabled:text-neutral-400 disabled:cursor-not-allowed text-white py-3.5 rounded-xl font-bold text-sm shadow-sm shadow-brand-700/20 transition-all active:scale-[0.98] touch-target flex items-center justify-center gap-2"
+              >
+                <ShoppingBag className="w-4.5 h-4.5" />
+                {checkoutSubmitting ? 'Processing…' : 'Proceed payment'}
+              </button>
+            </div>
           ) : (
             <button
               type="button"
               onClick={handleCheckout}
               disabled={cart.length === 0 || checkoutSubmitting}
-              className="w-full bg-brand-700 hover:bg-brand-600 disabled:bg-neutral-200 disabled:text-neutral-400 disabled:cursor-not-allowed text-white py-3.5 rounded-xl font-bold text-sm shadow-sm shadow-brand-700/20 transition-all active:scale-[0.98] touch-target flex items-center justify-center gap-2"
+              className="w-full bg-brand-700 hover:bg-brand-600 disabled:bg-neutral-200 disabled:text-neutral-400 disabled:cursor-not-allowed text-white py-3.5 rounded-xl font-bold text-lg shadow-sm shadow-brand-700/20 transition-all active:scale-[0.98] touch-target flex items-center justify-center gap-2"
             >
-              <ShoppingBag className="w-4.5 h-4.5" />
-              {checkoutSubmitting ? 'Processing…' : 'Proceed payment'}
+              <ShoppingBag className="w-5 h-5" />
+              {checkoutSubmitting ? 'Processing…' : 'Proceed to payment'}
             </button>
           )}
         </div>
