@@ -1,0 +1,33 @@
+# Database only. Run backend natively (for USB printer) and frontend via Tauri.
+# Start: docker-compose up -d
+# Windows: use postgres:15 (not Alpine); ensure port 5432 is free; Docker Desktop (WSL2) running.
+services:
+  database:
+    image: postgres:15
+    platform: linux/amd64
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: restaurant_pos
+      POSTGRES_PASSWORD: password123
+      POSTGRES_DB: restaurant_pos
+    ports:
+      - "5432:5432"
+    command: ["postgres", "-c", "hba_file=/etc/pg_hba_custom.conf"]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/pg_hba.conf:/etc/pg_hba_custom.conf:ro
+    networks:
+      - pos-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U restaurant_pos -d restaurant_pos"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  pgdata:
+
+networks:
+  pos-network:
+    driver: bridge

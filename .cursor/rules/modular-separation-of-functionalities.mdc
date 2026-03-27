@@ -1,0 +1,43 @@
+---
+description: Keep functionalities separated using a modular architecture
+alwaysApply: true
+---
+
+# Modular Separation of Functionalities
+
+Keep responsibilities isolated so changes stay local and do not create hidden coupling.
+
+## Module Boundaries
+
+- One module, one primary concern (UI, API client, route handler, service, data model, utility).
+- Avoid mixing transport, business rules, and persistence in the same function.
+- Keep route handlers thin; move reusable business logic to services.
+- Keep UI components focused on rendering and interaction; move side effects to hooks/utilities.
+
+## Dependency Direction
+
+- Prefer: `UI -> API client -> backend route -> service -> model`.
+- Do not import UI code into data/business layers.
+- Share contracts via typed DTOs/interfaces instead of ad-hoc object shapes.
+
+## Change Rules
+
+- Add new files/modules instead of growing one large file with unrelated logic.
+- If a function exceeds a single concern, split it into named helper functions.
+- Reuse existing modules before duplicating logic.
+
+## Good Practice
+
+```text
+Checkout feature:
+  Dashboard handles user events only
+  api/client handles HTTP + auth headers
+  routes/sales validates request and delegates
+  printer_service handles printing concerns only
+```
+
+## Avoid
+
+- God files/components with mixed concerns.
+- Circular imports between modules.
+- Copy-pasting logic across pages/routes instead of centralizing it.

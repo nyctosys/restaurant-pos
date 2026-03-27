@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="appLogoTitle">
+  <title id="appLogoTitle">Restaurant POS</title>
+  <!-- Steam -->
+  <g fill="none" stroke="#f5ecd8" stroke-width="14" stroke-linecap="round" opacity="0.95">
+    <path d="M168 196c20-42 10-78-16-108" />
+    <path d="M256 178c24-50 14-94-20-130" />
+    <path d="M344 196c-20-42-10-78 16-108" />
+  </g>
+  <!-- Cloche dome -->
+  <path fill="#c8a97e" d="M256 184c86 0 156 62 164 142H92c8-80 78-142 164-142Z" />
+  <path fill="#ffffff" fill-opacity="0.22" d="M256 200c-68 0-124 42-136 98h272c-12-56-68-98-136-98Z" />
+  <!-- Knob -->
+  <circle cx="256" cy="172" r="22" fill="#c8a97e" />
+  <circle cx="248" cy="166" r="8" fill="#f5ecd8" fill-opacity="0.4" />
+  <!-- Plate -->
+  <ellipse cx="256" cy="352" rx="204" ry="38" fill="#c8a97e" />
+  <ellipse cx="256" cy="344" rx="168" ry="22" fill="#b89460" fill-opacity="0.4" />
+</svg>
