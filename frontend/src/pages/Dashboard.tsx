@@ -14,6 +14,7 @@ type Product = {
   section: string;
   variants: string[];
   image_url?: string;
+  is_deal?: boolean;
 };
 
 type CartItem = {
@@ -264,6 +265,9 @@ export default function Dashboard() {
 
   // Categories come from the sections defined in Settings
   const categories = ['All Items', ...sections];
+  if (products.some(p => p.is_deal) && !categories.includes('Deals')) {
+    categories.push('Deals');
+  }
 
   useEffect(() => {
     if (lastScannedBarcode) {
@@ -285,7 +289,7 @@ export default function Dashboard() {
       setProductForVariants(product);
     } else {
       const stock = inventory[product.id.toString()]?.[''] || 0;
-      if (stock <= 0) return; // Prevent adding if out of stock
+      if (!product.is_deal && stock <= 0) return; // Prevent adding if out of stock
       handleAddToCart({
         id: product.id,
         title: product.title,
@@ -684,14 +688,14 @@ export default function Dashboard() {
                   className={`glass-card overflow-hidden transition-all duration-200 group text-left ${
                     layoutView === 'grid' ? 'flex flex-col' : 'flex items-center p-3'
                   } ${
-                    (!product.variants || product.variants.length === 0) && (inventory[product.id.toString()]?.[''] || 0) <= 0
+                    (!product.is_deal && (!product.variants || product.variants.length === 0) && (inventory[product.id.toString()]?.[''] || 0) <= 0)
                       ? 'opacity-50 grayscale cursor-not-allowed border-neutral-200/50'
                       : 'hover:shadow-md hover:border-white/60 active:scale-[0.97]'
                   }`}
                 >
                   {/* Product Image Area — aspect-square so size scales with card width (responsive), consistent across all cards */}
                   <div className={`${layoutView === 'grid' ? 'w-full aspect-square shrink-0' : 'w-16 h-16 shrink-0 rounded-lg'} flex items-center justify-center overflow-hidden transition-colors ${
-                    (!product.variants || product.variants.length === 0) && (inventory[product.id.toString()]?.[''] || 0) <= 0
+                    (!product.is_deal && (!product.variants || product.variants.length === 0) && (inventory[product.id.toString()]?.[''] || 0) <= 0)
                       ? 'bg-neutral-100/50'
                       : 'bg-gradient-to-br from-brand-50/40 to-brand-100/40 group-hover:from-brand-100/50 group-hover:to-brand-200/50'
                   }`}>
@@ -706,9 +710,13 @@ export default function Dashboard() {
                     <p className="text-sm font-medium text-neutral-800 truncate">{product.title}</p>
                     <div className="flex items-center justify-between gap-2 mt-1 min-h-6">
                       <p className="text-base font-bold text-gold-600 whitespace-nowrap flex-shrink-0">{formatCurrency(product.base_price)}</p>
-                      {(!product.variants || product.variants.length === 0) && (inventory[product.id.toString()]?.[''] || 0) <= 0 ? (
+                      {(!product.is_deal && (!product.variants || product.variants.length === 0) && (inventory[product.id.toString()]?.[''] || 0) <= 0) ? (
                         <span className="text-[10px] font-bold text-red-600 bg-red-50 px-1.5 py-0.5 rounded border border-red-100 uppercase flex-shrink-0">
                           Out of Stock
+                        </span>
+                      ) : product.is_deal ? (
+                        <span className="text-[10px] font-semibold text-brand-600 bg-brand-50 px-1.5 py-0.5 rounded border border-brand-100 truncate min-w-0">
+                          Combo Deal
                         </span>
                       ) : product.section ? (
                         <span className="text-[10px] font-semibold text-brand-600 bg-brand-50 px-1.5 py-0.5 rounded border border-brand-100 truncate min-w-0">

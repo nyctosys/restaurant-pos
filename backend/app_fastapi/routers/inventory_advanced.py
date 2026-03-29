@@ -171,6 +171,18 @@ def receive_purchase_order(po_id: int, payload: PurchaseOrderReceive, current_us
     db.session.commit()
     return {"message": "PO fully received, stock and costs updated"}
 
+@inventory_advanced_router.post("/purchase-orders/{po_id}/cancel")
+def cancel_purchase_order(po_id: int, current_user: User = Depends(get_current_user)):
+    po = PurchaseOrder.query.get(po_id)
+    if not po:
+        return JSONResponse(status_code=404, content={"message": "PO not found"})
+    if po.status == "received":
+        return JSONResponse(status_code=400, content={"message": "Cannot cancel a PO that has already been received. You must manually reverse the stock instead."})
+    
+    po.status = "cancelled"
+    db.session.commit()
+    return {"message": "PO cancelled successfully"}
+
 # --- Stock Movements (Manual adjustments) ---
 
 @inventory_advanced_router.post("/movements")

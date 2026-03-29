@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, X, Loader2, ArrowRightCircle, CheckCircle2, ChevronDown, PackageCheck } from 'lucide-react';
+import { Plus, X, Loader2, ArrowRightCircle, CheckCircle2, ChevronDown, PackageCheck, Ban } from 'lucide-react';
 import { get, post, getUserMessage } from '../../api';
 import { showToast } from '../Toast';
 import { showConfirm } from '../ConfirmDialog';
@@ -146,11 +146,30 @@ export default function PurchaseOrdersTab() {
     }
   };
 
+  const handleCancel = async (po: PurchaseOrder) => {
+    const confirmed = await showConfirm({
+      title: 'Cancel Purchase Order',
+      message: `Are you sure you want to cancel ${po.po_number}? This action cannot be undone.`,
+      confirmLabel: 'Yes, cancel PO',
+      variant: 'danger'
+    });
+    if (!confirmed) return;
+
+    try {
+      await post(`/inventory-advanced/purchase-orders/${po.id}/cancel`, {});
+      showToast('PO cancelled', 'success');
+      fetchData();
+    } catch (err) {
+      showToast(getUserMessage(err), 'error');
+    }
+  };
+
   const getStatusColor = (status: string) => {
     switch(status) {
       case 'received': return 'bg-emerald-100 text-emerald-800 border-emerald-200';
       case 'draft': return 'bg-neutral-100 text-neutral-700 border-neutral-200';
       case 'sent': return 'bg-blue-100 text-blue-800 border-blue-200';
+      case 'cancelled': return 'bg-red-100 text-red-800 border-red-200';
       default: return 'bg-soot-100 text-soot-700 border-soot-200';
     }
   };
@@ -208,14 +227,27 @@ export default function PurchaseOrdersTab() {
                       </p>
                     </div>
                     
-                    <div className="pt-3 border-t border-soot-200/50 flex justify-end">
-                      {po.status !== 'received' ? (
-                        <button 
-                          onClick={() => handleReceive(po)}
-                          className="flex items-center gap-1.5 text-sm font-semibold text-brand-700 hover:text-brand-800 transition-colors bg-brand-50 hover:bg-brand-100 px-3 py-1.5 rounded-md"
-                        >
-                          <ArrowRightCircle className="w-4 h-4" /> Receive Stock
-                        </button>
+                    <div className="pt-3 border-t border-soot-200/50 flex justify-end gap-2">
+                      {po.status === 'cancelled' ? (
+                        <span className="flex items-center gap-1.5 text-sm font-medium text-red-600 px-3 py-1.5 rounded-md bg-red-50 border border-red-100/50">
+                          <Ban className="w-4 h-4" /> Cancelled
+                        </span>
+                      ) : po.status !== 'received' ? (
+                        <>
+                          <button 
+                            onClick={() => handleCancel(po)}
+                            className="flex items-center gap-1.5 text-sm font-semibold text-red-600 hover:text-red-700 transition-colors hover:bg-red-50 px-2 py-1.5 rounded-md"
+                            title="Cancel Order"
+                          >
+                            <Ban className="w-4 h-4" /> Cancel
+                          </button>
+                          <button 
+                            onClick={() => handleReceive(po)}
+                            className="flex items-center gap-1.5 text-sm font-semibold text-brand-700 hover:text-brand-800 transition-colors bg-brand-50 hover:bg-brand-100 px-3 py-1.5 rounded-md"
+                          >
+                            <ArrowRightCircle className="w-4 h-4" /> Receive Stock
+                          </button>
+                        </>
                       ) : (
                         <span className="flex items-center gap-1.5 text-sm font-medium text-emerald-600 px-3 py-1.5 rounded-md bg-emerald-50 border border-emerald-100/50">
                           <CheckCircle2 className="w-4 h-4" /> Stock Updated

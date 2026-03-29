@@ -49,10 +49,22 @@ class Product(db.Model):
     image_url = db.Column(db.Text, nullable=True, default='')  # URL or data URL for product image (base64 can be large)
     created_at = db.Column(db.DateTime(timezone=True), default=datetime.utcnow)
     archived_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    is_deal = db.Column(db.Boolean, default=False)
 
     inventory = db.relationship('Inventory', backref='product', lazy=True)
     sale_items = db.relationship('SaleItem', backref='product', lazy=True)
     recipe_items = db.relationship('RecipeItem', back_populates='product', cascade="all, delete-orphan")
+    combo_items = db.relationship('ComboItem', back_populates='combo', foreign_keys='ComboItem.combo_id', cascade="all, delete-orphan")
+
+class ComboItem(db.Model):
+    __tablename__ = 'combo_items'
+    id = db.Column(db.Integer, primary_key=True)
+    combo_id = db.Column(db.Integer, db.ForeignKey('products.id'), nullable=False)
+    product_id = db.Column(db.Integer, db.ForeignKey('products.id'), nullable=False)
+    quantity = db.Column(db.Integer, nullable=False, default=1)
+
+    combo = db.relationship('Product', foreign_keys=[combo_id], back_populates='combo_items')
+    child_product = db.relationship('Product', foreign_keys=[product_id])
 
 class Inventory(db.Model):
     __tablename__ = 'inventory'
