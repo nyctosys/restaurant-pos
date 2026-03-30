@@ -122,3 +122,28 @@ class SaleItem(db.Model):
     quantity = db.Column(db.Integer, nullable=False)
     unit_price = db.Column(db.Numeric(12, 2), nullable=False)
     subtotal = db.Column(db.Numeric(12, 2), nullable=False)
+
+    modifiers = db.relationship('OrderItemModifier', backref='sale_item', lazy=True, cascade="all, delete-orphan")
+
+
+class Modifier(db.Model):
+    __tablename__ = 'modifiers'
+    __table_args__ = (CheckConstraint('price >= 0', name='ck_modifier_price_non_neg'),)
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False, unique=True)
+    price = db.Column(db.Numeric(12, 2), nullable=True)
+    created_at = db.Column(db.DateTime(timezone=True), default=datetime.utcnow)
+    archived_at = db.Column(db.DateTime(timezone=True), nullable=True)
+
+
+class OrderItemModifier(db.Model):
+    __tablename__ = 'order_item_modifiers'
+    id = db.Column(db.Integer, primary_key=True)
+    order_item_id = db.Column(db.Integer, db.ForeignKey('sale_items.id', ondelete='CASCADE'), nullable=False)
+    modifier_id = db.Column(db.Integer, db.ForeignKey('modifiers.id', ondelete='CASCADE'), nullable=False)
+
+    __table_args__ = (
+        db.UniqueConstraint('order_item_id', 'modifier_id', name='_order_item_modifier_uc'),
+    )
+
+    modifier = db.relationship('Modifier', lazy=True)

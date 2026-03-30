@@ -4,6 +4,7 @@ import UsersSettings from '../components/settings/UsersSettings';
 import ReceiptSettings from '../components/settings/ReceiptSettings';
 import BranchesSettings from '../components/settings/BranchesSettings';
 import TablesSettings from '../components/settings/TablesSettings';
+import ModifiersSettings from '../components/settings/ModifiersSettings';
 import appLogger, { type LogEntry } from '../utils/logger';
 import { get, put, post, getUserMessage } from '../api';
 import { showConfirm } from '../components/ConfirmDialog';
@@ -74,7 +75,7 @@ export default function Settings() {
   const user = userStr ? JSON.parse(userStr) : null;
   const isOwner = user?.role === 'owner';
   
-  const tabs = ['General', 'Receipt', 'Hardware', 'Categories', 'Variants', 'Tables', 'Tax & Rates', 'Discounts'];
+  const tabs = ['General', 'Receipt', 'Hardware', 'Categories', 'Variants', 'Tables', 'Modifiers', 'Tax & Rates', 'Discounts'];
   if (isOwner) {
     tabs.push('Users');
     tabs.push('Branches');
@@ -460,6 +461,7 @@ export default function Settings() {
         {activeTab === 'users' && <UsersSettings />}
         {activeTab === 'branches' && <BranchesSettings />}
         {activeTab === 'tables' && <TablesSettings />}
+        {activeTab === 'modifiers' && <ModifiersSettings />}
 
         {activeTab === 'hardware' && (
           <div className="max-w-2xl xl:max-w-3xl">
@@ -986,7 +988,7 @@ export default function Settings() {
         {activeTab === 'applogs' && <AppLogsPanel />}
 
         {/* Fallback for other tabs */}
-        {!['general', 'hardware', 'categories', 'variants', 'tables', 'taxrates', 'receipt', 'users', 'branches', 'applogs', 'discounts'].includes(activeTab) && (
+        {!['general', 'hardware', 'categories', 'variants', 'tables', 'modifiers', 'taxrates', 'receipt', 'users', 'branches', 'applogs', 'discounts'].includes(activeTab) && (
            <div className="text-soot-500">Settings panel for {activeTab} coming soon.</div>
         )}
 

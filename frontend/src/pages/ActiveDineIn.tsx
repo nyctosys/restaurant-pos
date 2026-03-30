@@ -4,6 +4,7 @@ import { Loader2, RefreshCw, UtensilsCrossed, Pencil, CreditCard, Ban } from 'lu
 import { get, post, getUserMessage } from '../api';
 import { formatCurrency } from '../utils/formatCurrency';
 import { showConfirm } from '../components/ConfirmDialog';
+import { getSocket } from '../realtime/socket';
 
 type ActiveSale = {
   id: number;
@@ -25,12 +26,6 @@ export default function ActiveDineIn() {
   const [payModalSale, setPayModalSale] = useState<ActiveSale | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<'Card' | 'Cash' | 'Online Transfer'>('Card');
   const [paySubmitting, setPaySubmitting] = useState(false);
-
-  // Modification modal state
-  const [modifyModalSale, setModifyModalSale] = useState<ActiveSale | null>(null);
-  const [modificationType, setModificationType] = useState<'add'|'remove'|'update'>('add');
-  const [modificationText, setModificationText] = useState('');
-  const [modSubmitting, setModSubmitting] = useState(false);
 
   const userStr = localStorage.getItem('user');
   const user = userStr ? JSON.parse(userStr) : null;
@@ -55,8 +50,16 @@ export default function ActiveDineIn() {
   }, [load]);
 
   useEffect(() => {
-    const id = setInterval(() => void load(), 8000);
-    return () => clearInterval(id);
+    const s = getSocket();
+    const onAny = () => void load();
+    s.on('ORDER_CREATED', onAny);
+    s.on('ORDER_UPDATED', onAny);
+    s.on('ORDER_STATUS_CHANGED', onAny);
+    return () => {
+      s.off('ORDER_CREATED', onAny);
+      s.off('ORDER_UPDATED', onAny);
+      s.off('ORDER_STATUS_CHANGED', onAny);
+    };
   }, [load]);
 
   const tableLabel = (s: ActiveSale) =>
@@ -110,29 +113,6 @@ export default function ActiveDineIn() {
 
   const goModify = (s: ActiveSale) => {
     navigate(`/dashboard?editOrder=${s.id}`);
-  };
-
-  const openModifyModal = (s: ActiveSale) => {
-    setModifyModalSale(s);
-    setModificationType('add');
-    setModificationText('');
-  };
-
-  const submitModification = async () => {
-    if (!modifyModalSale || !modificationText.trim()) return;
-    setModSubmitting(true);
-    try {
-      await post(`/orders/${modifyModalSale.id}/modifications`, {
-        type: modificationType,
-        description: modificationText.trim()
-      });
-      setModifyModalSale(null);
-      setModificationText('');
-    } catch (e) {
-      setError(getUserMessage(e));
-    } finally {
-      setModSubmitting(false);
-    }
   };
 
   return (
@@ -215,7 +195,7 @@ export default function ActiveDineIn() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => openModifyModal(s)}
+                    onClick={() => goModify(s)}
                     className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl glass-card text-sm font-semibold text-brand-900 hover:bg-white/50"
                   >
                     <Pencil className="w-4 h-4" />
@@ -287,71 +267,6 @@ export default function ActiveDineIn() {
         </div>
       )}
 
-      {modifyModalSale && (
-        <div className="fixed inset-0 z-[200] flex items-end sm:items-center justify-center glass-overlay px-4 pb-8 sm:p-6">
-          <div className="glass-floating rounded-t-3xl sm:rounded-2xl w-full max-w-md p-6 space-y-4 shadow-xl">
-            <h2 className="text-xl font-bold text-neutral-900">Custom Modification</h2>
-            <p className="text-sm text-neutral-600">Send a fast free-text request to the kitchen for Table {tableLabel(modifyModalSale)}.</p>
-            
-            <div className="space-y-3">
-              <div>
-                <label className="block text-xs font-semibold text-neutral-500 uppercase mb-1">Modification Type</label>
-                <div className="flex bg-neutral-100/50 rounded-lg p-1">
-                  {(['add', 'remove', 'update'] as const).map(t => (
-                    <button
-                      key={t}
-                      type="button"
-                      onClick={() => setModificationType(t)}
-                      className={`flex-1 py-1.5 text-sm font-semibold rounded-md transition-all ${modificationType === t ? 'bg-white shadow-sm text-brand-700' : 'text-neutral-500 hover:text-neutral-700'}`}
-                    >
-                      {t.charAt(0).toUpperCase() + t.slice(1)}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              
-              <div>
-                <label className="block text-xs font-semibold text-neutral-500 uppercase mb-1">Description</label>
-                <textarea
-                  value={modificationText}
-                  onChange={e => setModificationText(e.target.value)}
-                  placeholder="e.g. Add Mayo Dip, No Onions..."
-                  className="w-full rounded-xl border border-neutral-200 bg-white p-3 text-sm focus:ring-brand-500 focus:border-brand-500 resize-none h-24 shadow-inner"
-                />
-              </div>
-            </div>
-
-            <div className="flex gap-2 pt-2">
-              <button
-                type="button"
-                onClick={() => setModifyModalSale(null)}
-                className="flex-1 py-2.5 rounded-xl border border-neutral-200 font-semibold text-neutral-700 hover:bg-neutral-50"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                disabled={modSubmitting || !modificationText.trim()}
-                onClick={() => void submitModification()}
-                className="flex-1 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold disabled:opacity-50 shadow-md shadow-amber-600/20"
-              >
-                {modSubmitting ? 'Sending…' : 'Send to Kitchen'}
-              </button>
-            </div>
-            
-            <div className="pt-4 border-t border-neutral-200/60 mt-4 text-center">
-              <p className="text-xs text-neutral-500 mb-2">Need to add priced menu items?</p>
-              <button
-                type="button"
-                onClick={() => { setModifyModalSale(null); goModify(modifyModalSale); }}
-                className="w-full py-2.5 rounded-xl glass-card border-brand-200 text-brand-800 text-sm font-bold hover:bg-brand-50"
-              >
-                Edit Cart Items
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

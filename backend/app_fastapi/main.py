@@ -12,11 +12,13 @@ from fastapi.responses import JSONResponse
 
 from app import create_app as create_flask_app
 from app_fastapi.realtime import scanner_hub
+from app_fastapi.socketio_server import asgi_app as socketio_asgi_app
 from app_fastapi.routers import (
     auth_router,
     branches_router,
     health_router,
     menu_router,
+    modifiers_router,
     orders_router,
     printer_router,
     scanner_router,
@@ -42,6 +44,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.mount("/socket.io", socketio_asgi_app)
 
 
 @app.middleware("http")
@@ -110,6 +114,7 @@ app.include_router(auth_router)
 app.include_router(settings_router)
 app.include_router(menu_router)
 app.include_router(stock_router)
+app.include_router(modifiers_router)
 app.include_router(orders_router)
 app.include_router(users_router)
 app.include_router(branches_router)

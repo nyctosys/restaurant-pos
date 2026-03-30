@@ -1,19 +1,15 @@
-/**
- * Kitchen Display System (KDS) — live order queue for all order types.
- * Pure Glassmorphism Aesthetic on a Light, Clean Background.
- * Differentiated per-type color schemes.
- */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { get, patch, getUserMessage } from '../api';
+import { getSocket } from '../realtime/socket';
 import {
   Loader2, LogOut, ChefHat, Clock, UtensilsCrossed,
-  ShoppingBag, Truck, RotateCcw, Play, CheckCircle2, RefreshCw, AlertTriangle
+  ShoppingBag, Truck, Play, CheckCircle2, RefreshCw, AlertTriangle
 } from 'lucide-react';
 
 /* ── types ── */
-type KdsLine = { product_title: string; variant_sku_suffix?: string; quantity: number };
-type KitchenStatus = 'placed' | 'accepted' | 'preparing' | 'ready' | 'served';
+type KdsLine = { product_title: string; variant_sku_suffix?: string; quantity: number; modifiers?: string[] };
+type KitchenStatus = 'placed' | 'preparing' | 'ready';
 type KdsOrder = {
   id: number;
   created_at: string;
@@ -47,14 +43,22 @@ function minutesSince(iso: string, nowMs: number): number {
   return Math.max(0, (nowMs - new Date(iso).getTime()) / 60000);
 }
 
+function getPriorityColor(status: KitchenStatus, createdAtIso: string, nowMs: number): 'white' | 'yellow' | 'red' {
+  if (status !== 'placed') return 'white';
+  const age = minutesSince(createdAtIso, nowMs);
+  if (age >= 15) return 'red';
+  if (age >= 10) return 'yellow';
+  return 'white';
+}
+
 /* ── order type config ── */
-const ORDER_TYPE_CONFIG: Record<string, { label: string; cls: string; accent: string; icon: typeof UtensilsCrossed }> = {
-  dine_in:  { label: 'Dine-In',  cls: 'type-dine-in',  accent: '#a04000', icon: UtensilsCrossed },
-  takeaway: { label: 'Takeaway', cls: 'type-takeaway', accent: '#0d9488', icon: ShoppingBag },
-  delivery: { label: 'Delivery', cls: 'type-delivery', accent: '#7c3aed', icon: Truck },
+const ORDER_TYPE_CONFIG: Record<string, { label: string; pillColor: string; bgClass: string; icon: typeof UtensilsCrossed }> = {
+  dine_in:  { label: 'Dine-In', pillColor: 'bg-amber-100 text-amber-900 border-amber-200', bgClass: 'bg-orange-50/40', icon: UtensilsCrossed },
+  takeaway: { label: 'Takeaway', pillColor: 'bg-teal-100 text-teal-900 border-teal-200', bgClass: 'bg-teal-50/40', icon: ShoppingBag },
+  delivery: { label: 'Delivery', pillColor: 'bg-purple-100 text-purple-900 border-purple-200', bgClass: 'bg-purple-50/40', icon: Truck },
 };
 function getOrderTypeConfig(t?: string | null) {
-  return ORDER_TYPE_CONFIG[t || ''] || { label: t || 'Order', cls: 'type-other', accent: '#666', icon: ShoppingBag };
+  return ORDER_TYPE_CONFIG[t || ''] || { label: t || 'Order', pillColor: 'bg-neutral-100 text-neutral-700 border-neutral-200', bgClass: 'bg-neutral-50/40', icon: ShoppingBag };
 }
 
 export default function KitchenKds() {
@@ -81,8 +85,6 @@ export default function KitchenKds() {
     setError(null);
     try {
       const activeBranchId = localStorage.getItem('active_branch_id') || user?.branch_id || '1';
-      // The KDS only shows active orders, so include_completed is not needed here.
-      // If a 'completed' tab were added, this logic would need to be updated.
       const url = `/orders/kitchen?branch_id=${activeBranchId}`;
       const data = await get<{ orders?: KdsOrder[] }>(url);
       const fetched = data.orders ?? [];
@@ -103,7 +105,18 @@ export default function KitchenKds() {
   }, [user?.branch_id, user?.role]);
 
   useEffect(() => { void load(); }, [load]);
-  useEffect(() => { const id = setInterval(() => void load(), 8000); return () => clearInterval(id); }, [load]);
+  useEffect(() => {
+    const s = getSocket();
+    const onAny = () => void load();
+    s.on('ORDER_CREATED', onAny);
+    s.on('ORDER_UPDATED', onAny);
+    s.on('ORDER_STATUS_CHANGED', onAny);
+    return () => {
+      s.off('ORDER_CREATED', onAny);
+      s.off('ORDER_UPDATED', onAny);
+      s.off('ORDER_STATUS_CHANGED', onAny);
+    };
+  }, [load]);
 
   const updateStatus = useCallback(async (saleId: number, newStatus: KitchenStatus) => {
     setBusyIds(s => new Set(s).add(saleId));
@@ -118,78 +131,93 @@ export default function KitchenKds() {
   }, [load]);
 
   const filtered = orders.filter(o => {
-    if (activeTab === 'placed') return o.kitchen_status === 'placed' || o.kitchen_status === 'accepted';
+    if (activeTab === 'placed') return o.kitchen_status === 'placed';
     if (activeTab === 'preparing') return o.kitchen_status === 'preparing';
     return o.kitchen_status === 'ready';
   });
   
   const tabCounts: Record<FilterTab, number> = {
-    placed: orders.filter(o => o.kitchen_status === 'placed' || o.kitchen_status === 'accepted').length,
+    placed: orders.filter(o => o.kitchen_status === 'placed').length,
     preparing: orders.filter(o => o.kitchen_status === 'preparing').length,
     ready: orders.filter(o => o.kitchen_status === 'ready').length
   };
 
   return (
-    <div className="kds-root">
-      <header className="kds-header">
-        <div className="kds-header-left">
-          <div className="kds-brand">
-            <ChefHat size={28} />
+    <div className="flex flex-col h-screen min-h-0 bg-neutral-50/50 text-neutral-900 font-sans overflow-hidden">
+      {/* Header */}
+      <header className="flex items-center justify-between px-6 py-4 bg-white/60 backdrop-blur-md border-b border-white/40 shrink-0 shadow-sm z-10">
+        <div className="flex items-center gap-8">
+          <div className="flex items-center gap-3 text-2xl font-black text-neutral-800 tracking-tight">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-600 to-brand-800 flex items-center justify-center text-white shadow-brand-900/20 shadow-lg">
+              <ChefHat className="w-6 h-6" />
+            </div>
             <span>Kitchen Display</span>
           </div>
-          <div className="kds-stats">
-            <div className="kds-stat">
-              <Clock size={16} />
-              <span className="kds-clock">
-                {clock.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}
-              </span>
-            </div>
+          <div className="flex items-center gap-2 px-4 py-1.5 rounded-full bg-neutral-100/80 border border-neutral-200">
+            <Clock className="w-4 h-4 text-neutral-500" />
+            <span className="font-mono font-bold text-neutral-700 text-sm">
+              {clock.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}
+            </span>
           </div>
         </div>
-        <div className="kds-header-right">
-          <button className="kds-btn-icon" onClick={() => void load()} title="Refresh">
-            <RefreshCw size={20} />
+        <div className="flex items-center gap-3">
+          <button className="w-11 h-11 flex items-center justify-center rounded-xl bg-white border border-neutral-200 text-neutral-600 hover:text-brand-600 hover:bg-brand-50 hover:border-brand-200 transition-all shadow-sm active:scale-95" onClick={() => void load()} title="Refresh">
+            <RefreshCw className="w-5 h-5" />
           </button>
           <button
-            className="kds-btn-icon"
+            className="w-11 h-11 flex items-center justify-center rounded-xl bg-white border border-neutral-200 text-neutral-600 hover:text-red-600 hover:bg-red-50 hover:border-red-200 transition-all shadow-sm active:scale-95"
             onClick={() => { localStorage.removeItem('auth_token'); localStorage.removeItem('user'); navigate('/login', { replace: true }); }}
             title="Log out"
           >
-            <LogOut size={20} />
+            <LogOut className="w-5 h-5" />
           </button>
         </div>
       </header>
 
-      <nav className="kds-tabs">
-        <button className={`kds-tab ${activeTab === 'placed' ? 'kds-tab-active' : ''}`} onClick={() => setActiveTab('placed')}>
-          NEW QUEUE <span className="kds-tab-count">{tabCounts.placed}</span>
-        </button>
-        <button className={`kds-tab ${activeTab === 'preparing' ? 'kds-tab-active' : ''}`} onClick={() => setActiveTab('preparing')}>
-          PREPARING <span className="kds-tab-count">{tabCounts.preparing}</span>
-        </button>
-        <button className={`kds-tab ${activeTab === 'ready' ? 'kds-tab-active' : ''}`} onClick={() => setActiveTab('ready')}>
-          READY <span className="kds-tab-count">{tabCounts.ready}</span>
-        </button>
+      {/* Tabs */}
+      <nav className="flex items-center gap-3 px-6 py-3 bg-white/30 shrink-0 border-b border-white/40 shadow-[0_4px_12px_rgba(0,0,0,0.02)] z-[1]">
+        {(['placed', 'preparing', 'ready'] as const).map(tabKey => {
+          const isActive = activeTab === tabKey;
+          const labels: Record<string, string> = { placed: 'NEW QUEUE', preparing: 'PREPARING', ready: 'READY' };
+          return (
+            <button
+              key={tabKey}
+              onClick={() => setActiveTab(tabKey)}
+              className={`flex items-center gap-2.5 px-6 py-2.5 rounded-xl font-bold text-[13px] transition-all tracking-wide ${
+                isActive
+                  ? 'bg-white border text-brand-800 border-white shadow-sm ring-1 ring-black/5'
+                  : 'bg-transparent text-neutral-500 border border-transparent hover:bg-white/40'
+              }`}
+            >
+              {labels[tabKey]}
+              <span className={`px-2 py-0.5 rounded-md text-[11px] font-black leading-none flex items-center justify-center ${
+                isActive ? 'bg-brand-100/80 text-brand-800' : 'bg-black/5 text-neutral-600'
+              }`}>
+                {tabCounts[tabKey]}
+              </span>
+            </button>
+          );
+        })}
       </nav>
 
-      {error && <div className="kds-error">{error}</div>}
+      {error && <div className="m-6 mb-0 p-4 rounded-xl bg-red-50 border border-red-200 text-red-800 font-semibold shadow-sm">{error}</div>}
 
-      <div className="kds-grid-wrap">
+      {/* Grid view */}
+      <div className="flex-1 overflow-y-auto p-6 min-h-0">
         {loading && orders.length === 0 ? (
-          <div className="kds-empty">
-            <Loader2 className="kds-spin" size={32} />
-            <span>Loading orders...</span>
+          <div className="h-full flex flex-col items-center justify-center text-neutral-400 gap-3">
+            <Loader2 className="w-8 h-8 animate-spin" />
+            <span className="font-semibold text-lg">Loading orders...</span>
           </div>
         ) : filtered.length === 0 ? (
-          <div className="kds-empty">
-            <UtensilsCrossed size={48} style={{opacity: 0.2}} />
-            <p className="kds-empty-title">Queue is empty</p>
+          <div className="h-full flex flex-col items-center justify-center text-neutral-400 opacity-60">
+            <UtensilsCrossed className="w-16 h-16 mb-4" />
+            <p className="text-xl font-bold">Queue is empty</p>
           </div>
         ) : (
-          <div className="kds-grid">
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(340px,1fr))] gap-6 items-start">
             {filtered.map(order => {
-              const age = minutesSince(order.created_at, nowMs);
-              const urgency = age >= 10 ? 'rush' : age >= 5 ? 'warning' : 'normal';
+              const priority = getPriorityColor(order.kitchen_status, order.created_at, nowMs);
               const otCfg = getOrderTypeConfig(order.order_type);
               const OtIcon = otCfg.icon;
               const lines = order.items ?? [];
@@ -198,91 +226,125 @@ export default function KitchenKds() {
               const tableName = order.table_name || (snap as Record<string, string>).table_name;
               const customerName = (snap as Record<string, string>).customer_name;
 
+              // Compute dynamic card classes
+              // Default state builds upon glassmorphism, priority states use bold solid/translucent aesthetics.
+              let cardBg = 'bg-white/80 border-white/60 shadow-black/5';
+              let timerColor = 'text-neutral-700';
+
+              if (priority === 'yellow') {
+                cardBg = 'bg-amber-100/90 border-amber-300 shadow-amber-900/10 shadow-lg ring-1 ring-amber-400/50';
+                timerColor = 'text-amber-700';
+              } else if (priority === 'red') {
+                cardBg = 'bg-red-100/90 border-red-400 shadow-red-900/15 shadow-xl ring-2 ring-red-500/50';
+                timerColor = 'text-red-700';
+              }
+
               return (
-                <div key={order.id} className={`kds-card ${otCfg.cls} kds-urgency-${urgency}`}>
-                  <div className={`kds-card-stripe kds-stripe-${urgency}`} />
-                  <div className="kds-card-header">
-                    <div className="kds-card-header-main">
-                      <span className="kds-order-id">#{order.id}</span>
-                      <div className="kds-type-pill">
-                        <OtIcon size={12} />
+                <div
+                  key={order.id}
+                  className={`flex flex-col relative rounded-2xl overflow-hidden backdrop-blur-md border transition-all ${cardBg} ${priority === 'white' ? otCfg.bgClass : ''}`}
+                  style={{ animation: '0.3s ease-out 0s 1 normal forwards running kds-pop' }}
+                >
+                  {/* Subtle stripe across top */}
+                  <div className={`absolute top-0 left-0 right-0 h-1.5 z-10 ${priority === 'white' ? 'bg-gradient-to-r from-white to-white/50' : priority === 'yellow' ? 'bg-amber-500' : 'bg-red-600'}`} />
+
+                  {/* Card Header */}
+                  <div className="px-5 pt-6 pb-3 flex justify-between items-start border-b border-black/5">
+                    <div>
+                      <span className="text-3xl font-black text-neutral-900 tracking-tight leading-none block">#{order.id}</span>
+                      <div className={`mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded border font-bold text-[10px] uppercase tracking-wider ${otCfg.pillColor}`}>
+                        <OtIcon className="w-3 h-3" strokeWidth={2.5} />
                         <span>{otCfg.label}</span>
                       </div>
                     </div>
-                    <div className="kds-card-header-timer">
-                      <span className="kds-received-time">{formatReceivedTime(order.created_at)}</span>
-                      <div className={`kds-elapsed-timer theme-urgency-${urgency}`}>
-                        <Clock size={16} />
+                    <div className="text-right flex flex-col items-end">
+                      <span className="text-xs font-bold text-neutral-500 block">
+                        {formatReceivedTime(order.created_at)}
+                      </span>
+                      <div className={`mt-1 flex items-center justify-end gap-1.5 font-mono font-black text-xl tracking-tight ${timerColor}`}>
+                        <Clock className="w-4 h-4" strokeWidth={3} />
                         <span>{formatElapsed(order.created_at, nowMs)}</span>
                       </div>
                     </div>
                   </div>
 
+                  {/* Card Meta (Table / Customer) */}
                   {(tableName || customerName) && (
-                    <div className="kds-card-meta">
-                      {tableName && <div className="kds-meta-row"><span>TABLE:</span> <strong>{tableName}</strong></div>}
-                      {customerName && <div className="kds-meta-row"><span>CUST:</span> <strong>{customerName}</strong></div>}
+                    <div className="px-5 py-2.5 bg-black/5 flex flex-col gap-0.5 border-b border-black/5">
+                      {tableName && <div className="text-[13px] text-neutral-600 flex gap-2"><span className="font-bold uppercase text-[11px] opacity-70 mt-0.5">Table</span> <strong className="text-neutral-900 font-black">{tableName}</strong></div>}
+                      {customerName && <div className="text-[13px] text-neutral-600 flex gap-2"><span className="font-bold uppercase text-[11px] opacity-70 mt-0.5">Cust</span> <strong className="text-neutral-900 font-black">{customerName}</strong></div>}
                     </div>
                   )}
 
-                  <div className="kds-items-list">
+                  {/* Items list */}
+                  <div className="flex-1 px-5 py-4 flex flex-col gap-3">
                     {lines.map((line, idx) => (
-                      <div key={idx} className="kds-item-row">
-                        <span className="kds-item-qty">{line.quantity}×</span>
-                        <div className="kds-item-details">
-                          <span className="kds-item-name">{line.product_title}</span>
-                          {line.variant_sku_suffix && <span className="kds-item-variant">{line.variant_sku_suffix}</span>}
+                      <div key={idx} className="flex gap-3 items-start">
+                        <div className="min-w-[36px] h-9 rounded-lg shrink-0 flex items-center justify-center bg-white border border-black/5 font-black text-[15px] text-neutral-900 shadow-sm">
+                          {line.quantity}×
+                        </div>
+                        <div className="flex-1 min-w-0 pt-0.5">
+                          <span className="block text-[15px] font-bold text-neutral-900 leading-tight">{line.product_title}</span>
+                          {line.variant_sku_suffix && <span className="block text-[13px] font-semibold text-neutral-500 mt-0.5">{line.variant_sku_suffix}</span>}
+                          {line.modifiers && line.modifiers.length > 0 && (
+                            <div className="flex flex-wrap gap-1.5 mt-2">
+                              {line.modifiers.map((m, mi) => (
+                                <span key={mi} className="text-[11px] font-bold px-2 py-0.5 rounded flex items-center bg-white/60 border border-white text-neutral-700 shadow-sm">
+                                  {m}
+                                </span>
+                              ))}
+                            </div>
+                          )}
                         </div>
                       </div>
                     ))}
-                    {order.modifications && order.modifications.length > 0 && (
-                  <div className="mt-3.5 rounded-xl bg-amber-500/15 border border-amber-500/30 backdrop-blur-md p-3 shadow-inner">
-                    <div className="flex items-center gap-1.5 mb-2 font-bold text-amber-900 text-[11px] uppercase tracking-wider">
-                      <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
-                      MODIFIED:
-                    </div>
-                    <ul className="space-y-1.5">
-                      {order.modifications.map((mod: any, i: number) => (
-                        <li key={i} className="flex gap-2 items-start text-sm font-semibold text-amber-950 bg-white/40 border border-white/50 rounded-lg p-2.5 shadow-sm">
-                          <span className="shrink-0 text-amber-700 font-black mt-0.5">
-                            {mod.type === 'add' ? '+' : mod.type === 'remove' ? '-' : '•'}
-                          </span>
-                          <div className="flex flex-col leading-tight">
-                            <span>{mod.description}</span>
-                            <span className="text-[10px] text-amber-700/80 font-medium mt-0.5">
-                              {new Date(mod.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                            </span>
-                          </div>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}  </div>
 
-                  <div className="kds-card-actions">
-                    {order.kitchen_status === 'placed' && (
-                      <button className="btn-action btn-start" disabled={isBusy} onClick={() => updateStatus(order.id, 'accepted')}>
-                        <CheckCircle2 size={18} /> {isBusy ? 'Wait...' : 'ACCEPT'}
-                      </button>
+                    {/* Modifications Alert */}
+                    {order.modifications && order.modifications.length > 0 && (
+                      <div className="mt-3 rounded-xl bg-amber-500/15 border border-amber-500/30 backdrop-blur-md p-3 shadow-inner">
+                        <div className="flex items-center gap-1.5 mb-2 font-bold text-amber-900 text-[11px] uppercase tracking-wider">
+                          <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+                          Modifications
+                        </div>
+                        <ul className="space-y-1.5">
+                          {order.modifications.map((mod: any, i: number) => (
+                            <li key={i} className="flex gap-2 items-start text-sm font-semibold text-amber-950 bg-white/40 border border-white/50 rounded-lg p-2.5 shadow-sm">
+                              <span className="shrink-0 text-amber-700 font-black mt-0.5">
+                                {mod.type === 'add' ? '+' : mod.type === 'remove' ? '-' : '•'}
+                              </span>
+                              <div className="flex flex-col leading-tight">
+                                <span>{mod.description}</span>
+                                <span className="text-[10px] text-amber-700/80 font-bold mt-0.5">
+                                  {new Date(mod.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                </span>
+                              </div>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
                     )}
-                    {order.kitchen_status === 'accepted' && (
-                      <button className="btn-action btn-start" disabled={isBusy} onClick={() => updateStatus(order.id, 'preparing')}>
-                        <Play size={18} /> {isBusy ? 'Wait...' : 'START PREPARING'}
+                  </div>
+
+                  {/* Actions */}
+                  <div className="px-5 pb-5 pt-2">
+                    {order.kitchen_status === 'placed' && (
+                      <button
+                        disabled={isBusy}
+                        onClick={() => updateStatus(order.id, 'preparing')}
+                        className="w-full py-3.5 rounded-xl font-black text-sm uppercase tracking-wider flex items-center justify-center gap-2 bg-brand-700 text-white hover:bg-brand-600 transition-all shadow-sm active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        <Play className="w-4 h-4 fill-white" />
+                        {isBusy ? 'Wait...' : 'Start Preparing'}
                       </button>
                     )}
                     {order.kitchen_status === 'preparing' && (
-                      <button className="btn-action btn-ready" disabled={isBusy} onClick={() => updateStatus(order.id, 'ready')}>
-                        <CheckCircle2 size={18} /> {isBusy ? 'Wait...' : 'MARK READY'}
-                      </button>
-                    )}
-                    {order.kitchen_status === 'ready' && (
-                      <button className="btn-action btn-ready" style={{backgroundColor: '#4f46e5'}} disabled={isBusy} onClick={() => updateStatus(order.id, 'served')}>
-                        <CheckCircle2 size={18} /> {isBusy ? 'Wait...' : 'SERVE'}
-                      </button>
-                    )}
-                    {(order.kitchen_status === 'preparing' || order.kitchen_status === 'ready') && (
-                      <button className="btn-action btn-recall" style={{marginTop: 8}} disabled={isBusy} onClick={() => updateStatus(order.id, order.kitchen_status === 'ready' ? 'preparing' : 'accepted')}>
-                        <RotateCcw size={18} /> RECALL
+                      <button
+                        disabled={isBusy}
+                        onClick={() => updateStatus(order.id, 'ready')}
+                        className="w-full py-3.5 rounded-xl font-black text-sm uppercase tracking-wider flex items-center justify-center gap-2 bg-emerald-600 text-white hover:bg-emerald-500 transition-all shadow-sm active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed border border-emerald-500"
+                      >
+                        <CheckCircle2 className="w-4 h-4" />
+                        {isBusy ? 'Wait...' : 'Order Ready'}
                       </button>
                     )}
                   </div>
@@ -294,175 +356,10 @@ export default function KitchenKds() {
       </div>
 
       <style>{`
-        :root {
-          --kds-bg: #f3f4f6;
-          --kds-card-bg: rgba(255, 255, 255, 0.7);
-          --kds-glass-border: rgba(0, 0, 0, 0.08);
-          --kds-text-primary: #111827;
-          --kds-text-secondary: #4b5563;
-          --kds-accent-gold: #b45309;
-          --kds-blur: blur(20px);
-          
-          /* Type specific colors (Light variants) */
-          --color-dine-bg: rgba(254, 243, 199, 0.6);
-          --color-dine-accent: #92400e;
-          --color-takeaway-bg: rgba(204, 251, 241, 0.6);
-          --color-takeaway-accent: #0f766e;
-          --color-delivery-bg: rgba(237, 233, 254, 0.6);
-          --color-delivery-accent: #6d28d9;
+        @keyframes kds-pop {
+          from { transform: scale(0.96); opacity: 0; }
+          to { transform: scale(1); opacity: 1; }
         }
-
-        .kds-root {
-          height: 100vh; display: flex; flex-direction: column;
-          background: linear-gradient(135deg, #f9fafb 0%, #e5e7eb 100%);
-          color: var(--kds-text-primary);
-          font-family: 'Outfit', 'Inter', sans-serif;
-          overflow: hidden;
-        }
-
-        /* Header */
-        .kds-header {
-          display: flex; align-items: center; justify-content: space-between;
-          padding: 16px 32px;
-          background: rgba(255, 255, 255, 0.6);
-          backdrop-filter: var(--kds-blur);
-          border-bottom: 1px solid var(--kds-glass-border);
-          flex-shrink: 0;
-        }
-        .kds-header-left { display: flex; align-items: center; gap: 40px; }
-        .kds-brand {
-          display: flex; align-items: center; gap: 12px;
-          font-size: 20px; font-weight: 800; color: #1f2937;
-        }
-        .kds-stat {
-          display: flex; align-items: center; gap: 8px;
-          font-size: 15px; font-weight: 700; color: var(--kds-text-secondary);
-          background: rgba(0, 0, 0, 0.04); padding: 6px 16px; border-radius: 99px;
-        }
-        .kds-btn-icon {
-          width: 40px; height: 40px; border-radius: 12px; border: 1px solid var(--kds-glass-border);
-          background: rgba(255,255,255,0.8); color: #374151;
-          display: flex; align-items: center; justify-content: center;
-          cursor: pointer; transition: all 0.2s;
-        }
-        .kds-btn-icon:hover { background: #fff; transform: translateY(-1px); }
-
-        /* Navigation */
-        .kds-tabs {
-          display: flex; gap: 12px; padding: 12px 32px;
-          background: rgba(255, 255, 255, 0.3); flex-shrink: 0;
-          border-bottom: 1px solid var(--kds-glass-border);
-        }
-        .kds-tab {
-          padding: 10px 24px; border-radius: 14px; border: 1px solid transparent;
-          background: transparent; color: var(--kds-text-secondary);
-          font-size: 14px; font-weight: 800; cursor: pointer; transition: all 0.2s;
-          display: flex; align-items: center; gap: 10px;
-        }
-        .kds-tab-active {
-          background: white !important; color: #111827 !important;
-          box-shadow: 0 4px 12px rgba(0,0,0,0.05);
-          border-color: var(--kds-glass-border) !important;
-        }
-        .kds-tab-count {
-          background: rgba(0,0,0,0.08); padding: 2px 8px; border-radius: 6px; font-size: 12px;
-        }
-
-        /* Grid */
-        .kds-grid-wrap { flex: 1; overflow-y: auto; padding: 24px 32px; }
-        .kds-grid {
-          display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-          gap: 24px; align-content: start;
-        }
-
-        /* Card System */
-        .kds-card {
-          position: relative; border-radius: 20px; overflow: hidden;
-          background: var(--kds-card-bg); border: 1px solid var(--kds-glass-border);
-          display: flex; flex-direction: column; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-          backdrop-filter: var(--kds-blur);
-          box-shadow: 0 10px 25px rgba(0,0,0,0.03);
-          animation: kds-pop 0.3s ease-out;
-        }
-        @keyframes kds-pop { from { transform: scale(0.98); opacity: 0; } }
-        .kds-card:hover { transform: translateY(-4px); box-shadow: 0 15px 35px rgba(0,0,0,0.06); }
-
-        /* Categorical Differentiation */
-        .type-dine-in { background-color: var(--color-dine-bg); }
-        .type-dine-in .kds-type-pill { background: #fef3c7; color: #92400e; }
-        .type-dine-in .btn-start { background: #d97706; color: #fff; }
-
-        .type-takeaway { background-color: var(--color-takeaway-bg); }
-        .type-takeaway .kds-type-pill { background: #ccfbf1; color: #0f766e; }
-        .type-takeaway .btn-start { background: #0d9488; color: #fff; }
-
-        .type-delivery { background-color: var(--color-delivery-bg); }
-        .type-delivery .kds-type-pill { background: #ede9fe; color: #6d28d9; }
-        .type-delivery .btn-start { background: #7c3aed; color: #fff; }
-
-        /* Card Header */
-        .kds-card-header {
-          padding: 20px; display: flex; justify-content: space-between; align-items: flex-start;
-          border-bottom: 1px solid rgba(0,0,0,0.05);
-        }
-        .kds-order-id { font-size: 28px; font-weight: 900; letter-spacing: -1px; color: #111; }
-        .kds-type-pill {
-          display: inline-flex; align-items: center; gap: 6px;
-          padding: 4px 12px; border-radius: 20px; font-size: 11px; font-weight: 800;
-          text-transform: uppercase; margin-top: 6px;
-        }
-        .kds-received-time { display: block; font-size: 12px; font-weight: 700; color: #6b7280; text-align: right; }
-        .kds-elapsed-timer {
-          display: flex; align-items: center; gap: 6px; justify-content: flex-end;
-          font-size: 18px; font-weight: 800; margin-top: 4px;
-        }
-        .theme-urgency-rush { color: #dc2626; animation: rush-glow 1s infinite alternate; }
-        @keyframes rush-glow { from { opacity: 1; } to { opacity: 0.6; } }
-
-        /* Meta Content */
-        .kds-card-meta { padding: 8px 20px; background: rgba(0,0,0,0.02); display: flex; flex-direction: column; gap: 2px; }
-        .kds-meta-row { font-size: 12px; color: #4b5563; display: flex; gap: 8px; }
-        .kds-meta-row strong { color: #111; }
-
-        /* Items List */
-        .kds-items-list { padding: 16px 20px; flex: 1; display: flex; flex-direction: column; gap: 10px; }
-        .kds-item-row { display: flex; gap: 12px; align-items: flex-start; }
-        .kds-item-qty {
-          min-width: 32px; height: 32px; display: flex; align-items: center; justify-content: center;
-          font-size: 14px; font-weight: 800; border-radius: 8px;
-          background: white; border: 1px solid rgba(0,0,0,0.05);
-        }
-        .kds-item-details { flex: 1; }
-        .kds-item-name { display: block; font-size: 15px; font-weight: 700; color: #1a1a1a; line-height: 1.2; }
-        .kds-item-variant { font-size: 12px; color: #6b7280; }
-
-        /* Actions */
-        .kds-card-actions { padding: 0 20px 20px; }
-        .btn-action {
-          width: 100%; height: 48px; border-radius: 12px; border: none;
-          font-size: 14px; font-weight: 800; cursor: pointer;
-          display: flex; align-items: center; justify-content: center; gap: 10px;
-          transition: all 0.2s; text-transform: uppercase;
-        }
-        .btn-ready { background: #16a34a; color: #fff; }
-        .btn-ready:hover { background: #15803d; }
-        .btn-recall { background: #f3f4f6; color: #4b5563; border: 1px solid #e5e7eb; }
-
-        /* Modifications */
-        .kds-modifications { margin-top: 12px; padding-top: 12px; border-top: 1px dashed rgba(0,0,0,0.1); display: flex; flex-direction: column; gap: 6px; }
-        .kds-mods-title { font-size: 11px; font-weight: 800; color: #6b7280; letter-spacing: 0.5px; }
-        .kds-mod-row { display: flex; gap: 8px; font-size: 13px; font-weight: 600; padding: 6px 10px; border-radius: 6px; }
-        .kds-mod-add { background: rgba(34, 197, 94, 0.15); color: #15803d; }
-        .kds-mod-remove { background: rgba(239, 68, 68, 0.15); color: #b91c1c; text-decoration: line-through; }
-        .kds-mod-update { background: rgba(245, 158, 11, 0.15); color: #b45309; }
-        .kds-mod-time { font-size: 11px; opacity: 0.7; font-weight: 700; }
-
-        .kds-card-stripe { position: absolute; left: 0; top: 0; bottom: 0; width: 6px; }
-        .kds-stripe-warning { background: #f59e0b; }
-        .kds-stripe-rush { background: #dc2626; box-shadow: 0 0 10px rgba(220, 38, 38, 0.4); }
-
-        .kds-spin { animation: spin 1s linear infinite; }
-        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
       `}</style>
     </div>
   );

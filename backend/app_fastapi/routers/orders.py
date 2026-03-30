@@ -3,16 +3,30 @@ from __future__ import annotations
 from datetime import datetime, time, timedelta
 from typing import Any, Optional
 
+import anyio
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from sqlalchemy import func, inspect
 
 from app.errors import error_response
 from app.order_metadata import normalize_order_type_and_snapshot
-from app.models import Branch, Inventory, InventoryTransaction, Product, Sale, SaleItem, Setting, User, db
+from app.models import (
+    Branch,
+    Inventory,
+    InventoryTransaction,
+    Modifier,
+    OrderItemModifier,
+    Product,
+    Sale,
+    SaleItem,
+    Setting,
+    User,
+    db,
+)
 from app.services.printer_service import PrinterService
 from app_fastapi.deps import get_current_user, require_owner
 from app_fastapi.routers.common import yes
+from app_fastapi.socketio_server import RealtimeEvents, emit_event
 
 orders_router = APIRouter(prefix="/api/orders", tags=["orders"])
 
@@ -93,6 +107,20 @@ def checkout(payload: dict[str, Any] | None = None, current_user: User = Depends
             tax_rate = float(rates_by_method[payment_method]) / 100.0
         elif "tax_percentage" in (setting.config or {}):
             tax_rate = float(setting.config["tax_percentage"]) / 100.0
+    normalized_items, verr = _validate_cart_items(items)
+    if verr:
+        return verr
+    assert normalized_items is not None
+
+    all_mod_ids = sorted({mid for it in normalized_items for mid in (it.get("modifier_ids") or [])})
+    mods_by_id: dict[int, Modifier] = {}
+    if all_mod_ids:
+        mods = Modifier.query.filter(Modifier.id.in_(all_mod_ids), Modifier.archived_at == None).all()  # noqa: E711
+        mods_by_id = {m.id: m for m in mods}
+        missing = [mid for mid in all_mod_ids if mid not in mods_by_id]
+        if missing:
+            return error_response("Bad Request", f"Unknown modifier(s): {missing}", 400)
+
     total_amount = 0.0
     try:
         new_sale = Sale(
@@ -108,7 +136,7 @@ def checkout(payload: dict[str, Any] | None = None, current_user: User = Depends
         )
         db.session.add(new_sale)
         db.session.flush()
-        for item in items:
+        for item in normalized_items:
             product = Product.query.get(item["product_id"])
             if product is None:
                 db.session.rollback()
@@ -133,18 +161,21 @@ def checkout(payload: dict[str, Any] | None = None, current_user: User = Depends
                 )
             )
             unit_price = float(product.base_price)
-            subtotal = unit_price * item["quantity"]
+            mods_price_each = sum(float(mods_by_id[mid].price or 0.0) for mid in (item.get("modifier_ids") or []))
+            subtotal = (unit_price + mods_price_each) * item["quantity"]
             total_amount += subtotal
-            db.session.add(
-                SaleItem(
-                    sale_id=new_sale.id,
-                    product_id=product.id,
-                    variant_sku_suffix=item.get("variant_sku_suffix", ""),
-                    quantity=item["quantity"],
-                    unit_price=unit_price,
-                    subtotal=subtotal,
-                )
+            sale_item = SaleItem(
+                sale_id=new_sale.id,
+                product_id=product.id,
+                variant_sku_suffix=item.get("variant_sku_suffix", ""),
+                quantity=item["quantity"],
+                unit_price=unit_price,
+                subtotal=subtotal,
             )
+            db.session.add(sale_item)
+            db.session.flush()
+            for mid in (item.get("modifier_ids") or []):
+                db.session.add(OrderItemModifier(order_item_id=sale_item.id, modifier_id=mid))
         discount_amount = 0.0
         discount_id = None
         discount_snapshot = None
@@ -172,11 +203,15 @@ def checkout(payload: dict[str, Any] | None = None, current_user: User = Depends
         if branch_obj:
             branch_name = branch_obj.name
         receipt_items = []
-        for i in items:
+        for i in normalized_items:
             product = Product.query.get(i.get("product_id"))
+            mod_names = [mods_by_id[mid].name for mid in (i.get("modifier_ids") or [])]
+            title = str(product.title if product else "Item")
+            if mod_names:
+                title = f"{title} ({', '.join(mod_names)})"
             receipt_items.append(
                 {
-                    "title": str(product.title if product else "Item"),
+                    "title": title,
                     "quantity": int(i.get("quantity", 1)),
                     "unit_price": float(product.base_price) if product else 0.0,
                 }
@@ -197,6 +232,11 @@ def checkout(payload: dict[str, Any] | None = None, current_user: User = Depends
                 "order_type": order_type_norm,
                 "order_snapshot": order_snapshot_norm,
             }
+        )
+        anyio.from_thread.run(
+            emit_event,
+            RealtimeEvents.ORDER_CREATED,
+            {"sale_id": new_sale.id, "branch_id": branch_id, "kitchen_status": "placed"},
         )
         return JSONResponse(
             status_code=201,
@@ -349,11 +389,24 @@ def _validate_cart_items(items: list) -> tuple[Optional[list[dict]], Optional[JS
             return None, error_response("Bad Request", f"Item at index {idx} quantity must be a positive integer", 400)
         if qty <= 0:
             return None, error_response("Bad Request", f"Item at index {idx} quantity must be positive", 400)
+
+        raw_mods = item.get("modifier_ids") if isinstance(item, dict) else None
+        if raw_mods is None:
+            raw_mods = item.get("modifiers") if isinstance(item, dict) else None
+        modifier_ids: list[int] = []
+        if raw_mods is not None:
+            if not isinstance(raw_mods, list):
+                return None, error_response("Bad Request", f"Item at index {idx} modifiers must be an array", 400)
+            try:
+                modifier_ids = sorted({int(x) for x in raw_mods if x is not None and str(x).strip() != ""})
+            except Exception:
+                return None, error_response("Bad Request", f"Item at index {idx} modifiers must be integer IDs", 400)
         normalized.append(
             {
                 "product_id": int(item["product_id"]),
                 "variant_sku_suffix": item.get("variant_sku_suffix", "") or "",
                 "quantity": qty,
+                "modifier_ids": modifier_ids,
             }
         )
     return normalized, None
@@ -510,9 +563,8 @@ def list_kitchen_orders(
         if "kitchen_status" not in sales_cols:
             return {"orders": []}
 
+        # Back-compat: older versions used "accepted" between placed→preparing.
         statuses = ["placed", "accepted", "preparing", "ready"]
-        if yes(include_completed):
-            statuses.append("served")
 
         query = db.session.query(Sale).filter(Sale.kitchen_status.in_(statuses))
 
@@ -526,33 +578,41 @@ def list_kitchen_orders(
         elif current_user.branch_id:
             query = query.filter(Sale.branch_id == current_user.branch_id)
 
-        if yes(include_completed):
-            query = query.order_by(
-                db.case((Sale.kitchen_status == "placed", 0), (Sale.kitchen_status == "accepted", 1), (Sale.kitchen_status == "preparing", 2), (Sale.kitchen_status == "ready", 3), else_=4),
-                Sale.created_at.asc(),
-            )
-        else:
-            query = query.order_by(Sale.created_at.asc())
+        query = query.order_by(
+            db.case(
+                (Sale.kitchen_status == "placed", 0),
+                (Sale.kitchen_status == "preparing", 1),
+                (Sale.kitchen_status == "ready", 2),
+                else_=3,
+            ),
+            Sale.created_at.asc(),
+        )
 
         sales = query.all()
         out: list[dict[str, Any]] = []
         for sale in sales:
             snap = getattr(sale, "order_snapshot", None) or {}
             table_name = snap.get("table_name") if isinstance(snap, dict) else None
-            items_list = [
-                {
-                    "product_title": si.product.title if si.product else "Unknown",
-                    "variant_sku_suffix": si.variant_sku_suffix or "",
-                    "quantity": si.quantity,
-                }
-                for si in sale.items
-            ]
+            items_list = []
+            for si in sale.items:
+                mods = [oim.modifier.name for oim in getattr(si, "modifiers", []) if oim.modifier and oim.modifier.archived_at is None]
+                items_list.append(
+                    {
+                        "product_title": si.product.title if si.product else "Unknown",
+                        "variant_sku_suffix": si.variant_sku_suffix or "",
+                        "quantity": si.quantity,
+                        "modifiers": mods,
+                    }
+                )
+            ks = sale.kitchen_status
+            if ks == "accepted":
+                ks = "placed"
             out.append({
                 "id": sale.id,
                 "order_type": getattr(sale, "order_type", None),
                 "order_snapshot": snap,
                 "table_name": table_name,
-                "kitchen_status": sale.kitchen_status,
+                "kitchen_status": ks,
                 "modifications": getattr(sale, "modifications", []) or [],
                 "created_at": sale.created_at.isoformat() if sale.created_at else "",
                 "items": items_list,
@@ -577,11 +637,10 @@ def update_kitchen_status(
     data = payload or {}
     new_status = data.get("kitchen_status")
     valid_transitions = {
-        "placed": ["accepted"],
+        "placed": ["preparing"],
         "accepted": ["preparing"],
         "preparing": ["ready"],
-        "ready": ["served", "preparing"],  # recall
-        "served": ["ready"],               # recall
+        "ready": [],
     }
     current = getattr(sale, "kitchen_status", "none")
     allowed = valid_transitions.get(current, [])
@@ -594,6 +653,11 @@ def update_kitchen_status(
     try:
         sale.kitchen_status = new_status
         db.session.commit()
+        anyio.from_thread.run(
+            emit_event,
+            RealtimeEvents.ORDER_STATUS_CHANGED,
+            {"sale_id": sale.id, "branch_id": sale.branch_id, "kitchen_status": new_status},
+        )
         return {"message": "Kitchen status updated", "sale_id": sale.id, "kitchen_status": new_status}
     except Exception as exc:
         db.session.rollback()
@@ -610,6 +674,15 @@ def dine_in_kot(payload: dict[str, Any] | None = None, current_user: User = Depe
     if verr:
         return verr
     assert items is not None
+
+    all_mod_ids = sorted({mid for it in items for mid in (it.get("modifier_ids") or [])})
+    mods_by_id: dict[int, Modifier] = {}
+    if all_mod_ids:
+        mods = Modifier.query.filter(Modifier.id.in_(all_mod_ids), Modifier.archived_at == None).all()  # noqa: E711
+        mods_by_id = {m.id: m for m in mods}
+        missing = [mid for mid in all_mod_ids if mid not in mods_by_id]
+        if missing:
+            return error_response("Bad Request", f"Unknown modifier(s): {missing}", 400)
 
     bid, berr = _resolve_branch_id(data, current_user)
     if berr:
@@ -664,18 +737,21 @@ def dine_in_kot(payload: dict[str, Any] | None = None, current_user: User = Depe
                 )
             )
             unit_price = float(product.base_price)
-            subtotal = unit_price * item["quantity"]
+            mods_price_each = sum(float(mods_by_id[mid].price or 0.0) for mid in (item.get("modifier_ids") or []))
+            subtotal = (unit_price + mods_price_each) * item["quantity"]
             total_amount += subtotal
-            db.session.add(
-                SaleItem(
-                    sale_id=new_sale.id,
-                    product_id=product.id,
-                    variant_sku_suffix=item["variant_sku_suffix"],
-                    quantity=item["quantity"],
-                    unit_price=unit_price,
-                    subtotal=subtotal,
-                )
+            sale_item = SaleItem(
+                sale_id=new_sale.id,
+                product_id=product.id,
+                variant_sku_suffix=item["variant_sku_suffix"],
+                quantity=item["quantity"],
+                unit_price=unit_price,
+                subtotal=subtotal,
             )
+            db.session.add(sale_item)
+            db.session.flush()
+            for mid in (item.get("modifier_ids") or []):
+                db.session.add(OrderItemModifier(order_item_id=sale_item.id, modifier_id=mid))
         new_sale.discount_amount = 0
         new_sale.discount_id = None
         new_sale.discount_snapshot = None
@@ -692,9 +768,11 @@ def dine_in_kot(payload: dict[str, Any] | None = None, current_user: User = Depe
         for item in items:
             product = Product.query.get(item["product_id"])
             suf = item["variant_sku_suffix"] or ""
+            mod_names = [mods_by_id[mid].name for mid in (item.get("modifier_ids") or [])]
+            mod_suffix = f" + {', '.join(mod_names)}" if mod_names else ""
             kot_items.append(
                 {
-                    "title": str(product.title if product else "Item"),
+                    "title": str((product.title if product else "Item") + mod_suffix),
                     "quantity": int(item["quantity"]),
                     "variant": suf,
                 }
@@ -709,6 +787,11 @@ def dine_in_kot(payload: dict[str, Any] | None = None, current_user: User = Depe
                 "table_name": table_name,
                 "items": kot_items,
             }
+        )
+        anyio.from_thread.run(
+            emit_event,
+            RealtimeEvents.ORDER_CREATED,
+            {"sale_id": new_sale.id, "branch_id": bid, "kitchen_status": "placed", "status": "open", "order_type": "dine_in"},
         )
         return JSONResponse(
             status_code=201,
@@ -743,21 +826,32 @@ def update_open_sale_items(sale_id: int, payload: dict[str, Any] | None = None, 
 
     try:
         old_items = list(sale.items)
-        old_counts = {}
+        old_counts: dict[tuple[int | None, str, tuple[int, ...]], int] = {}
         for old in old_items:
-            key = (old.product_id, old.variant_sku_suffix or "")
+            mods = sorted({oim.modifier_id for oim in getattr(old, "modifiers", [])})
+            key = (old.product_id, old.variant_sku_suffix or "", tuple(mods))
             old_counts[key] = old_counts.get(key, 0) + old.quantity
             
-        new_counts = {}
+        new_counts: dict[tuple[int, str, tuple[int, ...]], int] = {}
         for item in items:
-            key = (item["product_id"], item["variant_sku_suffix"])
+            key = (item["product_id"], item["variant_sku_suffix"], tuple(item.get("modifier_ids") or []))
             new_counts[key] = new_counts.get(key, 0) + item["quantity"]
 
         now_iso = datetime.utcnow().isoformat()
         events = []
         
         # Compute diffs and events
-        diffs = {}  # key -> delta
+        all_mod_ids = sorted({mid for it in items for mid in (it.get("modifier_ids") or [])})
+        mods_by_id: dict[int, Modifier] = {}
+        if all_mod_ids:
+            mods = Modifier.query.filter(Modifier.id.in_(all_mod_ids), Modifier.archived_at == None).all()  # noqa: E711
+            mods_by_id = {m.id: m for m in mods}
+            missing = [mid for mid in all_mod_ids if mid not in mods_by_id]
+            if missing:
+                db.session.rollback()
+                return error_response("Bad Request", f"Unknown modifier(s): {missing}", 400)
+
+        diffs: dict[tuple[Any, ...], int] = {}  # key -> delta
         for key, qty in new_counts.items():
             old_qty = old_counts.get(key, 0)
             if qty != old_qty:
@@ -774,20 +868,23 @@ def update_open_sale_items(sale_id: int, payload: dict[str, Any] | None = None, 
         order_type = getattr(sale, "order_type", "dine_in")
         
         # Block takeaway/delivery if they are already being prepared
-        if order_type != "dine_in" and kitchen_status in ("preparing", "ready", "served"):
+        if order_type != "dine_in" and kitchen_status in ("preparing", "ready"):
             db.session.rollback()
             return error_response("Bad Request", f"Modification blocked: {order_type} order is already in {kitchen_status} status.", 400)
 
-        if kitchen_status in ("ready", "served"):
+        if kitchen_status in ("ready",):
             for key, delta in diffs.items():
                 if delta < 0:
                     db.session.rollback()
-                    return error_response("Bad Request", "Cannot remove or reduce items that are already ready/served.", 400)
+                    return error_response("Bad Request", "Cannot remove or reduce items that are already ready.", 400)
 
         for key, delta in diffs.items():
-            product_id, variant = key
+            product_id, variant, mod_ids = key
             product = Product.query.get(product_id)
+            mod_names = [mods_by_id[mid].name for mid in mod_ids] if mod_ids else []
             title = product.title + (f" ({variant})" if variant else "") if product else f"Item {product_id}"
+            if mod_names:
+                title = f"{title} + {', '.join(mod_names)}"
             
             if kitchen_status == "preparing":
                 if delta > 0:
@@ -797,13 +894,14 @@ def update_open_sale_items(sale_id: int, payload: dict[str, Any] | None = None, 
                 
         # Apply Inventory Transactions and update SaleItems
         for key, delta in diffs.items():
-            product_id, variant = key
+            product_id, variant, mod_ids = key
             product = Product.query.get(product_id)
             if not product:
                 db.session.rollback()
                 return error_response("Bad Request", f"Product ID {product_id} not found", 400)
                 
             unit_price = float(product.base_price)
+            mods_price_each = sum(float(mods_by_id[mid].price or 0.0) for mid in mod_ids) if mod_ids else 0.0
             
             # Inventory adjustment
             inventory = Inventory.query.filter_by(
@@ -829,52 +927,43 @@ def update_open_sale_items(sale_id: int, payload: dict[str, Any] | None = None, 
                 )
             )
             
-            # SaleItem adjustment
-            if kitchen_status in ("ready", "served"):
-                # Treat as new order item completely - just append a new SaleItem row for positive delta
-                if delta > 0:
-                    db.session.add(
-                        SaleItem(
-                            sale_id=sale_id,
-                            product_id=product.id,
-                            variant_sku_suffix=variant,
-                            quantity=delta,
-                            unit_price=unit_price,
-                            subtotal=unit_price * delta,
-                        )
+            existing_rows = []
+            for i in sale.items:
+                if i.product_id != product_id or (i.variant_sku_suffix or "") != variant:
+                    continue
+                existing_mods = sorted({oim.modifier_id for oim in getattr(i, "modifiers", [])})
+                if tuple(existing_mods) == tuple(mod_ids):
+                    existing_rows.append(i)
+
+            if delta > 0:
+                if existing_rows:
+                    existing_rows[0].quantity += delta
+                    existing_rows[0].subtotal = float(existing_rows[0].quantity) * (unit_price + mods_price_each)
+                else:
+                    new_row = SaleItem(
+                        sale_id=sale_id,
+                        product_id=product.id,
+                        variant_sku_suffix=variant,
+                        quantity=delta,
+                        unit_price=unit_price,
+                        subtotal=(unit_price + mods_price_each) * delta,
                     )
-                    sale.kitchen_status = "placed"  # Reset status so the new items route through kitchen again
-            else:
-                # Modifying existing rows or adding new ones
-                existing_rows = [i for i in sale.items if (i.product_id, i.variant_sku_suffix or "") == key]
-                if delta > 0:
-                    if existing_rows:
-                        # Add to the first matching row
-                        existing_rows[0].quantity += delta
-                        existing_rows[0].subtotal = float(existing_rows[0].quantity) * unit_price
+                    db.session.add(new_row)
+                    db.session.flush()
+                    for mid in mod_ids:
+                        db.session.add(OrderItemModifier(order_item_id=new_row.id, modifier_id=mid))
+            elif delta < 0:
+                remaining_to_remove = abs(delta)
+                for row in existing_rows:
+                    if remaining_to_remove <= 0:
+                        break
+                    if row.quantity <= remaining_to_remove:
+                        remaining_to_remove -= row.quantity
+                        db.session.delete(row)
                     else:
-                        db.session.add(
-                            SaleItem(
-                                sale_id=sale_id,
-                                product_id=product.id,
-                                variant_sku_suffix=variant,
-                                quantity=delta,
-                                unit_price=unit_price,
-                                subtotal=unit_price * delta,
-                            )
-                        )
-                elif delta < 0:
-                    remaining_to_remove = abs(delta)
-                    for row in existing_rows:
-                        if remaining_to_remove <= 0:
-                            break
-                        if row.quantity <= remaining_to_remove:
-                            remaining_to_remove -= row.quantity
-                            db.session.delete(row)
-                        else:
-                            row.quantity -= remaining_to_remove
-                            row.subtotal = float(row.quantity) * unit_price
-                            remaining_to_remove = 0
+                        row.quantity -= remaining_to_remove
+                        row.subtotal = float(row.quantity) * (unit_price + mods_price_each)
+                        remaining_to_remove = 0
 
         # Recalculate totals
         db.session.flush()
@@ -894,6 +983,11 @@ def update_open_sale_items(sale_id: int, payload: dict[str, Any] | None = None, 
             flag_modified(sale, "modifications")
 
         db.session.commit()
+        anyio.from_thread.run(
+            emit_event,
+            RealtimeEvents.ORDER_UPDATED,
+            {"sale_id": sale.id, "branch_id": sale.branch_id, "kitchen_status": getattr(sale, "kitchen_status", "placed")},
+        )
         return {"message": "Order updated with modifications", "sale_id": sale_id, "total_amount": float(total_amount), "events": events}
     except Exception as exc:
         db.session.rollback()
@@ -913,7 +1007,7 @@ def add_manual_modification(sale_id: int, payload: dict[str, Any] | None = None,
         
     kitchen_status = getattr(sale, "kitchen_status", "none")
     order_type = getattr(sale, "order_type", "dine_in")
-    if order_type != "dine_in" and kitchen_status in ("preparing", "ready", "served"):
+    if order_type != "dine_in" and kitchen_status in ("preparing", "ready"):
         return error_response("Bad Request", f"Modification blocked: {order_type} order is already in {kitchen_status} status.", 400)
         
     data = payload or {}
@@ -935,10 +1029,10 @@ def add_manual_modification(sale_id: int, payload: dict[str, Any] | None = None,
         sale.modifications = []
     sale.modifications = list(sale.modifications) + [event]
     
-    # If the order was already served/ready, we must put it back into the kitchen queue
+    # If the order was already ready, we must put it back into the kitchen queue
     # so the chefs see the new modification note.
     kitchen_status = getattr(sale, "kitchen_status", "none")
-    if kitchen_status in ("ready", "served"):
+    if kitchen_status in ("ready",):
         sale.kitchen_status = "placed"
         
     from sqlalchemy.orm.attributes import flag_modified
@@ -1000,6 +1094,11 @@ def finalize_open_sale(sale_id: int, payload: dict[str, Any] | None = None, curr
         sale.total_amount = total_with_tax
         sale.status = "completed"
         db.session.commit()
+        anyio.from_thread.run(
+            emit_event,
+            RealtimeEvents.ORDER_STATUS_CHANGED,
+            {"sale_id": sale.id, "branch_id": sale.branch_id, "status": "completed"},
+        )
 
         branch_name = "Main Branch"
         if sale.branch:
@@ -1077,6 +1176,11 @@ def cancel_open_sale(sale_id: int, current_user: User = Depends(get_current_user
                 )
         db.session.delete(sale)
         db.session.commit()
+        anyio.from_thread.run(
+            emit_event,
+            RealtimeEvents.ORDER_STATUS_CHANGED,
+            {"sale_id": sale_id, "branch_id": sale.branch_id, "status": "cancelled"},
+        )
         return {"message": "Open order cancelled", "sale_id": sale_id}
     except Exception as exc:
         db.session.rollback()
@@ -1090,18 +1194,30 @@ def get_sale_details(sale_id: int, current_user: User = Depends(get_current_user
         raise HTTPException(status_code=404, detail="Not Found")
     if current_user.role != "owner" and sale.branch_id != current_user.branch_id:
         return error_response("Forbidden", "Unauthorized", 403)
-    items = [
-        {
-            "id": i.id,
-            "product_id": i.product_id,
-            "product_title": i.product.title if i.product else "Unknown",
-            "variant_sku_suffix": i.variant_sku_suffix,
-            "quantity": i.quantity,
-            "unit_price": float(i.unit_price),
-            "subtotal": float(i.subtotal),
-        }
-        for i in sale.items
-    ]
+    items = []
+    for i in sale.items:
+        mods = []
+        for oim in getattr(i, "modifiers", []):
+            if oim.modifier and oim.modifier.archived_at is None:
+                mods.append(
+                    {
+                        "id": oim.modifier.id,
+                        "name": oim.modifier.name,
+                        "price": float(oim.modifier.price) if oim.modifier.price is not None else None,
+                    }
+                )
+        items.append(
+            {
+                "id": i.id,
+                "product_id": i.product_id,
+                "product_title": i.product.title if i.product else "Unknown",
+                "variant_sku_suffix": i.variant_sku_suffix,
+                "quantity": i.quantity,
+                "unit_price": float(i.unit_price),
+                "subtotal": float(i.subtotal),
+                "modifiers": mods,
+            }
+        )
     out = {
         "id": sale.id,
         "user_id": sale.user_id,
