@@ -402,6 +402,7 @@ def list_active_dine_in_orders(
         _maybe_add("archived_at", Sale.archived_at)
         _maybe_add("order_type", Sale.order_type)
         _maybe_add("order_snapshot", Sale.order_snapshot)
+        _maybe_add("kitchen_status", Sale.kitchen_status)
 
         if not select_cols:
             return {"sales": []}
@@ -461,6 +462,7 @@ def list_active_dine_in_orders(
                 "order_type": inferred_order_type,
                 "order_snapshot": snap,
                 "table_name": table_name,
+                "kitchen_status": data.get("kitchen_status") or "placed",
             }
             out.append(out_row)
             sale_ids.append(sale_id_val)
@@ -769,6 +771,13 @@ def update_open_sale_items(sale_id: int, payload: dict[str, Any] | None = None, 
             return {"message": "No changes made", "sale_id": sale_id, "total_amount": float(sale.total_amount)}
             
         kitchen_status = getattr(sale, "kitchen_status", "none")
+        order_type = getattr(sale, "order_type", "dine_in")
+        
+        # Block takeaway/delivery if they are already being prepared
+        if order_type != "dine_in" and kitchen_status in ("preparing", "ready", "served"):
+            db.session.rollback()
+            return error_response("Bad Request", f"Modification blocked: {order_type} order is already in {kitchen_status} status.", 400)
+
         if kitchen_status in ("ready", "served"):
             for key, delta in diffs.items():
                 if delta < 0:
@@ -901,6 +910,11 @@ def add_manual_modification(sale_id: int, payload: dict[str, Any] | None = None,
         return error_response("Forbidden", "Unauthorized", 403)
     if getattr(sale, "status", "") != "open":
         return error_response("Bad Request", "Order must be open", 400)
+        
+    kitchen_status = getattr(sale, "kitchen_status", "none")
+    order_type = getattr(sale, "order_type", "dine_in")
+    if order_type != "dine_in" and kitchen_status in ("preparing", "ready", "served"):
+        return error_response("Bad Request", f"Modification blocked: {order_type} order is already in {kitchen_status} status.", 400)
         
     data = payload or {}
     mod_type = data.get("type", "update")
@@ -1102,6 +1116,7 @@ def get_sale_details(sale_id: int, current_user: User = Depends(get_current_user
         "discount_snapshot": getattr(sale, "discount_snapshot", None),
         "order_type": getattr(sale, "order_type", None),
         "order_snapshot": getattr(sale, "order_snapshot", None),
+        "kitchen_status": getattr(sale, "kitchen_status", "placed"),
         "items": items,
     }
     if hasattr(sale, "archived_at") and sale.archived_at:

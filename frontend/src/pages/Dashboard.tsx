@@ -54,6 +54,7 @@ type OrderDetailLine = {
 type OrderDetailResponse = {
   id: number;
   status?: string;
+  kitchen_status?: string;
   order_type?: string | null;
   order_snapshot?: { table_name?: string } | null;
   items?: OrderDetailLine[];

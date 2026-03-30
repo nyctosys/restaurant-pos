@@ -14,6 +14,7 @@ type ActiveSale = {
   order_type: string | null;
   table_name?: string | null;
   order_snapshot?: { table_name?: string } | null;
+  kitchen_status: string;
 };
 
 export default function ActiveDineIn() {
@@ -51,6 +52,11 @@ export default function ActiveDineIn() {
 
   useEffect(() => {
     void load();
+  }, [load]);
+
+  useEffect(() => {
+    const id = setInterval(() => void load(), 8000);
+    return () => clearInterval(id);
   }, [load]);
 
   const tableLabel = (s: ActiveSale) =>
@@ -185,6 +191,12 @@ export default function ActiveDineIn() {
                   </div>
                   <span className="text-xs font-mono text-neutral-400">#{s.id}</span>
                 </div>
+                {['preparing', 'ready', 'served'].includes(s.kitchen_status) && (
+                  <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-[10px] font-bold uppercase w-fit">
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                    Kitchen is {s.kitchen_status}
+                  </div>
+                )}
                 <div className="text-sm text-neutral-600">
                   <span className="text-neutral-500">Subtotal </span>
                   <span className="font-semibold text-neutral-900">{formatCurrency(s.total_amount)}</span>
@@ -204,7 +216,7 @@ export default function ActiveDineIn() {
                   <button
                     type="button"
                     onClick={() => openModifyModal(s)}
-                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl glass-card text-sm font-semibold text-brand-900"
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl glass-card text-sm font-semibold text-brand-900 hover:bg-white/50"
                   >
                     <Pencil className="w-4 h-4" />
                     Modify
