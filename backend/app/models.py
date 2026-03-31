@@ -133,7 +133,10 @@ class SaleItem(db.Model):
     quantity = db.Column(db.Integer, nullable=False)
     unit_price = db.Column(db.Numeric(12, 2), nullable=False)
     subtotal = db.Column(db.Numeric(12, 2), nullable=False)
+    modifiers = db.Column(db.JSON, nullable=True, default=None)  # e.g. [{"ingredient_id": 1, "name": "Cheese Slice", "qty": 1}]
+    parent_sale_item_id = db.Column(db.Integer, db.ForeignKey('sale_items.id'), nullable=True)  # For deal child items
 
+    children = db.relationship('SaleItem', backref=db.backref('parent', remote_side='SaleItem.id'), lazy=True)
 
     
 

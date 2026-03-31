@@ -1,18 +1,18 @@
-/**
- * Kitchen Display (KOT / KDS) — live queue of open dine-in tickets with line items.
- * Uses the same canvas, liquid glass, brand, and gold tokens as the rest of the POS.
- */
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { get, getUserMessage } from '../api';
 import { Loader2, LogOut } from 'lucide-react';
+import { get, getUserMessage } from '../api';
 
 const numFont = "font-['Space_Grotesk',ui-monospace,monospace]";
 
 type KdsLine = {
+  id: number;
   product_title: string;
   variant_sku_suffix?: string;
   quantity: number;
+  is_deal?: boolean;
+  modifiers?: string[];
+  children?: KdsLine[];
 };
 
 type KdsOrder = {
@@ -35,6 +35,25 @@ function formatElapsedShort(iso: string, nowMs: number): string {
 function minutesSince(iso: string, nowMs: number): number {
   const t = new Date(iso).getTime();
   return Math.max(0, (nowMs - t) / 60000);
+}
+
+function ModifierPills({ modifiers }: { modifiers?: string[] }) {
+  if (!modifiers || modifiers.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="flex flex-wrap gap-1 mt-1.5">
+      {modifiers.map((mod, idx) => (
+        <span
+          key={`${mod}-${idx}`}
+          className="text-[10px] px-1.5 py-0.5 rounded-sm bg-blue-100/80 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300 font-medium"
+        >
+          + {mod}
+        </span>
+      ))}
+    </div>
+  );
 }
 
 export default function KitchenKds() {
@@ -67,7 +86,7 @@ export default function KitchenKds() {
       const q =
         user?.role === 'owner'
           ? `?branch_id=${activeBranchId}&include_items=1`
-          : `?include_items=1`;
+          : '?include_items=1';
       const data = await get<{ sales?: KdsOrder[] }>(`/orders/active${q}`);
       setOrders(data.sales ?? []);
     } catch (e) {
@@ -86,12 +105,10 @@ export default function KitchenKds() {
     return () => window.clearInterval(id);
   }, [load]);
 
-  const tableLabel = (o: KdsOrder) => o.table_name?.trim() || '—';
+  const tableLabel = (o: KdsOrder) => o.table_name?.trim() || '-';
 
   return (
-    <div
-      className={`h-full min-h-0 flex flex-col antialiased text-neutral-900 dark:text-neutral-100 selection:bg-brand-200/50 dark:selection:bg-brand-500/25`}
-    >
+    <div className="h-full min-h-0 flex flex-col antialiased text-neutral-900 dark:text-neutral-100 selection:bg-brand-200/50 dark:selection:bg-brand-500/25">
       <header className="shrink-0 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 px-4 py-3 sm:px-6 sm:py-4 border-b border-white/25 dark:border-white/10">
         <div className="min-w-0">
           <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-neutral-500 dark:text-neutral-400 mb-0.5">
@@ -101,7 +118,7 @@ export default function KitchenKds() {
             Kitchen
           </h1>
           <p className="text-[11px] text-neutral-600 dark:text-neutral-400 mt-1 max-w-prose leading-snug">
-            Open KOT queue · Fired when front sends Generate KOT · Elapsed time from ticket start
+            Open KOT queue. Fired when the POS sends Generate KOT. Elapsed time from ticket start.
           </p>
         </div>
         <div className="flex items-baseline justify-between sm:justify-end gap-6 sm:gap-10 shrink-0">
@@ -149,7 +166,7 @@ export default function KitchenKds() {
         {loading && orders.length === 0 ? (
           <div className="flex items-center justify-center gap-2 py-24 text-neutral-500 dark:text-neutral-400">
             <Loader2 className="w-5 h-5 animate-spin shrink-0" aria-hidden />
-            <span className="text-sm">Loading tickets…</span>
+            <span className="text-sm">Loading tickets...</span>
           </div>
         ) : orders.length === 0 ? (
           <div className="h-full min-h-[40vh] flex flex-col items-center justify-center text-center px-6">
@@ -179,9 +196,7 @@ export default function KitchenKds() {
                   }`}
                 >
                   <div
-                    className={`absolute left-0 top-0 bottom-0 w-1 rounded-l-xl ${
-                      rush ? 'bg-gold-500' : 'bg-transparent'
-                    }`}
+                    className={`absolute left-0 top-0 bottom-0 w-1 rounded-l-xl ${rush ? 'bg-gold-500' : 'bg-transparent'}`}
                     aria-hidden
                   />
                   <div className="flex items-start justify-between gap-3 px-3 pt-3 pb-2 border-b border-white/20 dark:border-white/10">
@@ -220,22 +235,58 @@ export default function KitchenKds() {
                       <p className="text-sm text-neutral-500 dark:text-neutral-400 italic">No lines (refresh)</p>
                     ) : (
                       lines.map((line, idx) => (
-                        <div key={`${o.id}-${idx}-${line.product_title}`} className="flex gap-2 items-start">
-                          <span
-                            className={`shrink-0 min-w-[2rem] text-center text-xs font-bold tabular-nums px-1.5 py-0.5 rounded-full bg-brand-100/95 text-brand-900 border border-brand-200/70 dark:bg-brand-900/40 dark:text-brand-100 dark:border-brand-700/50 ${numFont}`}
-                          >
-                            {line.quantity}×
-                          </span>
-                          <div className="min-w-0 flex-1">
-                            <p className="text-sm font-medium leading-tight text-neutral-900 dark:text-neutral-100">
-                              {line.product_title}
-                            </p>
-                            {line.variant_sku_suffix ? (
-                              <p className="text-[11px] text-neutral-600 dark:text-neutral-400 mt-0.5 leading-snug">
-                                {line.variant_sku_suffix}
+                        <div
+                          key={`${o.id}-${line.id}-${idx}`}
+                          className="space-y-1.5 border-b border-black/5 dark:border-white/5 pb-2 mb-2 last:border-0 last:mb-0 last:pb-0"
+                        >
+                          <div className="flex gap-2 items-start">
+                            <span className={`shrink-0 min-w-[2rem] text-center text-xs font-bold tabular-nums px-1.5 py-0.5 rounded-full bg-brand-100/95 text-brand-900 border border-brand-200/70 dark:bg-brand-900/40 dark:text-brand-100 dark:border-brand-700/50 ${numFont}`}>
+                              {line.quantity}x
+                            </span>
+                            <div className="min-w-0 flex-1">
+                              <p className="text-sm font-medium leading-tight text-neutral-900 dark:text-neutral-100">
+                                {line.product_title}{' '}
+                                {line.is_deal && (
+                                  <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400 ml-1">
+                                    (DEAL)
+                                  </span>
+                                )}
                               </p>
-                            ) : null}
+                              {line.variant_sku_suffix && (
+                                <p className="text-[11px] text-neutral-600 dark:text-neutral-400 mt-0.5 leading-snug">
+                                  {line.variant_sku_suffix}
+                                </p>
+                              )}
+                              <ModifierPills modifiers={line.modifiers} />
+                            </div>
                           </div>
+
+                          {line.children && line.children.length > 0 && (
+                            <div className="pl-6 space-y-1 mt-1">
+                              {line.children.map((child, cIdx) => (
+                                <div key={`${child.id}-${cIdx}`} className="space-y-1">
+                                  <div className="flex gap-1.5 items-start">
+                                    <span className="shrink-0 text-[10px] font-bold text-neutral-500 dark:text-neutral-400">
+                                      {child.quantity}x
+                                    </span>
+                                    <div className="min-w-0">
+                                      <p className="text-xs text-neutral-700 dark:text-neutral-300">
+                                        {child.product_title}
+                                      </p>
+                                      {child.variant_sku_suffix && (
+                                        <p className="text-[10px] text-neutral-500 dark:text-neutral-400">
+                                          {child.variant_sku_suffix}
+                                        </p>
+                                      )}
+                                    </div>
+                                  </div>
+                                  <div className="pl-4">
+                                    <ModifierPills modifiers={child.modifiers} />
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         </div>
                       ))
                     )}

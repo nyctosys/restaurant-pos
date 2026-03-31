@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { API_BASE } from '../api/errors';
 
@@ -16,10 +17,9 @@ type ScanHandler = (barcode: string) => void;
 // only register/unregister scan handlers per provider instance.
 let sharedWs: WebSocket | null = null;
 let sharedWsUrl: string | null = null;
-let sharedHandlers: Set<ScanHandler> = new Set();
-let sharedPageOrigin: string | null = null;
+const sharedHandlers: Set<ScanHandler> = new Set();
 
-function ensureSharedScannerSocket(wsUrl: string, pageOrigin: string): WebSocket {
+function ensureSharedScannerSocket(wsUrl: string): WebSocket {
   // If already open/connecting to the same URL, reuse it.
   if (
     sharedWs &&
@@ -40,7 +40,6 @@ function ensureSharedScannerSocket(wsUrl: string, pageOrigin: string): WebSocket
   }
 
   sharedWsUrl = wsUrl;
-  sharedPageOrigin = pageOrigin;
 
   const ws = new WebSocket(wsUrl);
   sharedWs = ws;
@@ -52,7 +51,7 @@ function ensureSharedScannerSocket(wsUrl: string, pageOrigin: string): WebSocket
   ws.onerror = () => {
   };
 
-  ws.onclose = (evt) => {
+  ws.onclose = () => {
     // If connection drops, allow recreation on next handler registration.
     if (sharedWs === ws) {
       sharedWs = null;
@@ -148,7 +147,7 @@ export const ScannerProvider: React.FC<{ children: React.ReactNode }> = ({ child
     sharedHandlers.add(handler);
 
     // Create (or reuse) the shared socket; it will call all registered handlers.
-    ensureSharedScannerSocket(wsUrl, window.location.origin);
+    ensureSharedScannerSocket(wsUrl);
 
     return () => {
       sharedHandlers.delete(handler);

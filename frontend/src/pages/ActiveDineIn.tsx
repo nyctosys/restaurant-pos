@@ -5,6 +5,16 @@ import { get, post, getUserMessage } from '../api';
 import { formatCurrency } from '../utils/formatCurrency';
 import { showConfirm } from '../components/ConfirmDialog';
 
+type ActiveSaleLine = {
+  id: number;
+  product_title: string;
+  variant_sku_suffix?: string;
+  quantity: number;
+  is_deal?: boolean;
+  modifiers?: string[];
+  children?: ActiveSaleLine[];
+};
+
 type ActiveSale = {
   id: number;
   branch_id: number;
@@ -14,7 +24,25 @@ type ActiveSale = {
   order_type: string | null;
   table_name?: string | null;
   order_snapshot?: { table_name?: string } | null;
+  items?: ActiveSaleLine[];
 };
+
+function ModifierPills({ modifiers }: { modifiers?: string[] }) {
+  if (!modifiers || modifiers.length === 0) return null;
+
+  return (
+    <div className="flex flex-wrap gap-1 mt-1">
+      {modifiers.map((mod, idx) => (
+        <span
+          key={`${mod}-${idx}`}
+          className="text-[10px] px-1.5 py-0.5 rounded-sm bg-brand-50 text-brand-800 border border-brand-100"
+        >
+          + {mod}
+        </span>
+      ))}
+    </div>
+  );
+}
 
 export default function ActiveDineIn() {
   const navigate = useNavigate();
@@ -33,7 +61,10 @@ export default function ActiveDineIn() {
     setError(null);
     try {
       const activeBranchId = localStorage.getItem('active_branch_id') ?? user?.branch_id ?? '1';
-      const q = user?.role === 'owner' ? `?branch_id=${activeBranchId}` : '';
+      const q =
+        user?.role === 'owner'
+          ? `?branch_id=${activeBranchId}&include_items=1`
+          : '?include_items=1';
       const data = await get<{ sales?: ActiveSale[] }>(`/orders/active${q}`);
       setSales(data.sales ?? []);
     } catch (e) {
@@ -163,6 +194,62 @@ export default function ActiveDineIn() {
                 <p className="text-xs text-neutral-400">
                   {new Date(s.created_at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}
                 </p>
+                {s.items && s.items.length > 0 && (
+                  <div className="rounded-xl bg-white/35 border border-white/40 px-3 py-2.5 space-y-2">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-neutral-500">
+                      Items to prepare
+                    </p>
+                    <div className="space-y-2">
+                      {s.items.map((line, idx) => (
+                        <div
+                          key={`${s.id}-${line.id}-${idx}`}
+                          className="border-b border-black/5 pb-2 last:border-0 last:pb-0"
+                        >
+                          <div className="flex gap-2 items-start">
+                            <span className="shrink-0 min-w-[2rem] text-center text-[11px] font-bold tabular-nums px-1.5 py-0.5 rounded-full bg-brand-100 text-brand-900">
+                              {line.quantity}x
+                            </span>
+                            <div className="min-w-0 flex-1">
+                              <p className="text-sm font-semibold text-neutral-900 leading-tight">
+                                {line.product_title}{' '}
+                                {line.is_deal && (
+                                  <span className="text-[10px] font-bold text-amber-700">(DEAL)</span>
+                                )}
+                              </p>
+                              {line.variant_sku_suffix && (
+                                <p className="text-[11px] text-neutral-500 mt-0.5">{line.variant_sku_suffix}</p>
+                              )}
+                              <ModifierPills modifiers={line.modifiers} />
+                            </div>
+                          </div>
+
+                          {line.children && line.children.length > 0 && (
+                            <div className="pl-8 mt-2 space-y-1.5">
+                              {line.children.map((child, childIdx) => (
+                                <div key={`${line.id}-${child.id}-${childIdx}`} className="space-y-1">
+                                  <div className="flex gap-2 items-start">
+                                    <span className="shrink-0 text-[10px] font-bold text-neutral-500">
+                                      {child.quantity}x
+                                    </span>
+                                    <div className="min-w-0">
+                                      <p className="text-xs font-medium text-neutral-700">{child.product_title}</p>
+                                      {child.variant_sku_suffix && (
+                                        <p className="text-[10px] text-neutral-500">{child.variant_sku_suffix}</p>
+                                      )}
+                                    </div>
+                                  </div>
+                                  <div className="pl-4">
+                                    <ModifierPills modifiers={child.modifiers} />
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <div className="flex flex-wrap gap-2 pt-1">
                   <button
                     type="button"
