@@ -223,6 +223,11 @@ class PrinterService:
             discount_amount = float(discount_amount)
         except (TypeError, ValueError):
             discount_amount = 0.0
+        delivery_charge = sale_data.get('delivery_charge') or 0
+        try:
+            delivery_charge = float(delivery_charge)
+        except (TypeError, ValueError):
+            delivery_charge = 0.0
         discount_name = (sale_data.get('discount_name') or 'Discount').strip()
 
         try:
@@ -337,6 +342,8 @@ class PrinterService:
                 # Use " - Rs.X" instead of "Rs.-X" to avoid printer firmware issues with minus in amount
                 discount_str = f" - Rs.{discount_amount:,.0f}"
                 self.printer.text(label.ljust(self.ITEM_COL_WIDTH) + discount_str.rjust(self.AMOUNT_COL_WIDTH) + "\n")
+            if delivery_charge > 0:
+                self.printer.text("Delivery charge".ljust(self.ITEM_COL_WIDTH) + f"Rs.{delivery_charge:,.0f}".rjust(self.AMOUNT_COL_WIDTH) + "\n")
             if tax_rate and tax_amount is not None:
                 self.printer.text(f"Tax ({tax_pct:.0f}%)".ljust(self.ITEM_COL_WIDTH) + f"Rs.{tax_amount:,.0f}".rjust(self.AMOUNT_COL_WIDTH) + "\n")
             self.printer.text(sep + "\n")

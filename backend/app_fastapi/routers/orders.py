@@ -14,6 +14,7 @@ from app_fastapi.deps import get_current_user, require_owner
 from app_fastapi.routers.common import yes
 
 orders_router = APIRouter(prefix="/api/orders", tags=["orders"])
+DELIVERY_CHARGE = 300.0
 
 
 def _sales_table_columns() -> set[str]:
@@ -25,6 +26,10 @@ def _json_error(error: str, message: str, status_code: int, details: Any = None)
     if details is not None:
         payload["details"] = details
     return JSONResponse(status_code=status_code, content=payload)
+
+
+def _delivery_charge_for_order_type(order_type: str | None) -> float:
+    return DELIVERY_CHARGE if order_type == "delivery" else 0.0
 
 
 def get_time_filter_ranges(time_filter: str, start_date_str: str | None, end_date_str: str | None):
@@ -409,11 +414,13 @@ def checkout(payload: dict[str, Any] | None = None, current_user: User = Depends
                 discount_id = discount_data.get("id")
                 discount_snapshot = {"name": discount_data.get("name") or "Discount", "type": d_type, "value": d_value}
         discounted_subtotal = total_amount - discount_amount
+        delivery_charge = _delivery_charge_for_order_type(order_type_norm)
         new_sale.discount_amount = discount_amount
         new_sale.discount_id = discount_id
         new_sale.discount_snapshot = discount_snapshot
+        new_sale.delivery_charge = delivery_charge
         new_sale.tax_amount = discounted_subtotal * tax_rate
-        new_sale.total_amount = discounted_subtotal + new_sale.tax_amount
+        new_sale.total_amount = discounted_subtotal + new_sale.tax_amount + delivery_charge
         db.session.commit()
         printer_service = PrinterService()
         branch_name = "Main Branch"
@@ -438,6 +445,7 @@ def checkout(payload: dict[str, Any] | None = None, current_user: User = Depends
                 "tax_amount": float(new_sale.tax_amount),
                 "tax_rate": float(tax_rate),
                 "discount_amount": float(discount_amount),
+                "delivery_charge": float(delivery_charge),
                 "discount_name": discount_name or "Discount",
                 "operator": current_user.username,
                 "branch": branch_name,
@@ -981,14 +989,16 @@ def finalize_open_sale(sale_id: int, payload: dict[str, Any] | None = None, curr
             discount_id = discount_data.get("id")
             discount_snapshot = {"name": discount_data.get("name") or "Discount", "type": d_type, "value": d_value}
     discounted_subtotal = items_sum - discount_amount
+    delivery_charge = _delivery_charge_for_order_type(getattr(sale, "order_type", None))
     tax_amount = discounted_subtotal * tax_rate
-    total_with_tax = discounted_subtotal + tax_amount
+    total_with_tax = discounted_subtotal + tax_amount + delivery_charge
 
     try:
         sale.payment_method = data["payment_method"]
         sale.discount_amount = discount_amount
         sale.discount_id = discount_id
         sale.discount_snapshot = discount_snapshot
+        sale.delivery_charge = delivery_charge
         sale.tax_amount = tax_amount
         sale.total_amount = total_with_tax
         sale.status = "completed"
@@ -1014,6 +1024,7 @@ def finalize_open_sale(sale_id: int, payload: dict[str, Any] | None = None, curr
                 "tax_amount": float(sale.tax_amount),
                 "tax_rate": float(tax_rate),
                 "discount_amount": float(discount_amount),
+                "delivery_charge": float(delivery_charge),
                 "discount_name": discount_name or "Discount",
                 "operator": current_user.username,
                 "branch": branch_name,
@@ -1101,6 +1112,7 @@ def get_sale_details(sale_id: int, current_user: User = Depends(get_current_user
         "created_at": sale.created_at.isoformat(),
         "status": getattr(sale, "status", "completed"),
         "discount_amount": float(getattr(sale, "discount_amount", 0) or 0),
+        "delivery_charge": float(getattr(sale, "delivery_charge", 0) or 0),
         "discount_snapshot": getattr(sale, "discount_snapshot", None),
         "order_type": getattr(sale, "order_type", None),
         "order_snapshot": getattr(sale, "order_snapshot", None),
@@ -1202,7 +1214,8 @@ def print_sale(sale_id: int, current_user: User = Depends(get_current_user)):
     if getattr(sale, "status", "") == "open":
         return _json_error("Bad Request", "Finalize payment before printing a customer receipt", 400)
     discount_amount = float(getattr(sale, "discount_amount", 0) or 0)
-    discounted_subtotal = float(sale.total_amount) - float(sale.tax_amount)
+    delivery_charge = float(getattr(sale, "delivery_charge", 0) or 0)
+    discounted_subtotal = float(sale.total_amount) - float(sale.tax_amount) - delivery_charge
     subtotal = discounted_subtotal + discount_amount
     tax_rate = (float(sale.tax_amount) / discounted_subtotal) if discounted_subtotal else 0
     discount_name = sale.discount_snapshot.get("name") if isinstance(getattr(sale, "discount_snapshot", None), dict) else None
@@ -1213,6 +1226,7 @@ def print_sale(sale_id: int, current_user: User = Depends(get_current_user)):
         "tax_amount": float(sale.tax_amount),
         "tax_rate": tax_rate,
         "discount_amount": discount_amount,
+        "delivery_charge": delivery_charge,
         "discount_name": discount_name,
         "operator": sale.user.username if sale.user else "Unknown",
         "branch": sale.branch.name if sale.branch else "Main Branch",

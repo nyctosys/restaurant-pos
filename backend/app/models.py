@@ -113,6 +113,7 @@ class Sale(db.Model):
     discount_amount = db.Column(db.Numeric(12, 2), nullable=True, default=0)
     discount_id = db.Column(db.String(64), nullable=True)
     discount_snapshot = db.Column(db.JSON, nullable=True)  # { name, type, value } for receipt/audit
+    delivery_charge = db.Column(db.Numeric(12, 2), nullable=True, default=0)
     archived_at = db.Column(db.DateTime(timezone=True), nullable=True)
     order_type = db.Column(db.String(20), nullable=True)  # takeaway, dine_in, delivery
     order_snapshot = db.Column(db.JSON, nullable=True)  # dine_in: { table_name }; delivery: { customer_name, phone, address }

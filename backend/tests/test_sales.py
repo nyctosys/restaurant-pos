@@ -258,6 +258,45 @@ def test_refund_nonexistent_sale_returns_404(client, app):
     assert r.status_code == 404
 
 
+def test_delivery_checkout_adds_flat_delivery_charge(client, app):
+    client.post(
+        "/api/auth/setup",
+        json={"username": "owner1", "password": "pass", "branch_name": "Main"},
+    )
+    token = _get_token(client)
+    with app.app_context():
+        b = Branch.query.filter_by(name="Main").first()
+        bid = b.id
+    pid = _create_product_and_inventory(app, bid, "Burger", 10)
+
+    r = client.post(
+        "/api/orders/checkout",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "items": [{"product_id": pid, "quantity": 2}],
+            "payment_method": "Cash",
+            "branch_id": bid,
+            "order_type": "delivery",
+            "order_snapshot": {
+                "customer_name": "Ali",
+                "phone": "03001234567",
+                "address": "Street 1",
+            },
+        },
+    )
+    assert r.status_code == 201
+    data = r.get_json()
+    assert data["total"] == 320.0
+
+    sale_id = data["sale_id"]
+    details = client.get(
+        f"/api/orders/{sale_id}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert details.status_code == 200
+    assert details.get_json()["delivery_charge"] == 300.0
+
+
 def test_dine_in_kds_expands_deals_and_preserves_modifiers(client, app):
     client.post(
         "/api/auth/setup",

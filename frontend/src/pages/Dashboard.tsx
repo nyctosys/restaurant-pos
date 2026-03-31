@@ -38,6 +38,7 @@ const ORDER_TYPE_OPTIONS: { id: OrderType; label: string; Icon: typeof Package }
   { id: 'dine_in', label: 'Dine in', Icon: UtensilsCrossed },
   { id: 'delivery', label: 'Delivery', Icon: Truck },
 ];
+const DELIVERY_CHARGE = 300;
 
 const PRODUCT_PLACEHOLDER_IMAGE = '/product-placeholder.svg';
 
@@ -575,7 +576,8 @@ export default function Dashboard() {
   const taxPct = taxEnabled ? (taxRatesByPaymentMethod[paymentMethod] ?? 0) : 0;
   const taxRate = taxPct / 100;
   const tax = discountedSubtotal * taxRate;
-  const total = discountedSubtotal + tax;
+  const deliveryCharge = orderType === 'delivery' ? DELIVERY_CHARGE : 0;
+  const total = discountedSubtotal + tax + deliveryCharge;
 
   const filteredProducts = products.filter(p => {
     const matchesCategory = activeCategory === 'All Items' || p.section === activeCategory;
@@ -1155,6 +1157,12 @@ export default function Dashboard() {
               <div className="flex justify-between text-sm">
                 <span className="text-neutral-500">Tax ({paymentMethod} — {taxPct}%)</span>
                 <span className="font-medium text-neutral-700">{formatCurrency(tax)}</span>
+              </div>
+            )}
+            {deliveryCharge > 0 && (
+              <div className="flex justify-between text-sm">
+                <span className="text-neutral-500">Delivery charge</span>
+                <span className="font-medium text-neutral-700">{formatCurrency(deliveryCharge)}</span>
               </div>
             )}
             <div className="h-px bg-neutral-200 my-1" />
