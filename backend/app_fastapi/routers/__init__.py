@@ -2,6 +2,7 @@ from app_fastapi.routers.auth import auth_router
 from app_fastapi.routers.branches import branches_router
 from app_fastapi.routers.health import health_router
 from app_fastapi.routers.menu import menu_router
+from app_fastapi.routers.modifiers import modifiers_router
 from app_fastapi.routers.orders import orders_router
 from app_fastapi.routers.printer import printer_router
 from app_fastapi.routers.scanner import scanner_router
@@ -14,6 +15,7 @@ __all__ = [
     "branches_router",
     "health_router",
     "menu_router",
+    "modifiers_router",
     "orders_router",
     "printer_router",
     "scanner_router",

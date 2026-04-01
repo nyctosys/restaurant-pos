@@ -1,6 +1,6 @@
 import { Navigate, Outlet } from 'react-router-dom';
 
-/** Kitchen display (KDS) — only users with role `kitchen` */
+/** Kitchen display (KDS) — users with role `kitchen` or `owner` */
 export default function RequireKitchenRole() {
   const raw = localStorage.getItem('user');
   let role = '';
@@ -9,7 +9,7 @@ export default function RequireKitchenRole() {
   } catch {
     role = '';
   }
-  if (role !== 'kitchen') {
+  if (role !== 'kitchen' && role !== 'owner') {
     return <Navigate to="/dashboard" replace />;
   }
   return <Outlet />;
