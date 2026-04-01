@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useSearchParams } from 'react-router-dom';
 import { useScanner } from '../hooks/useScanner';
@@ -14,6 +14,7 @@ type Product = {
   section: string;
   variants: string[];
   image_url?: string;
+  is_deal?: boolean;
 };
 
 type CartItem = {
@@ -24,6 +25,7 @@ type CartItem = {
   quantity: number;
   image: string;
   variant?: string;
+  modifiers?: string[];
 };
 
 type DiscountPreset = { id: string; name: string; type: 'percent' | 'fixed'; value: number };
@@ -36,6 +38,7 @@ const ORDER_TYPE_OPTIONS: { id: OrderType; label: string; Icon: typeof Package }
   { id: 'dine_in', label: 'Dine in', Icon: UtensilsCrossed },
   { id: 'delivery', label: 'Delivery', Icon: Truck },
 ];
+const DELIVERY_CHARGE = 300;
 
 const PRODUCT_PLACEHOLDER_IMAGE = '/product-placeholder.svg';
 
@@ -44,11 +47,13 @@ function getProductImageUrl(product: Product): string {
 }
 
 type OrderDetailLine = {
+  id: number;
   product_id: number;
   product_title?: string;
   variant_sku_suffix?: string;
   quantity: number;
   unit_price: number;
+  modifiers?: string[];
 };
 
 type OrderDetailResponse = {
@@ -78,6 +83,8 @@ export default function Dashboard() {
   }, []);
   const [loading, setLoading] = useState(true);
   const [productForVariants, setProductForVariants] = useState<Product | null>(null);
+  const [activeModifierItem, setActiveModifierItem] = useState<CartItem | null>(null);
+  const [ingredients, setIngredients] = useState<{name: string, sku?: string}[]>([]);
   const [paymentMethod, setPaymentMethod] = useState<'Card' | 'Cash' | 'Online Transfer'>('Card');
   const [inventory, setInventory] = useState<Record<string, Record<string, number>>>({});
   const [notification, setNotification] = useState<{ type: 'ok' | 'error'; msg: string } | null>(null);
@@ -108,16 +115,18 @@ export default function Dashboard() {
   const userStr = localStorage.getItem('user');
   const user = userStr ? JSON.parse(userStr) : null;
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     setLoading(true);
     const activeBranchId = localStorage.getItem('active_branch_id') ?? user?.branch_id ?? '1';
     try {
-      const [prodData, settingsData, invData] = await Promise.all([
+      const [prodData, settingsData, invData, modData] = await Promise.all([
         get<{ products?: Product[] }>(`/menu-items/`),
         get<{ config?: Record<string, unknown> }>(`/settings/?branch_id=${activeBranchId}`),
         get<{ inventory?: Record<string, Record<string, number>> }>(`/stock/?branch_id=${activeBranchId}`),
+        get<{ ingredients?: {name: string, sku?: string}[] }>(`/inventory-advanced/ingredients`)
       ]);
       setProducts(prodData?.products ?? []);
+      setIngredients(modData?.ingredients ?? []);
       const config = settingsData?.config ?? {};
       setSections(Array.isArray(config?.sections) ? (config.sections as string[]) : []);
       setTaxEnabled((config.tax_enabled as boolean) !== false);
@@ -160,7 +169,7 @@ export default function Dashboard() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [user?.branch_id]);
 
   useEffect(() => {
     setDineInTable(null);
@@ -212,13 +221,14 @@ export default function Dashboard() {
             const variant = line.variant_sku_suffix || '';
             const uniqueId = variant ? `${pid}-${variant}` : `${pid}`;
             return {
-              uniqueId,
+              uniqueId: `${uniqueId}-${line.id}`,
               id: pid,
               title: line.product_title || prod?.title || 'Item',
               price: line.unit_price,
               quantity: line.quantity,
               image: prod ? getProductImageUrl(prod) : PRODUCT_PLACEHOLDER_IMAGE,
               variant: variant || undefined,
+              modifiers: line.modifiers || [],
             };
           })
         );
@@ -260,10 +270,13 @@ export default function Dashboard() {
       }
     };
     checkPrinter();
-  }, []);
+  }, [fetchData]);
 
   // Categories come from the sections defined in Settings
   const categories = ['All Items', ...sections];
+  if (products.some(p => p.is_deal) && !categories.includes('Deals')) {
+    categories.push('Deals');
+  }
 
   useEffect(() => {
     if (lastScannedBarcode) {
@@ -285,7 +298,7 @@ export default function Dashboard() {
       setProductForVariants(product);
     } else {
       const stock = inventory[product.id.toString()]?.[''] || 0;
-      if (stock <= 0) return; // Prevent adding if out of stock
+      if (!product.is_deal && stock <= 0) return; // Prevent adding if out of stock
       handleAddToCart({
         id: product.id,
         title: product.title,
@@ -327,7 +340,8 @@ export default function Dashboard() {
     const items = cart.map(item => ({
       product_id: item.id,
       variant_sku_suffix: item.variant || '',
-      quantity: item.quantity
+      quantity: item.quantity,
+      modifiers: item.modifiers || [],
     }));
 
     setCheckoutSubmitting(true);
@@ -376,6 +390,7 @@ export default function Dashboard() {
       product_id: item.id,
       variant_sku_suffix: item.variant || '',
       quantity: item.quantity,
+      modifiers: item.modifiers || [],
     }));
     setCheckoutSubmitting(true);
     try {
@@ -438,6 +453,7 @@ export default function Dashboard() {
       product_id: item.id,
       variant_sku_suffix: item.variant || '',
       quantity: item.quantity,
+      modifiers: item.modifiers || [],
     }));
     setCheckoutSubmitting(true);
     try {
@@ -560,7 +576,8 @@ export default function Dashboard() {
   const taxPct = taxEnabled ? (taxRatesByPaymentMethod[paymentMethod] ?? 0) : 0;
   const taxRate = taxPct / 100;
   const tax = discountedSubtotal * taxRate;
-  const total = discountedSubtotal + tax;
+  const deliveryCharge = orderType === 'delivery' ? DELIVERY_CHARGE : 0;
+  const total = discountedSubtotal + tax + deliveryCharge;
 
   const filteredProducts = products.filter(p => {
     const matchesCategory = activeCategory === 'All Items' || p.section === activeCategory;
@@ -684,14 +701,14 @@ export default function Dashboard() {
                   className={`glass-card overflow-hidden transition-all duration-200 group text-left ${
                     layoutView === 'grid' ? 'flex flex-col' : 'flex items-center p-3'
                   } ${
-                    (!product.variants || product.variants.length === 0) && (inventory[product.id.toString()]?.[''] || 0) <= 0
+                    (!product.is_deal && (!product.variants || product.variants.length === 0) && (inventory[product.id.toString()]?.[''] || 0) <= 0)
                       ? 'opacity-50 grayscale cursor-not-allowed border-neutral-200/50'
                       : 'hover:shadow-md hover:border-white/60 active:scale-[0.97]'
                   }`}
                 >
                   {/* Product Image Area — aspect-square so size scales with card width (responsive), consistent across all cards */}
                   <div className={`${layoutView === 'grid' ? 'w-full aspect-square shrink-0' : 'w-16 h-16 shrink-0 rounded-lg'} flex items-center justify-center overflow-hidden transition-colors ${
-                    (!product.variants || product.variants.length === 0) && (inventory[product.id.toString()]?.[''] || 0) <= 0
+                    (!product.is_deal && (!product.variants || product.variants.length === 0) && (inventory[product.id.toString()]?.[''] || 0) <= 0)
                       ? 'bg-neutral-100/50'
                       : 'bg-gradient-to-br from-brand-50/40 to-brand-100/40 group-hover:from-brand-100/50 group-hover:to-brand-200/50'
                   }`}>
@@ -706,9 +723,13 @@ export default function Dashboard() {
                     <p className="text-sm font-medium text-neutral-800 truncate">{product.title}</p>
                     <div className="flex items-center justify-between gap-2 mt-1 min-h-6">
                       <p className="text-base font-bold text-gold-600 whitespace-nowrap flex-shrink-0">{formatCurrency(product.base_price)}</p>
-                      {(!product.variants || product.variants.length === 0) && (inventory[product.id.toString()]?.[''] || 0) <= 0 ? (
+                      {(!product.is_deal && (!product.variants || product.variants.length === 0) && (inventory[product.id.toString()]?.[''] || 0) <= 0) ? (
                         <span className="text-[10px] font-bold text-red-600 bg-red-50 px-1.5 py-0.5 rounded border border-red-100 uppercase flex-shrink-0">
                           Out of Stock
+                        </span>
+                      ) : product.is_deal ? (
+                        <span className="text-[10px] font-semibold text-brand-600 bg-brand-50 px-1.5 py-0.5 rounded border border-brand-100 truncate min-w-0">
+                          Combo Deal
                         </span>
                       ) : product.section ? (
                         <span className="text-[10px] font-semibold text-brand-600 bg-brand-50 px-1.5 py-0.5 rounded border border-brand-100 truncate min-w-0">
@@ -899,23 +920,42 @@ export default function Dashboard() {
                     </span>
                   )}
                   <p className="text-sm font-bold text-gold-600 mt-0.5">{formatCurrency(item.price)}</p>
-                  {/* Quantity Controls */}
-                  <div className="flex items-center gap-2 mt-2">
-                    <button
-                      type="button"
-                      onClick={(e) => { e.stopPropagation(); handleUpdateQuantity(item.uniqueId, -1); }}
-                      className="min-w-[44px] min-h-[44px] xl:min-w-9 xl:min-h-9 rounded-lg bg-white/30 hover:bg-white/50 flex items-center justify-center transition-colors border border-white/40"
-                    >
-                      <Minus className="w-4 h-4 text-neutral-700" />
-                    </button>
-                    <span className="text-sm font-bold text-neutral-800 w-8 text-center tabular-nums">{item.quantity}</span>
-                    <button
-                      type="button"
-                      onClick={(e) => { e.stopPropagation(); handleUpdateQuantity(item.uniqueId, 1); }}
-                      className="min-w-[44px] min-h-[44px] xl:min-w-9 xl:min-h-9 rounded-lg bg-brand-600/80 hover:bg-brand-600 flex items-center justify-center transition-colors border border-brand-500/50 backdrop-blur-sm"
-                    >
-                      <Plus className="w-4 h-4 text-white" />
-                    </button>
+                  {/* Quantity Controls & Modifiers */}
+                  <div className="flex flex-col gap-2 mt-2">
+                    {item.modifiers && item.modifiers.length > 0 && (
+                      <div className="flex flex-wrap gap-1">
+                        {item.modifiers.map((mod, idx) => (
+                          <span key={idx} className="text-[10px] px-1.5 py-0.5 bg-neutral-100 text-neutral-600 rounded">+{mod}</span>
+                        ))}
+                      </div>
+                    )}
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); handleUpdateQuantity(item.uniqueId, -1); }}
+                        className="min-w-[44px] min-h-[44px] xl:min-w-9 xl:min-h-9 rounded-lg bg-white/30 hover:bg-white/50 flex items-center justify-center transition-colors border border-white/40"
+                      >
+                        <Minus className="w-4 h-4 text-neutral-700" />
+                      </button>
+                      <span className="text-sm font-bold text-neutral-800 w-8 text-center tabular-nums">{item.quantity}</span>
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); handleUpdateQuantity(item.uniqueId, 1); }}
+                        className="min-w-[44px] min-h-[44px] xl:min-w-9 xl:min-h-9 rounded-lg bg-brand-600/80 hover:bg-brand-600 flex items-center justify-center transition-colors border border-brand-500/50 backdrop-blur-sm"
+                      >
+                        <Plus className="w-4 h-4 text-white" />
+                      </button>
+                      
+                      {ingredients.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); setActiveModifierItem(item); }}
+                          className="ml-2 text-xs font-semibold px-2 py-1.5 rounded bg-brand-50 text-brand-700 border border-brand-200 hover:bg-brand-100 transition-colors"
+                        >
+                          Modifiers
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
                 {/* Line Total + Remove */}
@@ -1119,6 +1159,12 @@ export default function Dashboard() {
                 <span className="font-medium text-neutral-700">{formatCurrency(tax)}</span>
               </div>
             )}
+            {deliveryCharge > 0 && (
+              <div className="flex justify-between text-sm">
+                <span className="text-neutral-500">Delivery charge</span>
+                <span className="font-medium text-neutral-700">{formatCurrency(deliveryCharge)}</span>
+              </div>
+            )}
             <div className="h-px bg-neutral-200 my-1" />
             <div className="flex justify-between items-end">
               <span className="text-sm font-semibold text-neutral-600">Total</span>
@@ -1224,6 +1270,73 @@ export default function Dashboard() {
                     );
                   })}
                 </div>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
+
+      {/* Modifier selection modal */}
+      {activeModifierItem &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <div className="fixed inset-0 z-[200] flex items-end lg:items-center justify-center glass-overlay px-4 pb-8 lg:p-6">
+            <div className="glass-floating rounded-t-3xl lg:rounded-2xl w-full max-w-md lg:max-w-lg animate-slide-up lg:animate-none max-h-[85vh] flex flex-col overflow-hidden">
+              <div className="p-5 border-b border-soot-200/60 flex justify-between items-center bg-white/25 shrink-0">
+                <div>
+                  <h3 className="text-lg font-bold text-soot-900">Add Modifiers</h3>
+                  <p className="text-sm text-soot-500">{activeModifierItem.title}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setActiveModifierItem(null)}
+                  className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-soot-200 transition-colors text-soot-500"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="p-5 overflow-y-auto flex-1">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  {ingredients.map(ing => {
+                    const isActive = activeModifierItem.modifiers?.includes(ing.name);
+                    return (
+                      <button
+                        key={ing.name}
+                        type="button"
+                        onClick={() => {
+                          const mods = activeModifierItem.modifiers || [];
+                          const newMods = isActive ? mods.filter(m => m !== ing.name) : [...mods, ing.name];
+                          
+                          setCart(prev => prev.map(item => 
+                            item.uniqueId === activeModifierItem.uniqueId 
+                              ? { ...item, modifiers: newMods }
+                              : item
+                          ));
+                          setActiveModifierItem({ ...activeModifierItem, modifiers: newMods });
+                        }}
+                        className={`p-3 rounded-xl border-2 text-center transition-all flex flex-col items-center justify-center gap-1.5 ${
+                          isActive
+                            ? 'border-brand-500 bg-brand-50 text-brand-800'
+                            : 'border-soot-200 hover:border-brand-300 hover:bg-brand-50/50 text-soot-700'
+                        }`}
+                      >
+                        <span className="text-sm font-semibold leading-tight line-clamp-2">{ing.name}</span>
+                        {isActive && <span className="text-[10px] font-bold uppercase text-brand-600 bg-brand-100 px-1.5 py-0.5 rounded">Added</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              
+              <div className="p-5 border-t border-soot-200/60 bg-white/50 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setActiveModifierItem(null)}
+                  className="w-full bg-brand-700 hover:bg-brand-600 text-white py-3 rounded-xl font-bold transition-colors"
+                >
+                  Done
+                </button>
               </div>
             </div>
           </div>,

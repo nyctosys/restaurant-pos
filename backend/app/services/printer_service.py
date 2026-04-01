@@ -223,6 +223,11 @@ class PrinterService:
             discount_amount = float(discount_amount)
         except (TypeError, ValueError):
             discount_amount = 0.0
+        delivery_charge = sale_data.get('delivery_charge') or 0
+        try:
+            delivery_charge = float(delivery_charge)
+        except (TypeError, ValueError):
+            delivery_charge = 0.0
         discount_name = (sale_data.get('discount_name') or 'Discount').strip()
 
         try:
@@ -337,6 +342,8 @@ class PrinterService:
                 # Use " - Rs.X" instead of "Rs.-X" to avoid printer firmware issues with minus in amount
                 discount_str = f" - Rs.{discount_amount:,.0f}"
                 self.printer.text(label.ljust(self.ITEM_COL_WIDTH) + discount_str.rjust(self.AMOUNT_COL_WIDTH) + "\n")
+            if delivery_charge > 0:
+                self.printer.text("Delivery charge".ljust(self.ITEM_COL_WIDTH) + f"Rs.{delivery_charge:,.0f}".rjust(self.AMOUNT_COL_WIDTH) + "\n")
             if tax_rate and tax_amount is not None:
                 self.printer.text(f"Tax ({tax_pct:.0f}%)".ljust(self.ITEM_COL_WIDTH) + f"Rs.{tax_amount:,.0f}".rjust(self.AMOUNT_COL_WIDTH) + "\n")
             self.printer.text(sep + "\n")
@@ -422,6 +429,43 @@ class PrinterService:
             items = []
 
         try:
+            def _print_kot_item(raw_item, indent=""):
+                if not isinstance(raw_item, dict):
+                    return
+                title = (raw_item.get("title") or raw_item.get("product_title") or "Item").strip()
+                try:
+                    qty = int(raw_item.get("quantity") or 1)
+                except (TypeError, ValueError):
+                    qty = 1
+                variant = (raw_item.get("variant") or raw_item.get("variant_sku_suffix") or "").strip()
+                is_deal = bool(raw_item.get("is_deal"))
+
+                line = f"{indent}{qty}x {title}"
+                if is_deal:
+                    line = f"{line} [DEAL]"
+                if variant:
+                    line = f"{line} ({variant})"
+                while len(line) > self.RECEIPT_WIDTH:
+                    self.printer.text(line[: self.RECEIPT_WIDTH] + "\n")
+                    line = line[self.RECEIPT_WIDTH :]
+                self.printer.text(line + "\n")
+
+                modifiers = raw_item.get("modifiers") or []
+                if isinstance(modifiers, list):
+                    for mod in modifiers:
+                        if not isinstance(mod, str) or not mod.strip():
+                            continue
+                        mod_line = f"{indent}  + {mod.strip()}"
+                        while len(mod_line) > self.RECEIPT_WIDTH:
+                            self.printer.text(mod_line[: self.RECEIPT_WIDTH] + "\n")
+                            mod_line = mod_line[self.RECEIPT_WIDTH :]
+                        self.printer.text(mod_line + "\n")
+
+                children = raw_item.get("children") or []
+                if isinstance(children, list):
+                    for child in children:
+                        _print_kot_item(child, indent="  ")
+
             self._set_font_scale(2)
             self.printer.set(align="center", bold=True)
             self.printer.text("KITCHEN ORDER\n")
@@ -443,21 +487,7 @@ class PrinterService:
             self.printer.set(bold=False)
             self.printer.text(thin + "\n")
             for raw in items:
-                if not isinstance(raw, dict):
-                    continue
-                title = (raw.get("title") or "Item").strip()
-                try:
-                    qty = int(raw.get("quantity") or 1)
-                except (TypeError, ValueError):
-                    qty = 1
-                variant = (raw.get("variant") or "").strip()
-                line = f"{qty}x {title}"
-                if variant:
-                    line = f"{line} ({variant})"
-                while len(line) > self.RECEIPT_WIDTH:
-                    self.printer.text(line[: self.RECEIPT_WIDTH] + "\n")
-                    line = line[self.RECEIPT_WIDTH :]
-                self.printer.text(line + "\n")
+                _print_kot_item(raw)
             self.printer.text(thin + "\n")
             self.printer.set(align="center")
             self.printer.text("— KDS / Prep —\n\n")

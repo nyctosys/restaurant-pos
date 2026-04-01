@@ -7,18 +7,29 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from sqlalchemy import func, inspect
 
-from app.errors import error_response
 from app.order_metadata import normalize_order_type_and_snapshot
-from app.models import Branch, Inventory, InventoryTransaction, Product, Sale, SaleItem, Setting, User, db
+from app.models import Branch, Ingredient, Inventory, InventoryTransaction, Product, Sale, SaleItem, Setting, StockMovement, User, db
 from app.services.printer_service import PrinterService
 from app_fastapi.deps import get_current_user, require_owner
 from app_fastapi.routers.common import yes
 
 orders_router = APIRouter(prefix="/api/orders", tags=["orders"])
+DELIVERY_CHARGE = 300.0
 
 
 def _sales_table_columns() -> set[str]:
     return {c["name"] for c in inspect(db.engine).get_columns("sales")}
+
+
+def _json_error(error: str, message: str, status_code: int, details: Any = None) -> JSONResponse:
+    payload: dict[str, Any] = {"error": error, "message": message}
+    if details is not None:
+        payload["details"] = details
+    return JSONResponse(status_code=status_code, content=payload)
+
+
+def _delivery_charge_for_order_type(order_type: str | None) -> float:
+    return DELIVERY_CHARGE if order_type == "delivery" else 0.0
 
 
 def get_time_filter_ranges(time_filter: str, start_date_str: str | None, end_date_str: str | None):
@@ -52,37 +63,301 @@ def get_time_filter_ranges(time_filter: str, start_date_str: str | None, end_dat
     return start_dt, end_dt
 
 
+def _process_modifiers(modifiers: list[str], qty: int, branch_id: int, current_user_id: int, sale_id: int) -> tuple[bool, str]:
+    """Deduct stock for ingredient modifiers (if any match by exact name)."""
+    for mod_name in modifiers:
+        ingredient = Ingredient.query.filter_by(name=mod_name).first()
+        if ingredient:
+            if ingredient.current_stock < qty:
+                return False, f"Insufficient stock for modifier: {mod_name}"
+            # Deduct ingredient
+            qty_before = ingredient.current_stock
+            qty_after = qty_before - qty
+            ingredient.current_stock = qty_after
+            db.session.add(
+                StockMovement(
+                    ingredient_id=ingredient.id,
+                    movement_type="sale_deduction",
+                    quantity_change=-qty,
+                    quantity_before=qty_before,
+                    quantity_after=qty_after,
+                    unit_cost=ingredient.average_cost,
+                    reference_id=sale_id,
+                    reference_type="sale",
+                    reason=f"Modifier '{mod_name}' used in sale",
+                    created_by=current_user_id,
+                    branch_id=branch_id
+                )
+            )
+    return True, ""
+
+
+def _normalize_modifiers(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    seen: set[str] = set()
+    normalized: list[str] = []
+    for raw in value:
+        if not isinstance(raw, str):
+            continue
+        mod_name = raw.strip()
+        if not mod_name or mod_name in seen:
+            continue
+        seen.add(mod_name)
+        normalized.append(mod_name)
+    return normalized
+
+
+def _restore_modifiers(
+    modifiers: list[str],
+    qty: int,
+    branch_id: int,
+    current_user_id: int,
+    sale_id: int,
+    reason: str,
+) -> None:
+    for mod_name in _normalize_modifiers(modifiers):
+        ingredient = Ingredient.query.filter_by(name=mod_name).first()
+        if not ingredient:
+            continue
+        qty_before = ingredient.current_stock
+        qty_after = qty_before + qty
+        ingredient.current_stock = qty_after
+        db.session.add(
+            StockMovement(
+                ingredient_id=ingredient.id,
+                movement_type="adjustment",
+                quantity_change=qty,
+                quantity_before=qty_before,
+                quantity_after=qty_after,
+                unit_cost=ingredient.average_cost,
+                reference_id=sale_id,
+                reference_type="sale",
+                reason=reason,
+                created_by=current_user_id,
+                branch_id=branch_id,
+            )
+        )
+
+
+def _restore_sale_item_side_effects(
+    sale_item: SaleItem,
+    branch_id: int,
+    current_user_id: int,
+    reason: str,
+    inventory_reason: str,
+) -> None:
+    product = sale_item.product
+    if not product:
+        return
+
+    if not product.is_deal:
+        inventory = Inventory.query.filter_by(
+            branch_id=branch_id,
+            product_id=sale_item.product_id,
+            variant_sku_suffix=sale_item.variant_sku_suffix or "",
+        ).first()
+        if inventory is not None:
+            inventory.stock_level += sale_item.quantity
+            db.session.add(
+                InventoryTransaction(
+                    branch_id=branch_id,
+                    product_id=sale_item.product_id,
+                    variant_sku_suffix=sale_item.variant_sku_suffix or "",
+                    delta=sale_item.quantity,
+                    reason=inventory_reason,
+                    user_id=current_user_id,
+                    reference_type="sale",
+                    reference_id=sale_item.sale_id,
+                )
+            )
+
+        if hasattr(product, "recipe_items"):
+            for recipe_item in product.recipe_items:
+                ingredient = recipe_item.ingredient
+                if not ingredient:
+                    continue
+                restored_qty = recipe_item.quantity * sale_item.quantity
+                qty_before = ingredient.current_stock
+                qty_after = qty_before + restored_qty
+                ingredient.current_stock = qty_after
+                db.session.add(
+                    StockMovement(
+                        ingredient_id=ingredient.id,
+                        movement_type="adjustment",
+                        quantity_change=restored_qty,
+                        quantity_before=qty_before,
+                        quantity_after=qty_after,
+                        unit_cost=ingredient.average_cost,
+                        reference_id=sale_item.sale_id,
+                        reference_type="sale",
+                        reason=reason,
+                        created_by=current_user_id,
+                        branch_id=branch_id,
+                    )
+                )
+
+    _restore_modifiers(
+        sale_item.modifiers or [],
+        sale_item.quantity,
+        branch_id,
+        current_user_id,
+        sale_item.sale_id,
+        reason,
+    )
+
+
+def _nest_sale_item_dicts(flat_items: list[dict[str, Any]]) -> dict[int, list[dict[str, Any]]]:
+    items_by_id: dict[int, dict[str, Any]] = {}
+    for item in flat_items:
+        items_by_id[item["id"]] = {**item, "children": list(item.get("children") or [])}
+
+    items_by_sale: dict[int, list[dict[str, Any]]] = {}
+    for item in flat_items:
+        item_dict = items_by_id[item["id"]]
+        parent_id = item_dict.get("parent_sale_item_id")
+        if parent_id and parent_id in items_by_id:
+            items_by_id[parent_id]["children"].append(item_dict)
+        else:
+            items_by_sale.setdefault(item_dict["sale_id"], []).append(item_dict)
+    return items_by_sale
+
+
+def _deduct_product_inventory_and_create_sale_items(
+    product: Product,
+    item_dict: dict[str, Any],
+    branch_id: int,
+    current_user_id: int,
+    sale_id: int,
+    parent_sale_item_id: int | None = None,
+    is_deal_child: bool = False
+) -> tuple[bool, str, float]:
+    """Deduct stock and create SaleItem rows, handling deals recursively."""
+    qty = item_dict["quantity"]
+    variant_suf = item_dict.get("variant_sku_suffix", "")
+    modifiers = _normalize_modifiers(item_dict.get("modifiers", []))
+
+    # Unit price is 0 for deal children, so total stays correct on the parent deal
+    unit_price = 0.0 if is_deal_child else float(product.base_price)
+    subtotal = unit_price * qty
+
+    # Create the SaleItem row first (parent deal row or regular item)
+    sale_item = SaleItem(
+        sale_id=sale_id,
+        product_id=product.id,
+        variant_sku_suffix=variant_suf,
+        quantity=qty,
+        unit_price=unit_price,
+        subtotal=subtotal,
+        modifiers=modifiers if not is_deal_child else [],
+        parent_sale_item_id=parent_sale_item_id
+    )
+    db.session.add(sale_item)
+    db.session.flush() # Get sale_item.id
+
+    if not is_deal_child and modifiers:
+        # Process modifiers if this is a top-level item with modifiers
+        ok, err = _process_modifiers(modifiers, qty, branch_id, current_user_id, sale_id)
+        if not ok:
+            return False, err, 0.0
+
+    if not product.is_deal:
+        # 1. Deduct finished goods Inventory
+        inventory = Inventory.query.filter_by(
+            branch_id=branch_id, product_id=product.id, variant_sku_suffix=variant_suf
+        ).first()
+
+        if not inventory or inventory.stock_level < qty:
+            msg = f"Insufficient stock for {product.title}"
+            return False, msg, 0.0
+
+        inventory.stock_level -= qty
+        db.session.add(
+            InventoryTransaction(
+                branch_id=branch_id,
+                product_id=product.id,
+                variant_sku_suffix=variant_suf,
+                delta=-qty,
+                reason="sale",
+                user_id=current_user_id,
+                reference_type="sale",
+                reference_id=sale_id,
+            )
+        )
+
+        # 2. Deduct Raw Materials based on recipe_items
+        if hasattr(product, 'recipe_items'):
+            for recipe_item in product.recipe_items:
+                ingredient = recipe_item.ingredient
+                if ingredient:
+                    total_ing_qty = recipe_item.quantity * qty
+                    if ingredient.current_stock < total_ing_qty:
+                        return False, f"Insufficient raw material: {ingredient.name}", 0.0
+                    
+                    qty_before = ingredient.current_stock
+                    qty_after = qty_before - total_ing_qty
+                    ingredient.current_stock = qty_after
+                    
+                    db.session.add(
+                        StockMovement(
+                            ingredient_id=ingredient.id,
+                            movement_type='sale_deduction',
+                            quantity_change=-total_ing_qty,
+                            quantity_before=qty_before,
+                            quantity_after=qty_after,
+                            unit_cost=ingredient.average_cost,
+                            reference_id=sale_id,
+                            reference_type='sale',
+                            reason=f"Sold {qty}x {product.title}",
+                            created_by=current_user_id,
+                            branch_id=branch_id
+                        )
+                    )
+
+    else:
+        # It is a Deal/Combo, recursively process child products
+        # Standard: do NOT deduct stock for the deal itself, because deals don't have stock
+        # But we DO need to recursively deduct the components and create sub-items
+        for combo_item in product.combo_items:
+            child = combo_item.child_product
+            if child:
+                child_dict = {
+                    "product_id": child.id,
+                    "variant_sku_suffix": "", 
+                    "quantity": qty * combo_item.quantity,
+                    "modifiers": []
+                }
+                ok, err, _ = _deduct_product_inventory_and_create_sale_items(
+                    child, child_dict, branch_id, current_user_id, sale_id, 
+                    parent_sale_item_id=sale_item.id, is_deal_child=True
+                )
+                if not ok:
+                    return False, err, 0.0
+
+    return True, "", subtotal
+
+
 @orders_router.post("/checkout")
 def checkout(payload: dict[str, Any] | None = None, current_user: User = Depends(get_current_user)):
     data = payload or {}
     if "items" not in data or "payment_method" not in data:
-        return error_response("Bad Request", "Missing necessary checkout data", 400)
+        return _json_error("Bad Request", "Missing necessary checkout data", 400)
     _ = data.get("notes")
-    items = data["items"]
-    if not items:
-        return error_response("Bad Request", "Cart is empty", 400)
-    for idx, item in enumerate(items):
-        if not isinstance(item, dict):
-            return error_response("Bad Request", f"Item at index {idx} must be an object", 400)
-        if item.get("product_id") is None:
-            return error_response("Bad Request", f"Item at index {idx} missing product_id", 400)
-        try:
-            qty = int(item.get("quantity", 0))
-        except (TypeError, ValueError):
-            return error_response("Bad Request", f"Item at index {idx} quantity must be a positive integer", 400)
-        if qty <= 0:
-            return error_response("Bad Request", f"Item at index {idx} quantity must be positive", 400)
+    items, verr = _validate_cart_items(data.get("items") or [])
+    if verr:
+        return verr
+    assert items is not None
     branch_id = data.get("branch_id")
     if current_user.role != "owner":
         branch_id = current_user.branch_id
     elif not branch_id:
         branch_id = current_user.branch_id or 1
     if not branch_id:
-        return error_response("Bad Request", "Branch ID must be provided or linked to the user", 400)
+        return _json_error("Bad Request", "Branch ID must be provided or linked to the user", 400)
 
     order_type_norm, order_snapshot_norm, order_err = normalize_order_type_and_snapshot(data)
     if order_err:
-        return error_response("Bad Request", order_err, 400)
+        return _json_error("Bad Request", order_err, 400)
 
     setting = Setting.query.filter_by(branch_id=branch_id).first() or Setting.query.filter_by(branch_id=None).first()
     tax_rate = 0.0
@@ -110,39 +385,20 @@ def checkout(payload: dict[str, Any] | None = None, current_user: User = Depends
             product = Product.query.get(item["product_id"])
             if product is None:
                 db.session.rollback()
-                return error_response("Bad Request", f"Product ID {item['product_id']} not found", 400)
-            inventory = Inventory.query.filter_by(
-                branch_id=branch_id, product_id=product.id, variant_sku_suffix=item.get("variant_sku_suffix", "")
-            ).first()
-            if not inventory or inventory.stock_level < item["quantity"]:
+                return _json_error("Bad Request", f"Product ID {item['product_id']} not found", 400)
+            
+            ok, err, subtotal = _deduct_product_inventory_and_create_sale_items(
+                product=product,
+                item_dict=item,
+                branch_id=branch_id,
+                current_user_id=current_user.id,
+                sale_id=new_sale.id
+            )
+            if not ok:
                 db.session.rollback()
-                return error_response("Bad Request", f"Insufficient stock for {product.title}", 400)
-            inventory.stock_level -= item["quantity"]
-            db.session.add(
-                InventoryTransaction(
-                    branch_id=branch_id,
-                    product_id=product.id,
-                    variant_sku_suffix=item.get("variant_sku_suffix", ""),
-                    delta=-item["quantity"],
-                    reason="sale",
-                    user_id=current_user.id,
-                    reference_type="sale",
-                    reference_id=new_sale.id,
-                )
-            )
-            unit_price = float(product.base_price)
-            subtotal = unit_price * item["quantity"]
+                return _json_error("Bad Request", err, 400)
+            
             total_amount += subtotal
-            db.session.add(
-                SaleItem(
-                    sale_id=new_sale.id,
-                    product_id=product.id,
-                    variant_sku_suffix=item.get("variant_sku_suffix", ""),
-                    quantity=item["quantity"],
-                    unit_price=unit_price,
-                    subtotal=subtotal,
-                )
-            )
         discount_amount = 0.0
         discount_id = None
         discount_snapshot = None
@@ -158,11 +414,13 @@ def checkout(payload: dict[str, Any] | None = None, current_user: User = Depends
                 discount_id = discount_data.get("id")
                 discount_snapshot = {"name": discount_data.get("name") or "Discount", "type": d_type, "value": d_value}
         discounted_subtotal = total_amount - discount_amount
+        delivery_charge = _delivery_charge_for_order_type(order_type_norm)
         new_sale.discount_amount = discount_amount
         new_sale.discount_id = discount_id
         new_sale.discount_snapshot = discount_snapshot
+        new_sale.delivery_charge = delivery_charge
         new_sale.tax_amount = discounted_subtotal * tax_rate
-        new_sale.total_amount = discounted_subtotal + new_sale.tax_amount
+        new_sale.total_amount = discounted_subtotal + new_sale.tax_amount + delivery_charge
         db.session.commit()
         printer_service = PrinterService()
         branch_name = "Main Branch"
@@ -187,6 +445,7 @@ def checkout(payload: dict[str, Any] | None = None, current_user: User = Depends
                 "tax_amount": float(new_sale.tax_amount),
                 "tax_rate": float(tax_rate),
                 "discount_amount": float(discount_amount),
+                "delivery_charge": float(delivery_charge),
                 "discount_name": discount_name or "Discount",
                 "operator": current_user.username,
                 "branch": branch_name,
@@ -207,7 +466,7 @@ def checkout(payload: dict[str, Any] | None = None, current_user: User = Depends
         )
     except Exception as exc:
         db.session.rollback()
-        return error_response("Bad Request", f"Checkout failed: {str(exc)}", 400)
+        return _json_error("Bad Request", f"Checkout failed: {str(exc)}", 400)
 
 
 @orders_router.get("/")
@@ -334,24 +593,25 @@ def get_analytics(
 
 def _validate_cart_items(items: list) -> tuple[Optional[list[dict]], Optional[JSONResponse]]:
     if not items:
-        return None, error_response("Bad Request", "Cart is empty", 400)
+            return None, _json_error("Bad Request", "Cart is empty", 400)
     normalized: list[dict] = []
     for idx, item in enumerate(items):
         if not isinstance(item, dict):
-            return None, error_response("Bad Request", f"Item at index {idx} must be an object", 400)
+            return None, _json_error("Bad Request", f"Item at index {idx} must be an object", 400)
         if item.get("product_id") is None:
-            return None, error_response("Bad Request", f"Item at index {idx} missing product_id", 400)
+            return None, _json_error("Bad Request", f"Item at index {idx} missing product_id", 400)
         try:
             qty = int(item.get("quantity", 0))
         except (TypeError, ValueError):
-            return None, error_response("Bad Request", f"Item at index {idx} quantity must be a positive integer", 400)
+            return None, _json_error("Bad Request", f"Item at index {idx} quantity must be a positive integer", 400)
         if qty <= 0:
-            return None, error_response("Bad Request", f"Item at index {idx} quantity must be positive", 400)
+            return None, _json_error("Bad Request", f"Item at index {idx} quantity must be positive", 400)
         normalized.append(
             {
                 "product_id": int(item["product_id"]),
                 "variant_sku_suffix": item.get("variant_sku_suffix", "") or "",
                 "quantity": qty,
+                "modifiers": _normalize_modifiers(item.get("modifiers") or []),
             }
         )
     return normalized, None
@@ -364,7 +624,7 @@ def _resolve_branch_id(data: dict[str, Any], current_user: User) -> tuple[int | 
     elif not branch_id:
         branch_id = current_user.branch_id or 1
     if not branch_id:
-        return None, error_response("Bad Request", "Branch ID must be provided or linked to the user", 400)
+        return None, _json_error("Bad Request", "Branch ID must be provided or linked to the user", 400)
     return int(branch_id), None
 
 
@@ -466,25 +726,37 @@ def list_active_dine_in_orders(
         if includeItems and sale_ids:
             items_rows = (
                 db.session.query(
+                    SaleItem.id,
                     SaleItem.sale_id,
                     SaleItem.variant_sku_suffix,
                     SaleItem.quantity,
+                    SaleItem.modifiers,
+                    SaleItem.parent_sale_item_id,
                     Product.title,
+                    Product.is_deal
                 )
                 .outerjoin(Product, SaleItem.product_id == Product.id)
                 .filter(SaleItem.sale_id.in_(sale_ids))
                 .all()
             )
 
-            items_by_sale: dict[int, list[dict[str, Any]]] = {}
-            for s_id, variant_suf, qty, product_title in items_rows:
-                items_by_sale.setdefault(s_id, []).append(
+            flat_items: list[dict[str, Any]] = []
+            for item in items_rows:
+                flat_items.append(
                     {
-                        "product_title": product_title if product_title else "Unknown",
-                        "variant_sku_suffix": variant_suf or "",
-                        "quantity": qty,
+                        "id": item.id,
+                        "sale_id": item.sale_id,
+                        "product_title": item.title if item.title else "Unknown",
+                        "variant_sku_suffix": item.variant_sku_suffix or "",
+                        "quantity": item.quantity,
+                        "modifiers": _normalize_modifiers(item.modifiers or []),
+                        "parent_sale_item_id": item.parent_sale_item_id,
+                        "is_deal": item.is_deal,
+                        "children": [],
                     }
                 )
+
+            items_by_sale = _nest_sale_item_dicts(flat_items)
 
             for out_row in out:
                 out_row["items"] = items_by_sale.get(out_row["id"], [])
@@ -499,7 +771,7 @@ def dine_in_kot(payload: dict[str, Any] | None = None, current_user: User = Depe
     """Create an open dine-in sale, deduct stock, print KOT (kitchen ticket). No payment yet."""
     data = payload or {}
     if "items" not in data:
-        return error_response("Bad Request", "Missing items", 400)
+        return _json_error("Bad Request", "Missing items", 400)
     items, verr = _validate_cart_items(data["items"])
     if verr:
         return verr
@@ -514,7 +786,7 @@ def dine_in_kot(payload: dict[str, Any] | None = None, current_user: User = Depe
         {"order_type": "dine_in", "order_snapshot": data.get("order_snapshot")}
     )
     if order_err:
-        return error_response("Bad Request", order_err, 400)
+        return _json_error("Bad Request", order_err, 400)
     assert order_type_norm == "dine_in"
 
     try:
@@ -535,39 +807,20 @@ def dine_in_kot(payload: dict[str, Any] | None = None, current_user: User = Depe
             product = Product.query.get(item["product_id"])
             if product is None:
                 db.session.rollback()
-                return error_response("Bad Request", f"Product ID {item['product_id']} not found", 400)
-            inventory = Inventory.query.filter_by(
-                branch_id=bid, product_id=product.id, variant_sku_suffix=item["variant_sku_suffix"]
-            ).first()
-            if not inventory or inventory.stock_level < item["quantity"]:
+                return _json_error("Bad Request", f"Product ID {item['product_id']} not found", 400)
+            
+            ok, err, subtotal = _deduct_product_inventory_and_create_sale_items(
+                product=product,
+                item_dict=item,
+                branch_id=bid,
+                current_user_id=current_user.id,
+                sale_id=new_sale.id
+            )
+            if not ok:
                 db.session.rollback()
-                return error_response("Bad Request", f"Insufficient stock for {product.title}", 400)
-            inventory.stock_level -= item["quantity"]
-            db.session.add(
-                InventoryTransaction(
-                    branch_id=bid,
-                    product_id=product.id,
-                    variant_sku_suffix=item["variant_sku_suffix"],
-                    delta=-item["quantity"],
-                    reason="sale",
-                    user_id=current_user.id,
-                    reference_type="sale",
-                    reference_id=new_sale.id,
-                )
-            )
-            unit_price = float(product.base_price)
-            subtotal = unit_price * item["quantity"]
+                return _json_error("Bad Request", err, 400)
+            
             total_amount += subtotal
-            db.session.add(
-                SaleItem(
-                    sale_id=new_sale.id,
-                    product_id=product.id,
-                    variant_sku_suffix=item["variant_sku_suffix"],
-                    quantity=item["quantity"],
-                    unit_price=unit_price,
-                    subtotal=subtotal,
-                )
-            )
         new_sale.discount_amount = 0
         new_sale.discount_id = None
         new_sale.discount_snapshot = None
@@ -580,17 +833,37 @@ def dine_in_kot(payload: dict[str, Any] | None = None, current_user: User = Depe
         if branch_obj:
             branch_name = branch_obj.name
         table_name = (order_snapshot_norm or {}).get("table_name", "") if isinstance(order_snapshot_norm, dict) else ""
-        kot_items = []
-        for item in items:
-            product = Product.query.get(item["product_id"])
-            suf = item["variant_sku_suffix"] or ""
-            kot_items.append(
+        kot_items_rows = (
+            db.session.query(
+                SaleItem.id,
+                SaleItem.sale_id,
+                SaleItem.variant_sku_suffix,
+                SaleItem.quantity,
+                SaleItem.modifiers,
+                SaleItem.parent_sale_item_id,
+                Product.title,
+                Product.is_deal,
+            )
+            .outerjoin(Product, SaleItem.product_id == Product.id)
+            .filter(SaleItem.sale_id == new_sale.id)
+            .all()
+        )
+        kot_flat_items: list[dict[str, Any]] = []
+        for item in kot_items_rows:
+            kot_flat_items.append(
                 {
-                    "title": str(product.title if product else "Item"),
-                    "quantity": int(item["quantity"]),
-                    "variant": suf,
+                    "id": item.id,
+                    "sale_id": item.sale_id,
+                    "product_title": item.title if item.title else "Unknown",
+                    "variant_sku_suffix": item.variant_sku_suffix or "",
+                    "quantity": item.quantity,
+                    "modifiers": _normalize_modifiers(item.modifiers or []),
+                    "parent_sale_item_id": item.parent_sale_item_id,
+                    "is_deal": item.is_deal,
+                    "children": [],
                 }
             )
+        kot_items = _nest_sale_item_dicts(kot_flat_items).get(new_sale.id, [])
         printer_service = PrinterService()
         print_ok = printer_service.print_kot(
             {
@@ -612,7 +885,7 @@ def dine_in_kot(payload: dict[str, Any] | None = None, current_user: User = Depe
         )
     except Exception as exc:
         db.session.rollback()
-        return error_response("Bad Request", f"KOT failed: {str(exc)}", 400)
+        return _json_error("Bad Request", f"KOT failed: {str(exc)}", 400)
 
 
 @orders_router.patch("/{sale_id}/items")
@@ -622,12 +895,12 @@ def update_open_sale_items(sale_id: int, payload: dict[str, Any] | None = None, 
     if not sale:
         raise HTTPException(status_code=404, detail="Not Found")
     if current_user.role != "owner" and sale.branch_id != current_user.branch_id:
-        return error_response("Forbidden", "Unauthorized", 403)
+        return _json_error("Forbidden", "Unauthorized", 403)
     if getattr(sale, "status", "") != "open":
-        return error_response("Bad Request", "Only open unpaid orders can be edited", 400)
+        return _json_error("Bad Request", "Only open unpaid orders can be edited", 400)
     data = payload or {}
     if "items" not in data:
-        return error_response("Bad Request", "Missing items", 400)
+        return _json_error("Bad Request", "Missing items", 400)
     items, verr = _validate_cart_items(data["items"])
     if verr:
         return verr
@@ -635,25 +908,13 @@ def update_open_sale_items(sale_id: int, payload: dict[str, Any] | None = None, 
 
     try:
         for old in list(sale.items):
-            inventory = Inventory.query.filter_by(
+            _restore_sale_item_side_effects(
+                old,
                 branch_id=sale.branch_id,
-                product_id=old.product_id,
-                variant_sku_suffix=old.variant_sku_suffix or "",
-            ).first()
-            if inventory is not None:
-                inventory.stock_level += old.quantity
-                db.session.add(
-                    InventoryTransaction(
-                        branch_id=sale.branch_id,
-                        product_id=old.product_id,
-                        variant_sku_suffix=old.variant_sku_suffix or "",
-                        delta=old.quantity,
-                        reason="adjustment",
-                        user_id=current_user.id,
-                        reference_type="sale",
-                        reference_id=sale_id,
-                    )
-                )
+                current_user_id=current_user.id,
+                reason=f"Open order #{sale_id} edited",
+                inventory_reason="adjustment",
+            )
             db.session.delete(old)
         db.session.flush()
 
@@ -662,39 +923,20 @@ def update_open_sale_items(sale_id: int, payload: dict[str, Any] | None = None, 
             product = Product.query.get(item["product_id"])
             if product is None:
                 db.session.rollback()
-                return error_response("Bad Request", f"Product ID {item['product_id']} not found", 400)
-            inventory = Inventory.query.filter_by(
-                branch_id=sale.branch_id, product_id=product.id, variant_sku_suffix=item["variant_sku_suffix"]
-            ).first()
-            if not inventory or inventory.stock_level < item["quantity"]:
+                return _json_error("Bad Request", f"Product ID {item['product_id']} not found", 400)
+            
+            ok, err, subtotal = _deduct_product_inventory_and_create_sale_items(
+                product=product,
+                item_dict=item,
+                branch_id=sale.branch_id,
+                current_user_id=current_user.id,
+                sale_id=sale_id
+            )
+            if not ok:
                 db.session.rollback()
-                return error_response("Bad Request", f"Insufficient stock for {product.title}", 400)
-            inventory.stock_level -= item["quantity"]
-            db.session.add(
-                InventoryTransaction(
-                    branch_id=sale.branch_id,
-                    product_id=product.id,
-                    variant_sku_suffix=item["variant_sku_suffix"],
-                    delta=-item["quantity"],
-                    reason="sale",
-                    user_id=current_user.id,
-                    reference_type="sale",
-                    reference_id=sale_id,
-                )
-            )
-            unit_price = float(product.base_price)
-            subtotal = unit_price * item["quantity"]
+                return _json_error("Bad Request", err, 400)
+            
             total_amount += subtotal
-            db.session.add(
-                SaleItem(
-                    sale_id=sale_id,
-                    product_id=product.id,
-                    variant_sku_suffix=item["variant_sku_suffix"],
-                    quantity=item["quantity"],
-                    unit_price=unit_price,
-                    subtotal=subtotal,
-                )
-            )
         sale.total_amount = total_amount
         sale.tax_amount = 0
         sale.discount_amount = 0
@@ -704,7 +946,7 @@ def update_open_sale_items(sale_id: int, payload: dict[str, Any] | None = None, 
         return {"message": "Order updated", "sale_id": sale_id, "total_amount": float(total_amount)}
     except Exception as exc:
         db.session.rollback()
-        return error_response("Bad Request", f"Update failed: {str(exc)}", 400)
+        return _json_error("Bad Request", f"Update failed: {str(exc)}", 400)
 
 
 @orders_router.post("/{sale_id}/finalize")
@@ -714,12 +956,12 @@ def finalize_open_sale(sale_id: int, payload: dict[str, Any] | None = None, curr
     if not sale:
         raise HTTPException(status_code=404, detail="Not Found")
     if current_user.role != "owner" and sale.branch_id != current_user.branch_id:
-        return error_response("Forbidden", "Unauthorized", 403)
+        return _json_error("Forbidden", "Unauthorized", 403)
     if getattr(sale, "status", "") != "open":
-        return error_response("Bad Request", "Order is not awaiting payment", 400)
+        return _json_error("Bad Request", "Order is not awaiting payment", 400)
     data = payload or {}
     if not data.get("payment_method"):
-        return error_response("Bad Request", "payment_method is required", 400)
+        return _json_error("Bad Request", "payment_method is required", 400)
 
     setting = Setting.query.filter_by(branch_id=sale.branch_id).first() or Setting.query.filter_by(branch_id=None).first()
     tax_rate = 0.0
@@ -747,14 +989,16 @@ def finalize_open_sale(sale_id: int, payload: dict[str, Any] | None = None, curr
             discount_id = discount_data.get("id")
             discount_snapshot = {"name": discount_data.get("name") or "Discount", "type": d_type, "value": d_value}
     discounted_subtotal = items_sum - discount_amount
+    delivery_charge = _delivery_charge_for_order_type(getattr(sale, "order_type", None))
     tax_amount = discounted_subtotal * tax_rate
-    total_with_tax = discounted_subtotal + tax_amount
+    total_with_tax = discounted_subtotal + tax_amount + delivery_charge
 
     try:
         sale.payment_method = data["payment_method"]
         sale.discount_amount = discount_amount
         sale.discount_id = discount_id
         sale.discount_snapshot = discount_snapshot
+        sale.delivery_charge = delivery_charge
         sale.tax_amount = tax_amount
         sale.total_amount = total_with_tax
         sale.status = "completed"
@@ -780,6 +1024,7 @@ def finalize_open_sale(sale_id: int, payload: dict[str, Any] | None = None, curr
                 "tax_amount": float(sale.tax_amount),
                 "tax_rate": float(tax_rate),
                 "discount_amount": float(discount_amount),
+                "delivery_charge": float(delivery_charge),
                 "discount_name": discount_name or "Discount",
                 "operator": current_user.username,
                 "branch": branch_name,
@@ -800,7 +1045,7 @@ def finalize_open_sale(sale_id: int, payload: dict[str, Any] | None = None, curr
         )
     except Exception as exc:
         db.session.rollback()
-        return error_response("Bad Request", f"Finalize failed: {str(exc)}", 400)
+        return _json_error("Bad Request", f"Finalize failed: {str(exc)}", 400)
 
 
 @orders_router.post("/{sale_id}/cancel-open")
@@ -810,36 +1055,24 @@ def cancel_open_sale(sale_id: int, current_user: User = Depends(get_current_user
     if not sale:
         raise HTTPException(status_code=404, detail="Not Found")
     if current_user.role != "owner" and sale.branch_id != current_user.branch_id:
-        return error_response("Forbidden", "Unauthorized", 403)
+        return _json_error("Forbidden", "Unauthorized", 403)
     if getattr(sale, "status", "") != "open":
-        return error_response("Bad Request", "Only open unpaid orders can be cancelled this way", 400)
+        return _json_error("Bad Request", "Only open unpaid orders can be cancelled this way", 400)
     try:
         for item in list(sale.items):
-            inventory = Inventory.query.filter_by(
+            _restore_sale_item_side_effects(
+                item,
                 branch_id=sale.branch_id,
-                product_id=item.product_id,
-                variant_sku_suffix=item.variant_sku_suffix or "",
-            ).first()
-            if inventory is not None:
-                inventory.stock_level += item.quantity
-                db.session.add(
-                    InventoryTransaction(
-                        branch_id=sale.branch_id,
-                        product_id=item.product_id,
-                        variant_sku_suffix=item.variant_sku_suffix or "",
-                        delta=item.quantity,
-                        reason="adjustment",
-                        user_id=current_user.id,
-                        reference_type="sale",
-                        reference_id=sale_id,
-                    )
-                )
+                current_user_id=current_user.id,
+                reason=f"Open order #{sale_id} cancelled",
+                inventory_reason="adjustment",
+            )
         db.session.delete(sale)
         db.session.commit()
         return {"message": "Open order cancelled", "sale_id": sale_id}
     except Exception as exc:
         db.session.rollback()
-        return error_response("Internal Server Error", str(exc), 500)
+        return _json_error("Internal Server Error", str(exc), 500)
 
 
 @orders_router.get("/{sale_id}")
@@ -848,19 +1081,26 @@ def get_sale_details(sale_id: int, current_user: User = Depends(get_current_user
     if not sale:
         raise HTTPException(status_code=404, detail="Not Found")
     if current_user.role != "owner" and sale.branch_id != current_user.branch_id:
-        return error_response("Forbidden", "Unauthorized", 403)
-    items = [
-        {
-            "id": i.id,
-            "product_id": i.product_id,
-            "product_title": i.product.title if i.product else "Unknown",
-            "variant_sku_suffix": i.variant_sku_suffix,
-            "quantity": i.quantity,
-            "unit_price": float(i.unit_price),
-            "subtotal": float(i.subtotal),
-        }
-        for i in sale.items
-    ]
+        return _json_error("Forbidden", "Unauthorized", 403)
+    flat_items: list[dict[str, Any]] = []
+    for i in sale.items:
+        flat_items.append(
+            {
+                "id": i.id,
+                "sale_id": sale.id,
+                "product_id": i.product_id,
+                "product_title": i.product.title if i.product else "Unknown",
+                "variant_sku_suffix": i.variant_sku_suffix,
+                "quantity": i.quantity,
+                "unit_price": float(i.unit_price),
+                "subtotal": float(i.subtotal),
+                "modifiers": _normalize_modifiers(i.modifiers or []),
+                "parent_sale_item_id": i.parent_sale_item_id,
+                "is_deal": bool(i.product.is_deal) if i.product else False,
+                "children": [],
+            }
+        )
+    items = _nest_sale_item_dicts(flat_items).get(sale.id, [])
     out = {
         "id": sale.id,
         "user_id": sale.user_id,
@@ -872,6 +1112,7 @@ def get_sale_details(sale_id: int, current_user: User = Depends(get_current_user
         "created_at": sale.created_at.isoformat(),
         "status": getattr(sale, "status", "completed"),
         "discount_amount": float(getattr(sale, "discount_amount", 0) or 0),
+        "delivery_charge": float(getattr(sale, "delivery_charge", 0) or 0),
         "discount_snapshot": getattr(sale, "discount_snapshot", None),
         "order_type": getattr(sale, "order_type", None),
         "order_snapshot": getattr(sale, "order_snapshot", None),
@@ -888,36 +1129,26 @@ def rollback_sale(sale_id: int, current_user: User = Depends(get_current_user)):
     if not sale:
         raise HTTPException(status_code=404, detail="Not Found")
     if current_user.role != "owner" and sale.branch_id != current_user.branch_id:
-        return error_response("Forbidden", "Unauthorized", 403)
+        return _json_error("Forbidden", "Unauthorized", 403)
     if getattr(sale, "status", "completed") == "open":
-        return error_response("Bad Request", "Unpaid dine-in order: cancel from Active Dine-In or void the open tab first", 400)
+        return _json_error("Bad Request", "Unpaid dine-in order: cancel from Active Dine-In or void the open tab first", 400)
     if getattr(sale, "status", "completed") == "refunded":
-        return error_response("Bad Request", "Sale already refunded", 400)
+        return _json_error("Bad Request", "Sale already refunded", 400)
     try:
         sale.status = "refunded"
         for item in sale.items:
-            inventory = Inventory.query.filter_by(
-                branch_id=sale.branch_id, product_id=item.product_id, variant_sku_suffix=item.variant_sku_suffix or ""
-            ).first()
-            if inventory is not None:
-                inventory.stock_level += item.quantity
-                db.session.add(
-                    InventoryTransaction(
-                        branch_id=sale.branch_id,
-                        product_id=item.product_id,
-                        variant_sku_suffix=item.variant_sku_suffix or "",
-                        delta=item.quantity,
-                        reason="refund",
-                        user_id=current_user.id,
-                        reference_type="sale_refund",
-                        reference_id=sale_id,
-                    )
-                )
+            _restore_sale_item_side_effects(
+                item,
+                branch_id=sale.branch_id,
+                current_user_id=current_user.id,
+                reason=f"Sale #{sale_id} refunded",
+                inventory_reason="refund",
+            )
         db.session.commit()
         return {"message": "Sale rolled back successfully"}
     except Exception as exc:
         db.session.rollback()
-        return error_response("Internal Server Error", f"Rollback failed: {str(exc)}", 500)
+        return _json_error("Internal Server Error", f"Rollback failed: {str(exc)}", 500)
 
 
 @orders_router.patch("/{sale_id}/archive")
@@ -926,16 +1157,16 @@ def archive_sale(sale_id: int, current_user: User = Depends(get_current_user)):
     if not sale:
         raise HTTPException(status_code=404, detail="Not Found")
     if current_user.role != "owner" and sale.branch_id != current_user.branch_id:
-        return error_response("Forbidden", "Unauthorized", 403)
+        return _json_error("Forbidden", "Unauthorized", 403)
     if not hasattr(sale, "archived_at"):
-        return error_response("Bad Request", "Archive not supported", 400)
+        return _json_error("Bad Request", "Archive not supported", 400)
     try:
         sale.archived_at = datetime.utcnow()
         db.session.commit()
         return {"message": "Transaction archived", "archived_at": sale.archived_at.isoformat()}
     except Exception as exc:
         db.session.rollback()
-        return error_response("Internal Server Error", str(exc), 500)
+        return _json_error("Internal Server Error", str(exc), 500)
 
 
 @orders_router.patch("/{sale_id}/unarchive")
@@ -944,16 +1175,16 @@ def unarchive_sale(sale_id: int, current_user: User = Depends(get_current_user))
     if not sale:
         raise HTTPException(status_code=404, detail="Not Found")
     if current_user.role != "owner" and sale.branch_id != current_user.branch_id:
-        return error_response("Forbidden", "Unauthorized", 403)
+        return _json_error("Forbidden", "Unauthorized", 403)
     if not hasattr(sale, "archived_at"):
-        return error_response("Bad Request", "Unarchive not supported", 400)
+        return _json_error("Bad Request", "Unarchive not supported", 400)
     try:
         sale.archived_at = None
         db.session.commit()
         return {"message": "Transaction restored"}
     except Exception as exc:
         db.session.rollback()
-        return error_response("Internal Server Error", str(exc), 500)
+        return _json_error("Internal Server Error", str(exc), 500)
 
 
 @orders_router.delete("/{sale_id}")
@@ -962,7 +1193,7 @@ def delete_sale_permanent(sale_id: int, current_user: User = Depends(require_own
     if not sale:
         raise HTTPException(status_code=404, detail="Not Found")
     if current_user.role != "owner" and sale.branch_id != current_user.branch_id:
-        return error_response("Forbidden", "Unauthorized", 403)
+        return _json_error("Forbidden", "Unauthorized", 403)
     items_count = len(sale.items)
     try:
         db.session.delete(sale)
@@ -970,7 +1201,7 @@ def delete_sale_permanent(sale_id: int, current_user: User = Depends(require_own
         return {"message": "Transaction permanently deleted.", "related_deleted": {"sale_items": items_count}}
     except Exception as exc:
         db.session.rollback()
-        return error_response("Internal Server Error", str(exc), 500)
+        return _json_error("Internal Server Error", str(exc), 500)
 
 
 @orders_router.post("/{sale_id}/print")
@@ -979,11 +1210,12 @@ def print_sale(sale_id: int, current_user: User = Depends(get_current_user)):
     if not sale:
         raise HTTPException(status_code=404, detail="Not Found")
     if current_user.role != "owner" and sale.branch_id != current_user.branch_id:
-        return error_response("Forbidden", "Unauthorized", 403)
+        return _json_error("Forbidden", "Unauthorized", 403)
     if getattr(sale, "status", "") == "open":
-        return error_response("Bad Request", "Finalize payment before printing a customer receipt", 400)
+        return _json_error("Bad Request", "Finalize payment before printing a customer receipt", 400)
     discount_amount = float(getattr(sale, "discount_amount", 0) or 0)
-    discounted_subtotal = float(sale.total_amount) - float(sale.tax_amount)
+    delivery_charge = float(getattr(sale, "delivery_charge", 0) or 0)
+    discounted_subtotal = float(sale.total_amount) - float(sale.tax_amount) - delivery_charge
     subtotal = discounted_subtotal + discount_amount
     tax_rate = (float(sale.tax_amount) / discounted_subtotal) if discounted_subtotal else 0
     discount_name = sale.discount_snapshot.get("name") if isinstance(getattr(sale, "discount_snapshot", None), dict) else None
@@ -994,6 +1226,7 @@ def print_sale(sale_id: int, current_user: User = Depends(get_current_user)):
         "tax_amount": float(sale.tax_amount),
         "tax_rate": tax_rate,
         "discount_amount": discount_amount,
+        "delivery_charge": delivery_charge,
         "discount_name": discount_name,
         "operator": sale.user.username if sale.user else "Unknown",
         "branch": sale.branch.name if sale.branch else "Main Branch",

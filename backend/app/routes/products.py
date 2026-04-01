@@ -1,6 +1,6 @@
 from flask import Blueprint, request, jsonify
 from datetime import datetime
-from app.models import db, Product, Inventory, SaleItem
+from app.models import db, Product, Inventory, SaleItem, RecipeItem
 from app.utils.auth_decorators import token_required, owner_required
 
 products_bp = Blueprint('products', __name__)
@@ -14,6 +14,7 @@ def _product_to_dict(product):
         'section': product.section or '',
         'variants': product.variants or [],
         'image_url': product.image_url or '',
+        'is_deal': getattr(product, 'is_deal', False),
         'archived_at': product.archived_at.isoformat() if getattr(product, 'archived_at', None) else None,
     }
 
@@ -163,6 +164,7 @@ def delete_product(current_user, product_id):
     try:
         SaleItem.query.filter_by(product_id=product_id).update({'product_id': None}, synchronize_session=False)
         Inventory.query.filter_by(product_id=product_id).delete()
+        RecipeItem.query.filter_by(product_id=product_id).delete()
         db.session.delete(product)
         db.session.commit()
         return jsonify({

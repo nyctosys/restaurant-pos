@@ -22,6 +22,7 @@ def _product_to_dict(product: Product) -> dict[str, Any]:
         "section": product.section or "",
         "variants": product.variants or [],
         "image_url": product.image_url or "",
+        "is_deal": getattr(product, "is_deal", False) or False,
         "archived_at": product.archived_at.isoformat() if getattr(product, "archived_at", None) else None,
     }
 

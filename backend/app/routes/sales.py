@@ -1,7 +1,7 @@
 from flask import Blueprint, request, jsonify
 from sqlalchemy import func
 from datetime import datetime, timedelta, time
-from app.models import db, Sale, SaleItem, Inventory, InventoryTransaction, Product, Setting
+from app.models import db, Sale, SaleItem, Inventory, InventoryTransaction, Product, Setting, StockMovement
 from app.utils.auth_decorators import token_required, owner_required
 from app.errors import error_response
 from app.order_metadata import normalize_order_type_and_snapshot
@@ -88,29 +88,71 @@ def checkout(current_user):
                 db.session.rollback()
                 return error_response("Bad Request", f"Product ID {item['product_id']} not found", 400)
             
-            # Check Inventory
-            inventory = Inventory.query.filter_by(
-                branch_id=branch_id, 
-                product_id=product.id,
-                variant_sku_suffix=item.get('variant_sku_suffix', '')
-            ).first()
+            def deduct_product(p, qty, item_v_suffix):
+                if not p.is_deal:
+                    # 1. Deduct finished goods Inventory
+                    inventory = Inventory.query.filter_by(
+                        branch_id=branch_id, 
+                        product_id=p.id,
+                        variant_sku_suffix=item_v_suffix
+                    ).first()
 
-            if not inventory or inventory.stock_level < item['quantity']:
+                    if not inventory or inventory.stock_level < qty:
+                        return False, f"Insufficient stock for {p.title}"
+
+                    inventory.stock_level -= qty
+                    db.session.add(InventoryTransaction(
+                        branch_id=branch_id,
+                        product_id=p.id,
+                        variant_sku_suffix=item_v_suffix,
+                        delta=-qty,
+                        reason='sale',
+                        user_id=current_user.id,
+                        reference_type='sale',
+                        reference_id=new_sale.id,
+                    ))
+
+                    # 2. Deduct Raw Materials based on recipe_items
+                    if hasattr(p, 'recipe_items'):
+                        for recipe_item in p.recipe_items:
+                            ingredient = recipe_item.ingredient
+                            if ingredient:
+                                total_ing_qty = recipe_item.quantity * qty
+                                if ingredient.current_stock < total_ing_qty:
+                                    return False, f"Insufficient raw material: {ingredient.name}"
+                                
+                                qty_before = ingredient.current_stock
+                                qty_after = qty_before - total_ing_qty
+                                ingredient.current_stock = qty_after
+                                
+                                sm = StockMovement(
+                                    ingredient_id=ingredient.id,
+                                    movement_type='sale',
+                                    quantity_change=-total_ing_qty,
+                                    quantity_before=qty_before,
+                                    quantity_after=qty_after,
+                                    unit_cost=ingredient.average_cost,
+                                    reference_id=new_sale.id,
+                                    reference_type='sale',
+                                    reason=f"Sold {qty}x {p.title}",
+                                    created_by=current_user.id,
+                                    branch_id=branch_id
+                                )
+                                db.session.add(sm)
+                else:
+                    # It is a Deal/Combo, recursively deduct child products
+                    for combo_item in p.combo_items:
+                        child = combo_item.child_product
+                        if child:
+                            success, err = deduct_product(child, qty * combo_item.quantity, "")
+                            if not success:
+                                return False, f"In combo {p.title}: {err}"
+                return True, ""
+
+            success, err_msg = deduct_product(product, item['quantity'], item.get('variant_sku_suffix', ''))
+            if not success:
                 db.session.rollback()
-                return error_response("Bad Request", f"Insufficient stock for {product.title}", 400)
-
-            # Deduct Inventory
-            inventory.stock_level -= item['quantity']
-            db.session.add(InventoryTransaction(
-                branch_id=branch_id,
-                product_id=product.id,
-                variant_sku_suffix=item.get('variant_sku_suffix', ''),
-                delta=-item['quantity'],
-                reason='sale',
-                user_id=current_user.id,
-                reference_type='sale',
-                reference_id=new_sale.id,
-            ))
+                return error_response("Bad Request", err_msg, 400)
 
             unit_price = float(product.base_price)  # Ignoring variant pricing delta for now
             subtotal = unit_price * item['quantity']
@@ -401,23 +443,58 @@ def rollback_sale(current_user, sale_id):
     try:
         sale.status = 'refunded'
         for item in sale.items:
-            inventory = Inventory.query.filter_by(
-                branch_id=sale.branch_id,
-                product_id=item.product_id,
-                variant_sku_suffix=item.variant_sku_suffix or ''
-            ).first()
-            if inventory is not None:
-                inventory.stock_level += item.quantity
-                db.session.add(InventoryTransaction(
-                    branch_id=sale.branch_id,
-                    product_id=item.product_id,
-                    variant_sku_suffix=item.variant_sku_suffix or '',
-                    delta=item.quantity,
-                    reason='refund',
-                    user_id=current_user.id,
-                    reference_type='sale_refund',
-                    reference_id=sale_id,
-                ))
+            product = Product.query.get(item.product_id)
+            if not product:
+                continue
+
+            def refund_product(p, qty, item_v_suffix):
+                if not p.is_deal:
+                    inventory = Inventory.query.filter_by(
+                        branch_id=sale.branch_id,
+                        product_id=p.id,
+                        variant_sku_suffix=item_v_suffix
+                    ).first()
+                    if inventory is not None:
+                        inventory.stock_level += qty
+                        db.session.add(InventoryTransaction(
+                            branch_id=sale.branch_id,
+                            product_id=p.id,
+                            variant_sku_suffix=item_v_suffix,
+                            delta=qty,
+                            reason='refund',
+                            user_id=current_user.id,
+                            reference_type='sale_refund',
+                            reference_id=sale_id,
+                        ))
+                    if hasattr(p, 'recipe_items'):
+                        for recipe_item in p.recipe_items:
+                            ingredient = recipe_item.ingredient
+                            if ingredient:
+                                total_ing_qty = recipe_item.quantity * qty
+                                qty_before = ingredient.current_stock
+                                qty_after = qty_before + total_ing_qty
+                                ingredient.current_stock = qty_after
+                                sm = StockMovement(
+                                    ingredient_id=ingredient.id,
+                                    movement_type='adjustment',
+                                    quantity_change=total_ing_qty,
+                                    quantity_before=qty_before,
+                                    quantity_after=qty_after,
+                                    unit_cost=ingredient.average_cost,
+                                    reference_id=sale_id,
+                                    reference_type='sale_refund',
+                                    reason=f"Refunded {qty}x {p.title}",
+                                    created_by=current_user.id,
+                                    branch_id=sale.branch_id
+                                )
+                                db.session.add(sm)
+                else:
+                    for combo_item in p.combo_items:
+                        child = combo_item.child_product
+                        if child:
+                            refund_product(child, qty * combo_item.quantity, "")
+
+            refund_product(product, item.quantity, item.variant_sku_suffix or '')
         db.session.commit()
         return jsonify({"message": "Sale rolled back successfully"}), 200
     except Exception as e:

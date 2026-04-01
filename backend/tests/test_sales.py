@@ -1,6 +1,6 @@
 """Test sales: checkout success and validation, refund, bad scenarios."""
 import pytest
-from app.models import db, User, Branch, Product, Inventory, Sale, SaleItem, Setting
+from app.models import ComboItem, Ingredient, Inventory, Branch, Product, Sale, SaleItem, Setting, User, db
 from werkzeug.security import generate_password_hash
 
 
@@ -256,3 +256,132 @@ def test_refund_nonexistent_sale_returns_404(client, app):
         headers={"Authorization": f"Bearer {token}"},
     )
     assert r.status_code == 404
+
+
+def test_delivery_checkout_adds_flat_delivery_charge(client, app):
+    client.post(
+        "/api/auth/setup",
+        json={"username": "owner1", "password": "pass", "branch_name": "Main"},
+    )
+    token = _get_token(client)
+    with app.app_context():
+        b = Branch.query.filter_by(name="Main").first()
+        bid = b.id
+    pid = _create_product_and_inventory(app, bid, "Burger", 10)
+
+    r = client.post(
+        "/api/orders/checkout",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "items": [{"product_id": pid, "quantity": 2}],
+            "payment_method": "Cash",
+            "branch_id": bid,
+            "order_type": "delivery",
+            "order_snapshot": {
+                "customer_name": "Ali",
+                "phone": "03001234567",
+                "address": "Street 1",
+            },
+        },
+    )
+    assert r.status_code == 201
+    data = r.get_json()
+    assert data["total"] == 320.0
+
+    sale_id = data["sale_id"]
+    details = client.get(
+        f"/api/orders/{sale_id}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert details.status_code == 200
+    assert details.get_json()["delivery_charge"] == 300.0
+
+
+def test_dine_in_kds_expands_deals_and_preserves_modifiers(client, app):
+    client.post(
+        "/api/auth/setup",
+        json={"username": "owner1", "password": "pass", "branch_name": "Main"},
+    )
+    token = _get_token(client)
+    with app.app_context():
+        branch = Branch.query.filter_by(name="Main").first()
+        bid = branch.id
+
+        cheese = Ingredient(name="Extra Cheese", current_stock=5, average_cost=1)
+        burger = Product(sku="BURGER1", title="Burger", base_price=12)
+        fries = Product(sku="FRIES1", title="Fries", base_price=6)
+        deal = Product(sku="DEAL1", title="Burger Deal", base_price=15, is_deal=True)
+        db.session.add_all([cheese, burger, fries, deal])
+        db.session.flush()
+
+        db.session.add_all(
+            [
+                Inventory(branch_id=bid, product_id=burger.id, variant_sku_suffix="", stock_level=10),
+                Inventory(branch_id=bid, product_id=fries.id, variant_sku_suffix="", stock_level=10),
+                ComboItem(combo_id=deal.id, product_id=burger.id, quantity=1),
+                ComboItem(combo_id=deal.id, product_id=fries.id, quantity=2),
+            ]
+        )
+        db.session.commit()
+        deal_id = deal.id
+        burger_id = burger.id
+        fries_id = fries.id
+        cheese_id = cheese.id
+
+    create_res = client.post(
+        "/api/orders/dine-in/kot",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "branch_id": bid,
+            "order_snapshot": {"table_name": "T1"},
+            "items": [
+                {
+                    "product_id": deal_id,
+                    "quantity": 1,
+                    "modifiers": ["Extra Cheese"],
+                }
+            ],
+        },
+    )
+    assert create_res.status_code == 201
+    sale_id = create_res.get_json()["sale_id"]
+
+    active_res = client.get(
+        f"/api/orders/active?branch_id={bid}&include_items=1",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert active_res.status_code == 200
+    sales = active_res.get_json()["sales"]
+    assert len(sales) == 1
+    items = sales[0]["items"]
+    assert len(items) == 1
+    assert items[0]["product_title"] == "Burger Deal"
+    assert items[0]["is_deal"] is True
+    assert items[0]["modifiers"] == ["Extra Cheese"]
+    assert [child["product_title"] for child in items[0]["children"]] == ["Burger", "Fries"]
+    assert [child["quantity"] for child in items[0]["children"]] == [1, 2]
+
+    detail_res = client.get(
+        f"/api/orders/{sale_id}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert detail_res.status_code == 200
+    detail_items = detail_res.get_json()["items"]
+    assert len(detail_items) == 1
+    assert detail_items[0]["product_title"] == "Burger Deal"
+    assert detail_items[0]["modifiers"] == ["Extra Cheese"]
+    assert len(detail_items[0]["children"]) == 2
+
+    cancel_res = client.post(
+        f"/api/orders/{sale_id}/cancel-open",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert cancel_res.status_code == 200
+
+    with app.app_context():
+        burger_inventory = Inventory.query.filter_by(branch_id=bid, product_id=burger_id, variant_sku_suffix="").first()
+        fries_inventory = Inventory.query.filter_by(branch_id=bid, product_id=fries_id, variant_sku_suffix="").first()
+        cheese = Ingredient.query.get(cheese_id)
+        assert burger_inventory.stock_level == 10
+        assert fries_inventory.stock_level == 10
+        assert cheese.current_stock == 5

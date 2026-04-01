@@ -24,6 +24,8 @@ from app_fastapi.routers import (
     stock_router,
     users_router,
 )
+from app_fastapi.routers.inventory_advanced import inventory_advanced_router
+from app_fastapi.routers.deals_router import deals_router
 
 request_logger = logging.getLogger("app.request")
 legacy_flask_app = create_flask_app()
@@ -115,3 +117,5 @@ app.include_router(users_router)
 app.include_router(branches_router)
 app.include_router(printer_router)
 app.include_router(scanner_router)
+app.include_router(inventory_advanced_router)
+app.include_router(deals_router)
