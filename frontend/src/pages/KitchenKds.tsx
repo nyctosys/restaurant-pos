@@ -1,59 +1,64 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Loader2, LogOut } from 'lucide-react';
-import { get, getUserMessage } from '../api';
+import { get, patch, getUserMessage } from '../api';
+import { getSocket } from '../realtime/socket';
+import {
+  Loader2, LogOut, ChefHat, Clock, UtensilsCrossed,
+  ShoppingBag, Truck, Play, CheckCircle2, RefreshCw, AlertTriangle
+} from 'lucide-react';
 
-const numFont = "font-['Space_Grotesk',ui-monospace,monospace]";
-
-type KdsLine = {
-  id: number;
-  product_title: string;
-  variant_sku_suffix?: string;
-  quantity: number;
-  is_deal?: boolean;
-  modifiers?: string[];
-  children?: KdsLine[];
-};
-
+/* ── types ── */
+type KdsLine = { product_title: string; variant_sku_suffix?: string; quantity: number; modifiers?: string[] };
+type KitchenStatus = 'placed' | 'preparing' | 'ready';
 type KdsOrder = {
   id: number;
   created_at: string;
+  order_type?: string | null;
+  order_snapshot?: Record<string, unknown> | null;
   table_name?: string | null;
+  kitchen_status: KitchenStatus;
   items?: KdsLine[];
+  modifications?: { type: string; description: string; timestamp: string }[];
 };
 
-function formatElapsedShort(iso: string, nowMs: number): string {
-  const t = new Date(iso).getTime();
-  const sec = Math.max(0, Math.floor((nowMs - t) / 1000));
+type FilterTab = 'placed' | 'preparing' | 'ready';
+
+/* ── helpers ── */
+function formatReceivedTime(iso: string): string {
+  try {
+    return new Date(iso).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: true });
+  } catch { return '—'; }
+}
+
+function formatElapsed(iso: string, nowMs: number): string {
+  const sec = Math.max(0, Math.floor((nowMs - new Date(iso).getTime()) / 1000));
   if (sec < 60) return `${sec}s`;
   const m = Math.floor(sec / 60);
-  if (m < 60) return `${m}m`;
+  if (m < 60) return `${m}m ${sec % 60}s`;
   const h = Math.floor(m / 60);
   return `${h}h ${m % 60}m`;
 }
 
 function minutesSince(iso: string, nowMs: number): number {
-  const t = new Date(iso).getTime();
-  return Math.max(0, (nowMs - t) / 60000);
+  return Math.max(0, (nowMs - new Date(iso).getTime()) / 60000);
 }
 
-function ModifierPills({ modifiers }: { modifiers?: string[] }) {
-  if (!modifiers || modifiers.length === 0) {
-    return null;
-  }
+function getPriorityColor(status: KitchenStatus, createdAtIso: string, nowMs: number): 'white' | 'yellow' | 'red' {
+  if (status !== 'placed') return 'white';
+  const age = minutesSince(createdAtIso, nowMs);
+  if (age >= 15) return 'red';
+  if (age >= 10) return 'yellow';
+  return 'white';
+}
 
-  return (
-    <div className="flex flex-wrap gap-1 mt-1.5">
-      {modifiers.map((mod, idx) => (
-        <span
-          key={`${mod}-${idx}`}
-          className="text-[10px] px-1.5 py-0.5 rounded-sm bg-blue-100/80 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300 font-medium"
-        >
-          + {mod}
-        </span>
-      ))}
-    </div>
-  );
+/* ── order type config ── */
+const ORDER_TYPE_CONFIG: Record<string, { label: string; pillColor: string; bgClass: string; icon: typeof UtensilsCrossed }> = {
+  dine_in:  { label: 'Dine-In', pillColor: 'bg-amber-100 text-amber-900 border-amber-200', bgClass: 'bg-orange-50/40', icon: UtensilsCrossed },
+  takeaway: { label: 'Takeaway', pillColor: 'bg-teal-100 text-teal-900 border-teal-200', bgClass: 'bg-teal-50/40', icon: ShoppingBag },
+  delivery: { label: 'Delivery', pillColor: 'bg-purple-100 text-purple-900 border-purple-200', bgClass: 'bg-purple-50/40', icon: Truck },
+};
+function getOrderTypeConfig(t?: string | null) {
+  return ORDER_TYPE_CONFIG[t || ''] || { label: t || 'Order', pillColor: 'bg-neutral-100 text-neutral-700 border-neutral-200', bgClass: 'bg-neutral-50/40', icon: ShoppingBag };
 }
 
 export default function KitchenKds() {
@@ -61,34 +66,37 @@ export default function KitchenKds() {
   const [orders, setOrders] = useState<KdsOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [, setElapsedTick] = useState(0);
+  const [activeTab, setActiveTab] = useState<FilterTab>('placed');
+  const [, setTick] = useState(0);
   const [clock, setClock] = useState(() => new Date());
+  const [busyIds, setBusyIds] = useState<Set<number>>(new Set());
+  const prevMetricsRef = useRef({ newCount: 0, modsCount: 0 });
 
   const userStr = localStorage.getItem('user');
   const user = userStr ? JSON.parse(userStr) : null;
-
   const nowMs = Date.now();
 
   useEffect(() => {
-    const id = window.setInterval(() => setClock(new Date()), 1000);
-    return () => window.clearInterval(id);
-  }, []);
-
-  useEffect(() => {
-    const id = window.setInterval(() => setElapsedTick(x => x + 1), 1000);
-    return () => window.clearInterval(id);
+    const id = setInterval(() => { setClock(new Date()); setTick(x => x + 1); }, 1000);
+    return () => clearInterval(id);
   }, []);
 
   const load = useCallback(async () => {
     setError(null);
     try {
-      const activeBranchId = localStorage.getItem('active_branch_id') ?? user?.branch_id ?? '1';
-      const q =
-        user?.role === 'owner'
-          ? `?branch_id=${activeBranchId}&include_items=1`
-          : '?include_items=1';
-      const data = await get<{ sales?: KdsOrder[] }>(`/orders/active${q}`);
-      setOrders(data.sales ?? []);
+      const activeBranchId = localStorage.getItem('active_branch_id') || user?.branch_id || '1';
+      const url = `/orders/kitchen?branch_id=${activeBranchId}`;
+      const data = await get<{ orders?: KdsOrder[] }>(url);
+      const fetched = data.orders ?? [];
+      const newCount = fetched.filter(o => o.kitchen_status === 'placed').length;
+      const modsCount = fetched.reduce((sum, o) => sum + (o.modifications?.length || 0), 0);
+      
+      const prev = prevMetricsRef.current;
+      if ((newCount > prev.newCount && prev.newCount >= 0) || (modsCount > prev.modsCount && prev.modsCount >= 0)) {
+        try { new Audio('data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=').play(); } catch {}
+      }
+      prevMetricsRef.current = { newCount, modsCount };
+      setOrders(fetched);
     } catch (e) {
       setError(getUserMessage(e));
     } finally {
@@ -96,236 +104,263 @@ export default function KitchenKds() {
     }
   }, [user?.branch_id, user?.role]);
 
+  useEffect(() => { void load(); }, [load]);
   useEffect(() => {
-    void load();
+    const s = getSocket();
+    const onAny = () => void load();
+    s.on('ORDER_CREATED', onAny);
+    s.on('ORDER_UPDATED', onAny);
+    s.on('ORDER_STATUS_CHANGED', onAny);
+    return () => {
+      s.off('ORDER_CREATED', onAny);
+      s.off('ORDER_UPDATED', onAny);
+      s.off('ORDER_STATUS_CHANGED', onAny);
+    };
   }, [load]);
 
-  useEffect(() => {
-    const id = window.setInterval(() => void load(), 12000);
-    return () => window.clearInterval(id);
+  const updateStatus = useCallback(async (saleId: number, newStatus: KitchenStatus) => {
+    setBusyIds(s => new Set(s).add(saleId));
+    try {
+      await patch(`/orders/${saleId}/kitchen-status`, { kitchen_status: newStatus });
+      await load();
+    } catch (e) {
+      setError(getUserMessage(e));
+    } finally {
+      setBusyIds(s => { const n = new Set(s); n.delete(saleId); return n; });
+    }
   }, [load]);
 
-  const tableLabel = (o: KdsOrder) => o.table_name?.trim() || '-';
+  const filtered = orders.filter(o => {
+    if (activeTab === 'placed') return o.kitchen_status === 'placed';
+    if (activeTab === 'preparing') return o.kitchen_status === 'preparing';
+    return o.kitchen_status === 'ready';
+  });
+  
+  const tabCounts: Record<FilterTab, number> = {
+    placed: orders.filter(o => o.kitchen_status === 'placed').length,
+    preparing: orders.filter(o => o.kitchen_status === 'preparing').length,
+    ready: orders.filter(o => o.kitchen_status === 'ready').length
+  };
 
   return (
-    <div className="h-full min-h-0 flex flex-col antialiased text-neutral-900 dark:text-neutral-100 selection:bg-brand-200/50 dark:selection:bg-brand-500/25">
-      <header className="shrink-0 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 px-4 py-3 sm:px-6 sm:py-4 border-b border-white/25 dark:border-white/10">
-        <div className="min-w-0">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-neutral-500 dark:text-neutral-400 mb-0.5">
-            Station
-          </p>
-          <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-brand-900 dark:text-brand-50 truncate">
-            Kitchen
-          </h1>
-          <p className="text-[11px] text-neutral-600 dark:text-neutral-400 mt-1 max-w-prose leading-snug">
-            Open KOT queue. Fired when the POS sends Generate KOT. Elapsed time from ticket start.
-          </p>
+    <div className="flex flex-col h-screen min-h-0 bg-neutral-50/50 text-neutral-900 font-sans overflow-hidden">
+      {/* Header */}
+      <header className="flex items-center justify-between px-6 py-4 bg-white/60 backdrop-blur-md border-b border-white/40 shrink-0 shadow-sm z-10">
+        <div className="flex items-center gap-8">
+          <div className="flex items-center gap-3 text-2xl font-black text-neutral-800 tracking-tight">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-600 to-brand-800 flex items-center justify-center text-white shadow-brand-900/20 shadow-lg">
+              <ChefHat className="w-6 h-6" />
+            </div>
+            <span>Kitchen Display</span>
+          </div>
+          <div className="flex items-center gap-2 px-4 py-1.5 rounded-full bg-neutral-100/80 border border-neutral-200">
+            <Clock className="w-4 h-4 text-neutral-500" />
+            <span className="font-mono font-bold text-neutral-700 text-sm">
+              {clock.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}
+            </span>
+          </div>
         </div>
-        <div className="flex items-baseline justify-between sm:justify-end gap-6 sm:gap-10 shrink-0">
-          <div className="text-right">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-neutral-500 dark:text-neutral-400 mb-0.5">
-              Time
-            </p>
-            <p className={`text-2xl sm:text-3xl font-medium tabular-nums tracking-tight text-brand-900 dark:text-brand-50 ${numFont}`}>
-              {clock.toLocaleTimeString(undefined, {
-                hour: '2-digit',
-                minute: '2-digit',
-                second: '2-digit',
-                hour12: false,
-              })}
-            </p>
-          </div>
-          <div className="text-right">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-neutral-500 dark:text-neutral-400 mb-0.5">
-              Queue
-            </p>
-            <p className={`text-2xl sm:text-3xl font-medium tabular-nums text-gold-600 dark:text-gold-400 ${numFont}`}>
-              {orders.length}{' '}
-              <span className="text-sm font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wide">
-                active
-              </span>
-            </p>
-          </div>
+        <div className="flex items-center gap-3">
+          <button className="w-11 h-11 flex items-center justify-center rounded-xl bg-white border border-neutral-200 text-neutral-600 hover:text-brand-600 hover:bg-brand-50 hover:border-brand-200 transition-all shadow-sm active:scale-95" onClick={() => void load()} title="Refresh">
+            <RefreshCw className="w-5 h-5" />
+          </button>
+          <button
+            className="w-11 h-11 flex items-center justify-center rounded-xl bg-white border border-neutral-200 text-neutral-600 hover:text-red-600 hover:bg-red-50 hover:border-red-200 transition-all shadow-sm active:scale-95"
+            onClick={() => { localStorage.removeItem('auth_token'); localStorage.removeItem('user'); navigate('/login', { replace: true }); }}
+            title="Log out"
+          >
+            <LogOut className="w-5 h-5" />
+          </button>
         </div>
       </header>
 
-      {error && (
-        <div className="mx-4 mt-3 px-3 py-2 rounded-xl text-sm border border-red-200 bg-red-50 text-red-800 dark:bg-red-950/50 dark:border-red-800/50 dark:text-red-200 flex flex-wrap items-center gap-2">
-          <span className="flex-1 min-w-0">{error}</span>
-          <button
-            type="button"
-            className="shrink-0 underline font-semibold text-red-700 dark:text-red-100"
-            onClick={() => void load()}
-          >
-            Retry
-          </button>
-        </div>
-      )}
+      {/* Tabs */}
+      <nav className="flex items-center gap-3 px-6 py-3 bg-white/30 shrink-0 border-b border-white/40 shadow-[0_4px_12px_rgba(0,0,0,0.02)] z-[1]">
+        {(['placed', 'preparing', 'ready'] as const).map(tabKey => {
+          const isActive = activeTab === tabKey;
+          const labels: Record<string, string> = { placed: 'NEW QUEUE', preparing: 'PREPARING', ready: 'READY' };
+          return (
+            <button
+              key={tabKey}
+              onClick={() => setActiveTab(tabKey)}
+              className={`flex items-center gap-2.5 px-6 py-2.5 rounded-xl font-bold text-[13px] transition-all tracking-wide ${
+                isActive
+                  ? 'bg-white border text-brand-800 border-white shadow-sm ring-1 ring-black/5'
+                  : 'bg-transparent text-neutral-500 border border-transparent hover:bg-white/40'
+              }`}
+            >
+              {labels[tabKey]}
+              <span className={`px-2 py-0.5 rounded-md text-[11px] font-black leading-none flex items-center justify-center ${
+                isActive ? 'bg-brand-100/80 text-brand-800' : 'bg-black/5 text-neutral-600'
+              }`}>
+                {tabCounts[tabKey]}
+              </span>
+            </button>
+          );
+        })}
+      </nav>
 
-      <div className="flex-1 min-h-0 overflow-auto page-padding">
+      {error && <div className="m-6 mb-0 p-4 rounded-xl bg-red-50 border border-red-200 text-red-800 font-semibold shadow-sm">{error}</div>}
+
+      {/* Grid view */}
+      <div className="flex-1 overflow-y-auto p-6 min-h-0">
         {loading && orders.length === 0 ? (
-          <div className="flex items-center justify-center gap-2 py-24 text-neutral-500 dark:text-neutral-400">
-            <Loader2 className="w-5 h-5 animate-spin shrink-0" aria-hidden />
-            <span className="text-sm">Loading tickets...</span>
+          <div className="h-full flex flex-col items-center justify-center text-neutral-400 gap-3">
+            <Loader2 className="w-8 h-8 animate-spin" />
+            <span className="font-semibold text-lg">Loading orders...</span>
           </div>
-        ) : orders.length === 0 ? (
-          <div className="h-full min-h-[40vh] flex flex-col items-center justify-center text-center px-6">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.25em] text-neutral-500 dark:text-neutral-400 mb-3">
-              Line clear
-            </p>
-            <p className="text-lg sm:text-xl font-medium text-brand-800 dark:text-brand-100 max-w-md leading-relaxed">
-              All orders cleared
-            </p>
-            <p className="text-sm text-neutral-600 dark:text-neutral-400 mt-3 max-w-sm leading-relaxed">
-              When the POS sends a kitchen ticket, it appears here with table, elapsed time, and every line to fire.
-            </p>
+        ) : filtered.length === 0 ? (
+          <div className="h-full flex flex-col items-center justify-center text-neutral-400 opacity-60">
+            <UtensilsCrossed className="w-16 h-16 mb-4" />
+            <p className="text-xl font-bold">Queue is empty</p>
           </div>
         ) : (
-          <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 auto-rows-min">
-            {orders.map(o => {
-              const ageMin = minutesSince(o.created_at, nowMs);
-              const rush = ageMin >= 10;
-              const lines = o.items ?? [];
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(340px,1fr))] gap-6 items-start">
+            {filtered.map(order => {
+              const priority = getPriorityColor(order.kitchen_status, order.created_at, nowMs);
+              const otCfg = getOrderTypeConfig(order.order_type);
+              const OtIcon = otCfg.icon;
+              const lines = order.items ?? [];
+              const isBusy = busyIds.has(order.id);
+              const snap = order.order_snapshot || {};
+              const tableName = order.table_name || (snap as Record<string, string>).table_name;
+              const customerName = (snap as Record<string, string>).customer_name;
+
+              // Compute dynamic card classes
+              // Default state builds upon glassmorphism, priority states use bold solid/translucent aesthetics.
+              let cardBg = 'bg-white/80 border-white/60 shadow-black/5';
+              let timerColor = 'text-neutral-700';
+
+              if (priority === 'yellow') {
+                cardBg = 'bg-amber-100/90 border-amber-300 shadow-amber-900/10 shadow-lg ring-1 ring-amber-400/50';
+                timerColor = 'text-amber-700';
+              } else if (priority === 'red') {
+                cardBg = 'bg-red-100/90 border-red-400 shadow-red-900/15 shadow-xl ring-2 ring-red-500/50';
+                timerColor = 'text-red-700';
+              }
+
               return (
-                <li
-                  key={o.id}
-                  className={`relative rounded-xl overflow-hidden flex flex-col min-h-[140px] glass-card border transition-shadow ${
-                    rush
-                      ? 'border-gold-400/60 shadow-lg shadow-gold-500/15 ring-1 ring-gold-500/25 dark:border-gold-500/35'
-                      : 'border-white/25 dark:border-white/10'
-                  }`}
+                <div
+                  key={order.id}
+                  className={`flex flex-col relative rounded-2xl overflow-hidden backdrop-blur-md border transition-all ${cardBg} ${priority === 'white' ? otCfg.bgClass : ''}`}
+                  style={{ animation: '0.3s ease-out 0s 1 normal forwards running kds-pop' }}
                 >
-                  <div
-                    className={`absolute left-0 top-0 bottom-0 w-1 rounded-l-xl ${rush ? 'bg-gold-500' : 'bg-transparent'}`}
-                    aria-hidden
-                  />
-                  <div className="flex items-start justify-between gap-3 px-3 pt-3 pb-2 border-b border-white/20 dark:border-white/10">
-                    <div className="min-w-0 flex-1 pl-1">
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-neutral-500 dark:text-neutral-400 mb-0.5">
-                        Table
-                      </p>
-                      <p className={`text-2xl font-semibold leading-none truncate tabular-nums text-brand-900 dark:text-brand-50 ${numFont}`}>
-                        {tableLabel(o)}
-                      </p>
-                      <p className="text-[11px] text-neutral-500 dark:text-neutral-400 mt-1.5">
-                        Order <span className={`text-neutral-700 dark:text-neutral-300 tabular-nums ${numFont}`}>#{o.id}</span>
-                      </p>
+                  {/* Subtle stripe across top */}
+                  <div className={`absolute top-0 left-0 right-0 h-1.5 z-10 ${priority === 'white' ? 'bg-gradient-to-r from-white to-white/50' : priority === 'yellow' ? 'bg-amber-500' : 'bg-red-600'}`} />
+
+                  {/* Card Header */}
+                  <div className="px-5 pt-6 pb-3 flex justify-between items-start border-b border-black/5">
+                    <div>
+                      <span className="text-3xl font-black text-neutral-900 tracking-tight leading-none block">#{order.id}</span>
+                      <div className={`mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded border font-bold text-[10px] uppercase tracking-wider ${otCfg.pillColor}`}>
+                        <OtIcon className="w-3 h-3" strokeWidth={2.5} />
+                        <span>{otCfg.label}</span>
+                      </div>
                     </div>
-                    <div className="text-right shrink-0">
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-neutral-500 dark:text-neutral-400 mb-0.5">
-                        Elapsed
-                      </p>
-                      <p
-                        className={`text-lg font-medium tabular-nums ${numFont} ${
-                          rush ? 'text-gold-600 dark:text-gold-400' : 'text-neutral-800 dark:text-neutral-200'
-                        }`}
-                      >
-                        {formatElapsedShort(o.created_at, nowMs)}
-                      </p>
-                      {rush && (
-                        <span className="inline-block mt-1 text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full bg-gold-100/95 text-gold-900 border border-gold-400/60 dark:bg-gold-900/45 dark:text-gold-100 dark:border-gold-600/50">
-                          Rush
-                        </span>
-                      )}
+                    <div className="text-right flex flex-col items-end">
+                      <span className="text-xs font-bold text-neutral-500 block">
+                        {formatReceivedTime(order.created_at)}
+                      </span>
+                      <div className={`mt-1 flex items-center justify-end gap-1.5 font-mono font-black text-xl tracking-tight ${timerColor}`}>
+                        <Clock className="w-4 h-4" strokeWidth={3} />
+                        <span>{formatElapsed(order.created_at, nowMs)}</span>
+                      </div>
                     </div>
                   </div>
 
-                  <div className="px-3 py-2.5 flex-1 space-y-2 pl-4">
-                    {lines.length === 0 ? (
-                      <p className="text-sm text-neutral-500 dark:text-neutral-400 italic">No lines (refresh)</p>
-                    ) : (
-                      lines.map((line, idx) => (
-                        <div
-                          key={`${o.id}-${line.id}-${idx}`}
-                          className="space-y-1.5 border-b border-black/5 dark:border-white/5 pb-2 mb-2 last:border-0 last:mb-0 last:pb-0"
-                        >
-                          <div className="flex gap-2 items-start">
-                            <span className={`shrink-0 min-w-[2rem] text-center text-xs font-bold tabular-nums px-1.5 py-0.5 rounded-full bg-brand-100/95 text-brand-900 border border-brand-200/70 dark:bg-brand-900/40 dark:text-brand-100 dark:border-brand-700/50 ${numFont}`}>
-                              {line.quantity}x
-                            </span>
-                            <div className="min-w-0 flex-1">
-                              <p className="text-sm font-medium leading-tight text-neutral-900 dark:text-neutral-100">
-                                {line.product_title}{' '}
-                                {line.is_deal && (
-                                  <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400 ml-1">
-                                    (DEAL)
-                                  </span>
-                                )}
-                              </p>
-                              {line.variant_sku_suffix && (
-                                <p className="text-[11px] text-neutral-600 dark:text-neutral-400 mt-0.5 leading-snug">
-                                  {line.variant_sku_suffix}
-                                </p>
-                              )}
-                              <ModifierPills modifiers={line.modifiers} />
-                            </div>
-                          </div>
+                  {/* Card Meta (Table / Customer) */}
+                  {(tableName || customerName) && (
+                    <div className="px-5 py-2.5 bg-black/5 flex flex-col gap-0.5 border-b border-black/5">
+                      {tableName && <div className="text-[13px] text-neutral-600 flex gap-2"><span className="font-bold uppercase text-[11px] opacity-70 mt-0.5">Table</span> <strong className="text-neutral-900 font-black">{tableName}</strong></div>}
+                      {customerName && <div className="text-[13px] text-neutral-600 flex gap-2"><span className="font-bold uppercase text-[11px] opacity-70 mt-0.5">Cust</span> <strong className="text-neutral-900 font-black">{customerName}</strong></div>}
+                    </div>
+                  )}
 
-                          {line.children && line.children.length > 0 && (
-                            <div className="pl-6 space-y-1 mt-1">
-                              {line.children.map((child, cIdx) => (
-                                <div key={`${child.id}-${cIdx}`} className="space-y-1">
-                                  <div className="flex gap-1.5 items-start">
-                                    <span className="shrink-0 text-[10px] font-bold text-neutral-500 dark:text-neutral-400">
-                                      {child.quantity}x
-                                    </span>
-                                    <div className="min-w-0">
-                                      <p className="text-xs text-neutral-700 dark:text-neutral-300">
-                                        {child.product_title}
-                                      </p>
-                                      {child.variant_sku_suffix && (
-                                        <p className="text-[10px] text-neutral-500 dark:text-neutral-400">
-                                          {child.variant_sku_suffix}
-                                        </p>
-                                      )}
-                                    </div>
-                                  </div>
-                                  <div className="pl-4">
-                                    <ModifierPills modifiers={child.modifiers} />
-                                  </div>
-                                </div>
+                  {/* Items list */}
+                  <div className="flex-1 px-5 py-4 flex flex-col gap-3">
+                    {lines.map((line, idx) => (
+                      <div key={idx} className="flex gap-3 items-start">
+                        <div className="min-w-[36px] h-9 rounded-lg shrink-0 flex items-center justify-center bg-white border border-black/5 font-black text-[15px] text-neutral-900 shadow-sm">
+                          {line.quantity}×
+                        </div>
+                        <div className="flex-1 min-w-0 pt-0.5">
+                          <span className="block text-[15px] font-bold text-neutral-900 leading-tight">{line.product_title}</span>
+                          {line.variant_sku_suffix && <span className="block text-[13px] font-semibold text-neutral-500 mt-0.5">{line.variant_sku_suffix}</span>}
+                          {line.modifiers && line.modifiers.length > 0 && (
+                            <div className="flex flex-wrap gap-1.5 mt-2">
+                              {line.modifiers.map((m, mi) => (
+                                <span key={mi} className="text-[11px] font-bold px-2 py-0.5 rounded flex items-center bg-white/60 border border-white text-neutral-700 shadow-sm">
+                                  {m}
+                                </span>
                               ))}
                             </div>
                           )}
                         </div>
-                      ))
+                      </div>
+                    ))}
+
+                    {/* Modifications Alert */}
+                    {order.modifications && order.modifications.length > 0 && (
+                      <div className="mt-3 rounded-xl bg-amber-500/15 border border-amber-500/30 backdrop-blur-md p-3 shadow-inner">
+                        <div className="flex items-center gap-1.5 mb-2 font-bold text-amber-900 text-[11px] uppercase tracking-wider">
+                          <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+                          Modifications
+                        </div>
+                        <ul className="space-y-1.5">
+                          {order.modifications.map((mod: any, i: number) => (
+                            <li key={i} className="flex gap-2 items-start text-sm font-semibold text-amber-950 bg-white/40 border border-white/50 rounded-lg p-2.5 shadow-sm">
+                              <span className="shrink-0 text-amber-700 font-black mt-0.5">
+                                {mod.type === 'add' ? '+' : mod.type === 'remove' ? '-' : '•'}
+                              </span>
+                              <div className="flex flex-col leading-tight">
+                                <span>{mod.description}</span>
+                                <span className="text-[10px] text-amber-700/80 font-bold mt-0.5">
+                                  {new Date(mod.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                </span>
+                              </div>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
                     )}
                   </div>
 
-                  <div className="px-3 py-2 text-[10px] uppercase tracking-[0.14em] text-neutral-500 dark:text-neutral-400 border-t border-white/15 bg-white/5 dark:bg-black/15">
-                    {lines.length} line{lines.length === 1 ? '' : 's'} · kitchen display
+                  {/* Actions */}
+                  <div className="px-5 pb-5 pt-2">
+                    {order.kitchen_status === 'placed' && (
+                      <button
+                        disabled={isBusy}
+                        onClick={() => updateStatus(order.id, 'preparing')}
+                        className="w-full py-3.5 rounded-xl font-black text-sm uppercase tracking-wider flex items-center justify-center gap-2 bg-brand-700 text-white hover:bg-brand-600 transition-all shadow-sm active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        <Play className="w-4 h-4 fill-white" />
+                        {isBusy ? 'Wait...' : 'Start Preparing'}
+                      </button>
+                    )}
+                    {order.kitchen_status === 'preparing' && (
+                      <button
+                        disabled={isBusy}
+                        onClick={() => updateStatus(order.id, 'ready')}
+                        className="w-full py-3.5 rounded-xl font-black text-sm uppercase tracking-wider flex items-center justify-center gap-2 bg-emerald-600 text-white hover:bg-emerald-500 transition-all shadow-sm active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed border border-emerald-500"
+                      >
+                        <CheckCircle2 className="w-4 h-4" />
+                        {isBusy ? 'Wait...' : 'Order Ready'}
+                      </button>
+                    )}
                   </div>
-                </li>
+                </div>
               );
             })}
-          </ul>
+          </div>
         )}
       </div>
 
-      <footer className="shrink-0 px-4 py-2 flex flex-wrap items-center justify-between gap-3 text-[10px] text-neutral-500 dark:text-neutral-400 border-t border-white/25 dark:border-white/10 bg-white/5 dark:bg-black/10">
-        <span>Auto-refresh ~12s · Elapsed updates every second</span>
-        <div className="flex items-center gap-4">
-          <button
-            type="button"
-            onClick={() => void load()}
-            className="font-semibold uppercase tracking-wide text-brand-800 dark:text-brand-200 hover:text-brand-950 dark:hover:text-white transition-colors"
-          >
-            Refresh now
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              localStorage.removeItem('auth_token');
-              localStorage.removeItem('user');
-              navigate('/login', { replace: true });
-            }}
-            className="inline-flex items-center gap-1.5 font-semibold uppercase tracking-wide text-brand-800 dark:text-brand-200 hover:text-brand-950 dark:hover:text-white transition-colors"
-          >
-            <LogOut className="w-3.5 h-3.5" aria-hidden />
-            Log out
-          </button>
-        </div>
-      </footer>
+      <style>{`
+        @keyframes kds-pop {
+          from { transform: scale(0.96); opacity: 0; }
+          to { transform: scale(1); opacity: 1; }
+        }
+      `}</style>
     </div>
   );
 }

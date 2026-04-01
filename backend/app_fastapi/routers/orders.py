@@ -766,6 +766,143 @@ def list_active_dine_in_orders(
         raise
 
 
+def _flatten_kitchen_display_lines(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Flatten nested sale items (deals/children) into KDS line rows."""
+    lines: list[dict[str, Any]] = []
+    for n in nodes:
+        mods_raw = n.get("modifiers") or []
+        mod_strs: list[str] = []
+        if isinstance(mods_raw, list):
+            for m in mods_raw:
+                if isinstance(m, str):
+                    mod_strs.append(m)
+                elif isinstance(m, dict) and m.get("name"):
+                    mod_strs.append(str(m["name"]))
+        lines.append(
+            {
+                "product_title": n.get("product_title") or "Unknown",
+                "variant_sku_suffix": (n.get("variant_sku_suffix") or "") or "",
+                "quantity": int(n.get("quantity") or 0),
+                "modifiers": mod_strs,
+            }
+        )
+        for ch in n.get("children") or []:
+            lines.extend(_flatten_kitchen_display_lines([ch]))
+    return lines
+
+
+def _kitchen_status_value(sale: Sale) -> str:
+    raw = getattr(sale, "kitchen_status", None)
+    if raw in ("placed", "preparing", "ready"):
+        return raw
+    return "placed"
+
+
+@orders_router.get("/kitchen")
+def list_kitchen_orders(
+    branch_id: int | None = None,
+    current_user: User = Depends(get_current_user),
+):
+    """Kitchen Display: open dine-in tickets with items and workflow status (placed → preparing → ready)."""
+    try:
+        if current_user.role != "owner":
+            bid = current_user.branch_id
+        elif branch_id is not None:
+            bid = int(branch_id)
+        else:
+            bid = current_user.branch_id or 1
+        if not bid:
+            return {"orders": []}
+
+        q = Sale.query.filter(
+            Sale.status == "open",
+            Sale.branch_id == bid,
+            Sale.archived_at == None,  # noqa: E711
+        )
+        if hasattr(Sale, "order_type"):
+            q = q.filter(Sale.order_type == "dine_in")
+        sales = q.order_by(Sale.created_at.desc()).all()
+        if not sales:
+            return {"orders": []}
+
+        sale_ids = [s.id for s in sales]
+        items_rows = (
+            db.session.query(
+                SaleItem.id,
+                SaleItem.sale_id,
+                SaleItem.variant_sku_suffix,
+                SaleItem.quantity,
+                SaleItem.modifiers,
+                SaleItem.parent_sale_item_id,
+                Product.title,
+                Product.is_deal,
+            )
+            .outerjoin(Product, SaleItem.product_id == Product.id)
+            .filter(SaleItem.sale_id.in_(sale_ids))
+            .all()
+        )
+
+        flat_items: list[dict[str, Any]] = []
+        for item in items_rows:
+            flat_items.append(
+                {
+                    "id": item.id,
+                    "sale_id": item.sale_id,
+                    "product_title": item.title if item.title else "Unknown",
+                    "variant_sku_suffix": item.variant_sku_suffix or "",
+                    "quantity": item.quantity,
+                    "modifiers": _normalize_modifiers(item.modifiers or []),
+                    "parent_sale_item_id": item.parent_sale_item_id,
+                    "is_deal": item.is_deal,
+                    "children": [],
+                }
+            )
+
+        items_by_sale = _nest_sale_item_dicts(flat_items)
+        out: list[dict[str, Any]] = []
+        for sale in sales:
+            snap = sale.order_snapshot or {}
+            table_name = snap.get("table_name") if isinstance(snap, dict) else None
+            nested = items_by_sale.get(sale.id, [])
+            out.append(
+                {
+                    "id": sale.id,
+                    "created_at": sale.created_at.isoformat() if sale.created_at else "",
+                    "order_type": getattr(sale, "order_type", None) or "dine_in",
+                    "order_snapshot": snap,
+                    "table_name": table_name,
+                    "kitchen_status": _kitchen_status_value(sale),
+                    "items": _flatten_kitchen_display_lines(nested),
+                    "modifications": [],
+                }
+            )
+        return {"orders": out}
+    except Exception as exc:
+        raise
+
+
+@orders_router.patch("/{sale_id}/kitchen-status")
+def update_kitchen_status(
+    sale_id: int,
+    payload: dict[str, Any] | None = None,
+    current_user: User = Depends(get_current_user),
+):
+    data = payload or {}
+    status_new = data.get("kitchen_status")
+    if status_new not in ("placed", "preparing", "ready"):
+        return _json_error("Bad Request", "kitchen_status must be placed, preparing, or ready", 400)
+    sale = Sale.query.get(sale_id)
+    if not sale:
+        return _json_error("Not Found", "Order not found", 404)
+    if current_user.role != "owner" and sale.branch_id != current_user.branch_id:
+        return _json_error("Forbidden", "Not allowed for this branch", 403)
+    if sale.status != "open":
+        return _json_error("Bad Request", "Order is not open", 400)
+    sale.kitchen_status = status_new
+    db.session.commit()
+    return {"ok": True, "id": sale.id, "kitchen_status": status_new}
+
+
 @orders_router.post("/dine-in/kot")
 def dine_in_kot(payload: dict[str, Any] | None = None, current_user: User = Depends(get_current_user)):
     """Create an open dine-in sale, deduct stock, print KOT (kitchen ticket). No payment yet."""
@@ -826,6 +963,7 @@ def dine_in_kot(payload: dict[str, Any] | None = None, current_user: User = Depe
         new_sale.discount_snapshot = None
         new_sale.total_amount = total_amount
         new_sale.tax_amount = 0
+        new_sale.kitchen_status = "placed"
         db.session.commit()
 
         branch_name = "Main Branch"

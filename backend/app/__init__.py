@@ -90,6 +90,12 @@ def create_app():
                     print("Added 'status' column to 'sales' table.")
                 except (OperationalError, ProgrammingError):
                     db.session.rollback()
+                try:
+                    db.session.execute(text("ALTER TABLE sales ADD COLUMN kitchen_status VARCHAR(20)"))
+                    db.session.commit()
+                    print("Added 'kitchen_status' column to 'sales' table.")
+                except (OperationalError, ProgrammingError):
+                    db.session.rollback()
                 break
             except Exception as e:
                 if i < retries - 1:

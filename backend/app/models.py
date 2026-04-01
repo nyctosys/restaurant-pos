@@ -129,6 +129,8 @@ class Sale(db.Model):
     archived_at = db.Column(db.DateTime(timezone=True), nullable=True)
     order_type = db.Column(db.String(20), nullable=True)  # takeaway, dine_in, delivery
     order_snapshot = db.Column(db.JSON, nullable=True)  # dine_in: { table_name }; delivery: { customer_name, phone, address }
+    # Kitchen display workflow (open dine-in / KOT tickets)
+    kitchen_status = db.Column(db.String(20), nullable=True)  # placed | preparing | ready
 
     items = db.relationship('SaleItem', backref='sale', lazy=True, cascade="all, delete-orphan")
 
