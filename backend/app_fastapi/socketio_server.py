@@ -12,7 +12,8 @@ class RealtimeEvents:
 
 
 sio = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins="*")
-asgi_app = socketio.ASGIApp(sio, socketio_path="socket.io")
+# Mounted under "/socket.io" by FastAPI; empty path avoids "/socket.io/socket.io" duplication.
+asgi_app = socketio.ASGIApp(sio, socketio_path="")
 
 
 async def emit_event(event: str, payload: dict[str, Any]) -> None:

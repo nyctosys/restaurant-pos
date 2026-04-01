@@ -56,6 +56,18 @@ class Product(db.Model):
     recipe_items = db.relationship('RecipeItem', back_populates='product', cascade="all, delete-orphan")
     combo_items = db.relationship('ComboItem', back_populates='combo', foreign_keys='ComboItem.combo_id', cascade="all, delete-orphan")
 
+class Modifier(db.Model):
+    __tablename__ = 'modifiers'
+    __table_args__ = (
+        CheckConstraint('price >= 0', name='ck_modifier_price_non_neg'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(255), unique=True, nullable=False)
+    price = db.Column(db.Numeric(12, 2), nullable=True, default=0)
+    created_at = db.Column(db.DateTime(timezone=True), default=datetime.utcnow)
+    archived_at = db.Column(db.DateTime(timezone=True), nullable=True)
+
 class ComboItem(db.Model):
     __tablename__ = 'combo_items'
     id = db.Column(db.Integer, primary_key=True)
