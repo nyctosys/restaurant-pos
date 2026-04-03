@@ -15,12 +15,12 @@ def printer_status(current_user):
         if connected:
             return jsonify({
                 'status': 'connected',
-                'message': 'USB printer is connected and ready'
+                'message': 'Printer is connected and ready'
             }), 200
         else:
             return jsonify({
                 'status': 'disconnected',
-                'message': 'USB printer not found or not configured'
+                'message': 'Printer not found or not configured'
             }), 200
     except Exception as e:
         return jsonify({
@@ -56,8 +56,35 @@ def test_print(current_user):
         if success:
             return jsonify({'success': True, 'message': 'Test print completed'}), 200
         else:
-            return jsonify({'success': False, 'message': 'Failed to print. Check USB connection.'}), 503
+            return jsonify({'success': False, 'message': 'Failed to print. Check printer connection and settings.'}), 503
             
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@printer_bp.route('/test-kot-print', methods=['POST'])
+@token_required
+def test_kot_print(current_user):
+    """Fires a test KOT print using current KOT printer settings."""
+    try:
+        from app.services.printer_service import PrinterService
+        printer_service = PrinterService()
+
+        test_kot = {
+            'sale_id': 'TEST-KOT',
+            'branch': 'Test Branch',
+            'operator': current_user.username,
+            'table_name': 'T-01',
+            'items': [
+                {'title': 'Chicken Burger', 'quantity': 2, 'variant_sku_suffix': 'Large', 'modifiers': ['Extra Cheese']},
+                {'title': 'Fries', 'quantity': 1, 'modifiers': []},
+            ],
+        }
+
+        success = printer_service.print_kot(test_kot)
+        if success:
+            return jsonify({'success': True, 'message': 'Test KOT print completed'}), 200
+        return jsonify({'success': False, 'message': 'Failed to print KOT. Check printer connection and settings.'}), 503
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
 

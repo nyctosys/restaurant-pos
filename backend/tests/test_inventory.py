@@ -1,62 +1,66 @@
-"""Test inventory get/update and invalid branch/product."""
+"""Ingredient stock map and manual adjustment (branch-scoped)."""
 import pytest
-from app.models import db, Branch, User, Product, Inventory
+from app.models import db, Branch, User, Ingredient, IngredientBranchStock
+from app.services.branch_ingredient_stock import seed_branch_stocks_for_new_ingredient
 from werkzeug.security import generate_password_hash
 
 
-def _auth_headers(client, app, role="owner"):
+def _seed_user_branch(app):
     with app.app_context():
         b = Branch(name="Main")
         db.session.add(b)
         db.session.flush()
         u = User(
-            username="owner1",
+            username="invuser",
             password_hash=generate_password_hash("pass"),
-            role=role,
+            role="owner",
             branch_id=b.id,
         )
         db.session.add(u)
         db.session.commit()
-    r = client.post("/api/auth/login", json={"username": "owner1", "password": "pass"})
-    token = r.get_json()["token"]
-    return {"Authorization": f"Bearer {token}"}
+        return b.id
 
 
-def test_inventory_list_requires_auth(client):
+def test_stock_list_requires_auth(client):
     r = client.get("/api/stock/")
     assert r.status_code == 401
 
 
-def test_inventory_update_success(client, app):
-    h = _auth_headers(client, app)
+def test_stock_update_and_list(client, app):
+    bid = _seed_user_branch(app)
     with app.app_context():
-        b = Branch.query.filter_by(name="Main").first()
-        p = Product(sku="SKU1", title="X", base_price=10)
-        db.session.add(p)
+        ing = Ingredient(name="Flour", unit="kg", current_stock=0.0)
+        db.session.add(ing)
         db.session.flush()
-        inv = Inventory(branch_id=b.id, product_id=p.id, stock_level=5)
-        db.session.add(inv)
+        seed_branch_stocks_for_new_ingredient(ing.id, 0.0)
+        row = IngredientBranchStock.query.filter_by(ingredient_id=ing.id, branch_id=bid).first()
+        row.current_stock = 5.0
         db.session.commit()
-        bid, pid = b.id, p.id
-    r = client.post(
+        iid = ing.id
+
+    r = client.post("/api/auth/login", json={"username": "invuser", "password": "pass"})
+    token = r.get_json()["token"]
+    h = {"Authorization": f"Bearer {token}"}
+
+    r = client.get("/api/stock/", headers=h)
+    assert r.status_code == 200
+    inv = r.get_json()["ingredient_stock"]
+    assert str(iid) in inv
+    assert inv[str(iid)] == 5
+
+    r2 = client.post(
         "/api/stock/update",
         headers=h,
-        json={"branch_id": bid, "product_id": pid, "stock_delta": 3},
+        json={"ingredient_id": iid, "stock_delta": 3, "branch_id": bid},
     )
-    assert r.status_code == 200
-    data = r.get_json()
-    assert data.get("stock_level") == 8
+    assert r2.status_code == 200
+    assert r2.get_json().get("stock_level") == 8
+
+    r3 = client.get("/api/stock/transactions?time_filter=today", headers=h)
+    assert r3.status_code == 200
+    assert len(r3.get_json().get("transactions") or []) >= 1
 
 
 def test_stock_transactions_requires_auth(client):
     r = client.get("/api/stock/transactions?time_filter=today")
     assert r.status_code == 401
-
-
-def test_stock_transactions_returns_list(client, app):
-    h = _auth_headers(client, app)
-    r = client.get("/api/stock/transactions?time_filter=today", headers=h)
-    assert r.status_code == 200
-    data = r.get_json()
-    assert "transactions" in data
-    assert isinstance(data["transactions"], list)

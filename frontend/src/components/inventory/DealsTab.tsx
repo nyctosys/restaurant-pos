@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Plus, X, Loader2, ListPlus, Trash2, UtensilsCrossed } from 'lucide-react';
 import { get, post, del, getUserMessage } from '../../api';
 import { formatCurrency } from '../../utils/formatCurrency';
@@ -17,6 +17,8 @@ interface ComboItem {
   product_id: number;
   product_title?: string;
   quantity: number;
+  /** Empty = base combo (all deal variants); otherwise must match a deal variant label. */
+  variant_key?: string;
 }
 
 interface Deal {
@@ -24,6 +26,8 @@ interface Deal {
   sku: string;
   title: string;
   base_price: number;
+  section?: string;
+  variants?: string[];
   combo_items: ComboItem[];
 }
 
@@ -37,8 +41,19 @@ export default function DealsTab() {
     title: '',
     sku: '',
     base_price: '',
+    /** Comma-separated deal variant labels (optional). Used for variant-specific combo lines. */
+    variants: '',
     combo_items: [] as ComboItem[]
   });
+
+  const dealVariantOptions = useMemo(
+    () =>
+      formData.variants
+        .split(',')
+        .map(s => s.trim())
+        .filter(Boolean),
+    [formData.variants]
+  );
 
   useEffect(() => {
     fetchData();
@@ -48,6 +63,7 @@ export default function DealsTab() {
     setLoading(true);
     try {
       const [dealsRes, productsRes] = await Promise.all([
+        // Same handlers as /menu/deals/; inventory-advanced path is stable across backend reloads.
         get('/inventory-advanced/deals/'),
         get('/menu-items/')
       ]);
@@ -71,13 +87,21 @@ export default function DealsTab() {
     }
 
     try {
+      const variantList = dealVariantOptions;
       await post('/inventory-advanced/deals/', {
-        ...formData,
-        base_price: parseFloat(formData.base_price)
+        title: formData.title,
+        sku: formData.sku,
+        base_price: parseFloat(formData.base_price),
+        variants: variantList,
+        combo_items: formData.combo_items.map(({ product_id, quantity, variant_key }) => ({
+          product_id,
+          quantity,
+          variant_key: (variant_key || '').trim()
+        }))
       });
       showToast('Deal created successfully', 'success');
       setShowForm(false);
-      setFormData({ title: '', sku: '', base_price: '', combo_items: [] });
+      setFormData({ title: '', sku: '', base_price: '', variants: '', combo_items: [] });
       fetchData();
     } catch (err) {
       showToast(getUserMessage(err), 'error');
@@ -86,16 +110,17 @@ export default function DealsTab() {
 
   const handleDelete = async (id: number) => {
     const confirmed = await showConfirm({
-      title: 'Delete Deal',
-      message: 'Are you sure you want to delete this deal? This cannot be undone.',
-      confirmLabel: 'Delete',
+      title: 'Remove deal from menu',
+      message:
+        'This archives the deal: it disappears from the POS and menu, but past receipts and sales history stay intact.',
+      confirmLabel: 'Remove',
       variant: 'danger'
     });
     if (!confirmed) return;
 
     try {
       await del(`/inventory-advanced/deals/${id}`);
-      showToast('Deal deleted', 'success');
+      showToast('Deal removed from menu', 'success');
       fetchData();
     } catch (err) {
       showToast(getUserMessage(err), 'error');
@@ -105,7 +130,7 @@ export default function DealsTab() {
   const addComboItem = () => {
     setFormData(prev => ({
       ...prev,
-      combo_items: [...prev.combo_items, { product_id: 0, quantity: 1 }]
+      combo_items: [...prev.combo_items, { product_id: 0, quantity: 1, variant_key: '' }]
     }));
   };
 
@@ -138,7 +163,11 @@ export default function DealsTab() {
             <UtensilsCrossed className="w-6 h-6 text-brand-500" />
             Deals & Combos
           </h2>
-          <p className="text-soot-600 font-medium">Bundle multiple menu items into promotions.</p>
+          <p className="text-soot-600 font-medium">
+            Bundle menu items into promotions. Deals use the <span className="font-semibold text-soot-800">Deals</span>{' '}
+            section and appear on the order screen (category filter &quot;Deals&quot; when needed). Ingredient depletion
+            follows each bundled item&apos;s recipe (BOM), same as regular menu items.
+          </p>
         </div>
         <button
           onClick={() => setShowForm(!showForm)}
@@ -154,6 +183,22 @@ export default function DealsTab() {
           <h3 className="text-lg font-bold text-soot-900 mb-4">Create New Deal</h3>
           <form onSubmit={handleCreate} className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div className="md:col-span-3">
+                <label className="block text-sm font-semibold text-soot-700 mb-2">
+                  Deal variants <span className="text-soot-500 font-normal">(optional)</span>
+                </label>
+                <input
+                  type="text"
+                  value={formData.variants}
+                  onChange={e => setFormData({ ...formData, variants: e.target.value })}
+                  className="w-full bg-white/50 border border-soot-200 rounded-xl px-4 py-3 focus:ring-2 focus:ring-brand-500 transition-all font-medium touch-target outline-none"
+                  placeholder="e.g. Regular, Large — comma-separated"
+                />
+                <p className="text-xs text-soot-500 mt-1.5">
+                  If set, you can tag each combo line for a variant (or leave as base for all). POS will require a
+                  variant pick when the deal has variants.
+                </p>
+              </div>
               <div>
                 <label className="block text-sm font-semibold text-soot-700 mb-2">Deal Title</label>
                 <input
@@ -177,7 +222,7 @@ export default function DealsTab() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-semibold text-soot-700 mb-2">Bundled Price ($)</label>
+                <label className="block text-sm font-semibold text-soot-700 mb-2">Bundled price (PKR)</label>
                 <input
                   type="number"
                   required
@@ -205,8 +250,8 @@ export default function DealsTab() {
               
               <div className="space-y-3">
                 {formData.combo_items.map((item, index) => (
-                  <div key={index} className="flex gap-4 items-end bg-white/30 p-4 rounded-xl border border-soot-100">
-                    <div className="flex-1">
+                  <div key={index} className="flex flex-wrap gap-4 items-end bg-white/30 p-4 rounded-xl border border-soot-100">
+                    <div className="flex-1 min-w-[200px]">
                       <label className="block text-xs font-semibold text-soot-600 mb-1">Menu Item</label>
                       <select
                         required
@@ -220,7 +265,7 @@ export default function DealsTab() {
                         ))}
                       </select>
                     </div>
-                    <div className="w-32">
+                    <div className="w-24 shrink-0">
                       <label className="block text-xs font-semibold text-soot-600 mb-1">Quantity</label>
                       <input
                         type="number"
@@ -231,6 +276,21 @@ export default function DealsTab() {
                         className="w-full bg-white border border-soot-200 rounded-lg px-3 py-2 font-medium focus:ring-2 focus:ring-brand-400 outline-none"
                       />
                     </div>
+                    {dealVariantOptions.length > 0 && (
+                      <div className="w-full sm:w-44 shrink-0">
+                        <label className="block text-xs font-semibold text-soot-600 mb-1">Combo for variant</label>
+                        <select
+                          value={item.variant_key || ''}
+                          onChange={e => updateComboItem(index, 'variant_key', e.target.value)}
+                          className="w-full bg-white border border-soot-200 rounded-lg px-3 py-2 font-medium focus:ring-2 focus:ring-brand-400 outline-none"
+                        >
+                          <option value="">Base (all)</option>
+                          {dealVariantOptions.map(v => (
+                            <option key={v} value={v}>{v}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
                     <button
                       type="button"
                       onClick={() => removeComboItem(index)}
@@ -283,6 +343,18 @@ export default function DealsTab() {
                   <span className="text-xs bg-brand-100 text-brand-800 font-bold px-2 py-0.5 rounded-md border border-brand-200 inline-block mt-1">
                     {deal.sku}
                   </span>
+                  <span className="text-xs bg-soot-100 text-soot-700 font-semibold px-2 py-0.5 rounded-md border border-soot-200 inline-block mt-1 ml-1">
+                    {deal.section || 'Deals'}
+                  </span>
+                  {deal.variants && deal.variants.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-2">
+                      {deal.variants.map(v => (
+                        <span key={v} className="text-[10px] font-bold uppercase tracking-wide text-brand-800 bg-white/80 border border-brand-200 px-1.5 py-0.5 rounded">
+                          {v}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
                 <button
                   onClick={() => handleDelete(deal.id)}
@@ -294,10 +366,13 @@ export default function DealsTab() {
               <div className="p-5 flex-1">
                 <ul className="space-y-2">
                   {deal.combo_items.map((item, idx) => (
-                    <li key={idx} className="flex justify-between items-center text-sm">
+                    <li key={idx} className="flex justify-between items-center text-sm gap-2">
                       <span className="text-soot-600 font-medium pb-1 border-b border-dashed border-soot-200 flex-1 mr-4">
                         <span className="font-bold text-soot-900 mr-2">{item.quantity}x</span>
                         {item.product_title}
+                        {item.variant_key ? (
+                          <span className="text-[10px] font-bold text-brand-700 ml-2">({item.variant_key})</span>
+                        ) : null}
                       </span>
                     </li>
                   ))}

@@ -1,5 +1,6 @@
 import { Component, type ReactNode, type ErrorInfo } from 'react';
 import log from '../utils/logger';
+import { postClientAppEvent } from '../api/appLogs';
 
 interface State {
   hasError: boolean;
@@ -17,6 +18,15 @@ export default class ErrorBoundary extends Component<{ children: ReactNode }, St
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     this.setState({ errorInfo });
     log.error('ErrorBoundary', error.message, { stack: error.stack, componentStack: errorInfo.componentStack });
+    void postClientAppEvent({
+      severity: 'error',
+      message: error.message,
+      route: typeof window !== 'undefined' ? window.location.pathname : undefined,
+      context: {
+        stack: error.stack,
+        componentStack: errorInfo.componentStack,
+      },
+    });
   }
 
   render() {

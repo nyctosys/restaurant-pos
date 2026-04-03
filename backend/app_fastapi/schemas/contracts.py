@@ -30,7 +30,7 @@ class CheckoutItem(BaseModel):
     model_config = ConfigDict(extra="ignore")
     product_id: int
     quantity: int
-    variant_sku_suffix: str | None = ""
+    modifier_ids: list[int] = Field(default_factory=list)
 
 
 class DiscountPayload(BaseModel):

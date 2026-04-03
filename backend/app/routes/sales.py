@@ -2,6 +2,7 @@ from flask import Blueprint, request, jsonify
 from sqlalchemy import func
 from datetime import datetime, timedelta, time
 from app.models import db, Sale, SaleItem, Inventory, InventoryTransaction, Product, Setting, StockMovement
+from app.services.recipe_variants import combo_items_for_variant
 from app.utils.auth_decorators import token_required, owner_required
 from app.errors import error_response
 from app.order_metadata import normalize_order_type_and_snapshot
@@ -140,8 +141,8 @@ def checkout(current_user):
                                 )
                                 db.session.add(sm)
                 else:
-                    # It is a Deal/Combo, recursively deduct child products
-                    for combo_item in p.combo_items:
+                    # It is a Deal/Combo, recursively deduct child products (variant-scoped combo lines)
+                    for combo_item in combo_items_for_variant(p, item_v_suffix):
                         child = combo_item.child_product
                         if child:
                             success, err = deduct_product(child, qty * combo_item.quantity, "")
@@ -489,7 +490,7 @@ def rollback_sale(current_user, sale_id):
                                 )
                                 db.session.add(sm)
                 else:
-                    for combo_item in p.combo_items:
+                    for combo_item in combo_items_for_variant(p, item_v_suffix):
                         child = combo_item.child_product
                         if child:
                             refund_product(child, qty * combo_item.quantity, "")

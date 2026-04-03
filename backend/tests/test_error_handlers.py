@@ -6,9 +6,10 @@ def test_404_returns_json(client):
     r = client.get("/api/nonexistent")
     assert r.status_code == 404
     data = r.get_json()
-    assert "error" in data
-    assert "message" in data
-    assert "Not Found" in data.get("error", "")
+    # FastAPI default: {"detail": "Not Found"}; legacy handlers: { "error", "message" }
+    assert "detail" in data or ("error" in data and "message" in data)
+    blob = str(data.get("detail", "")) + str(data.get("error", "")) + str(data.get("message", ""))
+    assert "not found" in blob.lower()
 
 
 def test_500_returns_json(client):

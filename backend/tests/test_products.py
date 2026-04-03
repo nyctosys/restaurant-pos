@@ -45,4 +45,4 @@ def test_product_update_404(client, app):
     )
     assert r.status_code == 404
     data = r.get_json()
-    assert data is not None and ("error" in data or "message" in data)
+    assert data is not None and ("detail" in data or "error" in data or "message" in data)

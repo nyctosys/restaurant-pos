@@ -9,6 +9,7 @@ type Product = {
   title: string;
   sku: string;
   base_price: number;
+  variants?: string[];
 };
 
 type Ingredient = {
@@ -25,6 +26,7 @@ type RecipeItem = {
   quantity: number;
   unit: string;
   notes?: string;
+  variant_key?: string;
 };
 
 export default function RecipesTab() {
@@ -33,6 +35,8 @@ export default function RecipesTab() {
   const [loadingInitial, setLoadingInitial] = useState(true);
   
   const [selectedProductId, setSelectedProductId] = useState<number | null>(null);
+  /** '' = base BOM (all variants unless a variant-specific BOM exists); else exact variant label */
+  const [recipeVariantScope, setRecipeVariantScope] = useState('');
   const [recipeItems, setRecipeItems] = useState<RecipeItem[]>([]);
   const [loadingRecipe, setLoadingRecipe] = useState(false);
 
@@ -66,6 +70,7 @@ export default function RecipesTab() {
 
   const loadRecipe = async (productId: number) => {
     setSelectedProductId(productId);
+    setRecipeVariantScope('');
     setLoadingRecipe(true);
     setShowAddForm(false);
     try {
@@ -98,7 +103,8 @@ export default function RecipesTab() {
         ingredient_id: parseInt(formIngredientId, 10),
         quantity: qty,
         unit: ing.unit,
-        notes: formNotes || undefined
+        notes: formNotes || undefined,
+        variant_key: recipeVariantScope || '',
       });
       showToast('Ingredient added to recipe', 'success');
       
@@ -135,9 +141,15 @@ export default function RecipesTab() {
 
   const selectedProduct = products.find(p => p.id === selectedProductId);
 
-  // Calculate recipe cost
+  const displayedRecipeItems = recipeItems.filter(ri => {
+    const vk = (ri.variant_key || '').trim();
+    if (!recipeVariantScope) return vk === '';
+    return vk === recipeVariantScope;
+  });
+
+  // Calculate recipe cost for the selected scope only
   let totalCost = 0;
-  recipeItems.forEach(ri => {
+  displayedRecipeItems.forEach(ri => {
     const ing = ingredients.find(i => i.id === ri.ingredient_id);
     if (ing) {
       totalCost += (ing.average_cost * ri.quantity);
@@ -196,11 +208,33 @@ export default function RecipesTab() {
             <div className="p-5 border-b border-white/20 bg-white/20 shrink-0 flex flex-wrap justify-between items-start gap-4">
               <div>
                 <h2 className="text-xl font-bold text-soot-900">{selectedProduct.title}</h2>
-                <div className="flex gap-3 text-sm mt-1">
+                <div className="flex gap-3 text-sm mt-1 flex-wrap">
                   <span className="text-soot-500 font-mono">{selectedProduct.sku}</span>
                   <span className="text-soot-300">|</span>
                   <span className="text-soot-600 font-medium">Sell Price: {formatCurrency(selectedProduct.base_price)}</span>
                 </div>
+                {(selectedProduct.variants && selectedProduct.variants.length > 0) && (
+                  <div className="mt-3 max-w-full">
+                    <label className="block text-xs font-semibold text-soot-600 uppercase tracking-wider mb-1">
+                      Recipe scope
+                    </label>
+                    <select
+                      value={recipeVariantScope}
+                      onChange={e => setRecipeVariantScope(e.target.value)}
+                      className="w-full sm:max-w-md px-3 py-2 rounded-lg glass-card text-sm border border-soot-200/80 focus:ring-2 focus:ring-brand-500"
+                    >
+                      <option value="">Base (default — used when no variant-specific BOM exists)</option>
+                      {selectedProduct.variants.map(v => (
+                        <option key={v} value={v}>
+                          Variant: {v}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-xs text-soot-500 mt-1">
+                      Add ingredients for the base recipe, or pick a variant to override the BOM for that option only.
+                    </p>
+                  </div>
+                )}
               </div>
               
               <div className="glass-card px-4 py-2 bg-white/40 border-brand-200/50 flex flex-col items-end">
@@ -222,7 +256,7 @@ export default function RecipesTab() {
                  <div className="flex items-center justify-center py-10 text-soot-400 gap-2">
                    <Loader2 className="w-5 h-5 animate-spin" /> Loading recipe...
                  </div>
-              ) : recipeItems.length === 0 ? (
+              ) : displayedRecipeItems.length === 0 ? (
                  <div className="text-center py-10 text-soot-400">
                    <div className="w-12 h-12 rounded-full bg-soot-100 flex items-center justify-center mx-auto mb-3">
                      <PackageSearch className="w-6 h-6 text-soot-300" />
@@ -232,7 +266,7 @@ export default function RecipesTab() {
                  </div>
               ) : (
                 <div className="space-y-3">
-                  {recipeItems.map(ri => {
+                  {displayedRecipeItems.map(ri => {
                     const ing = ingredients.find(i => i.id === ri.ingredient_id);
                     if (!ing) return null;
                     return (
@@ -241,6 +275,9 @@ export default function RecipesTab() {
                           <p className="font-bold text-soot-900">{ing.name}</p>
                           <p className="text-xs text-soot-500 mt-0.5">
                             Cost: {formatCurrency(ing.average_cost)} / {ing.unit}
+                            {(ri.variant_key || '').trim() ? (
+                              <span className="ml-2 text-brand-700 font-semibold">({(ri.variant_key || '').trim()})</span>
+                            ) : null}
                           </p>
                         </div>
                         <div className="flex items-center gap-6">

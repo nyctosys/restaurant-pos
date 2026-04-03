@@ -22,30 +22,59 @@ def _extract_bearer(authorization: str | None) -> str | None:
 def get_current_user(authorization: str | None = Header(default=None)) -> User:
     token = _extract_bearer(authorization)
     if not token:
-        raise HTTPException(status_code=401, detail={"message": "Token is missing!"})
+        raise HTTPException(
+            status_code=401,
+            detail={"error": "Unauthorized", "message": "Token is missing!", "code": "token_missing"},
+        )
     try:
         data = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
         user = User.query.get(data["user_id"])
         if not user:
-            raise HTTPException(status_code=401, detail={"message": "User not found!"})
+            raise HTTPException(
+                status_code=401,
+                detail={"error": "Unauthorized", "message": "User not found!", "code": "user_not_found"},
+            )
         return user
     except jwt.ExpiredSignatureError as exc:
         raise HTTPException(
             status_code=401,
-            detail={"message": "Session expired. Please log in again.", "code": "token_expired"},
+            detail={
+                "error": "Unauthorized",
+                "message": "Session expired. Please log in again.",
+                "code": "token_expired",
+            },
         ) from exc
     except jwt.InvalidTokenError as exc:
         raise HTTPException(
             status_code=401,
-            detail={"message": "Invalid session. Please log in again.", "code": "token_invalid"},
+            detail={
+                "error": "Unauthorized",
+                "message": "Invalid session. Please log in again.",
+                "code": "token_invalid",
+            },
         ) from exc
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=401, detail={"message": "Invalid session. Please log in again."}) from exc
+        raise HTTPException(
+            status_code=401,
+            detail={"error": "Unauthorized", "message": "Invalid session. Please log in again.", "code": "token_invalid"},
+        ) from exc
 
 
 def require_owner(current_user: User = Depends(get_current_user)) -> User:
     if current_user.role != "owner":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail={"message": "Owner privileges required!"})
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"error": "Forbidden", "message": "Owner privileges required!", "code": "forbidden"},
+        )
+    return current_user
+
+
+def require_owner_or_manager(current_user: User = Depends(get_current_user)) -> User:
+    if current_user.role not in ("owner", "manager"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"error": "Forbidden", "message": "Owner or manager privileges required!", "code": "forbidden"},
+        )
     return current_user

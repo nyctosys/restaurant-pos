@@ -1,4 +1,4 @@
-import { useState, useEffect, useSyncExternalStore, useRef } from 'react';
+import { useState, useEffect, useLayoutEffect, useSyncExternalStore, useRef } from 'react';
 import { Plus, Trash2, Loader2, Moon, Sun, ScrollText, Copy, Trash, Download, ChevronDown, ChevronUp, Archive, ArchiveRestore } from 'lucide-react';
 import UsersSettings from '../components/settings/UsersSettings';
 import ReceiptSettings from '../components/settings/ReceiptSettings';
@@ -6,7 +6,8 @@ import BranchesSettings from '../components/settings/BranchesSettings';
 import TablesSettings from '../components/settings/TablesSettings';
 import ModifiersSettings from '../components/settings/ModifiersSettings';
 import appLogger, { type LogEntry } from '../utils/logger';
-import { get, put, post, getUserMessage } from '../api';
+import { get, put, post, getUserMessage, getUserMessageWithRef } from '../api';
+import { getTerminalBranchIdString, parseUserFromStorage } from '../utils/branchContext';
 import { showConfirm } from '../components/ConfirmDialog';
 
 type SettingsResponse = { config?: Record<string, unknown> };
@@ -14,6 +15,7 @@ type SettingsResponse = { config?: Record<string, unknown> };
 export default function Settings() {
   const [activeTab, setActiveTab] = useState('general');
   const [isDark, setIsDark] = useState(() => document.documentElement.classList.contains('dark'));
+  const settingsNavScrollRef = useRef<HTMLDivElement>(null);
 
   // ── Sections state ──
   const [sections, setSections] = useState<string[]>([]);
@@ -45,11 +47,24 @@ export default function Settings() {
   const PAYMENT_METHODS = ['Cash', 'Card', 'Online Transfer'];
 
   // ── Hardware settings state ──
-  const [hardware, setHardware] = useState({ printer_vendor_id: '', printer_product_id: '', paper_width: '80mm' });
+  const [hardware, setHardware] = useState({
+    receipt_printer_mode: 'lan',
+    receipt_printer_ip: '',
+    receipt_printer_port: 9100,
+    receipt_printer_vendor_id: '',
+    receipt_printer_product_id: '',
+    kot_printer_mode: 'lan',
+    kot_printer_ip: '',
+    kot_printer_port: 9100,
+    kot_printer_vendor_id: '',
+    kot_printer_product_id: '',
+    paper_width: '80mm',
+  });
   const [hardwareLoading, setHardwareLoading] = useState(false);
   const [hardwareSaving, setHardwareSaving] = useState(false);
   const [hardwareFeedback, setHardwareFeedback] = useState('');
   const [testPrintLoading, setTestPrintLoading] = useState(false);
+  const [testKotPrintLoading, setTestKotPrintLoading] = useState(false);
 
   // ── Discounts state ──
   type DiscountItem = { id: string; name: string; type: 'percent' | 'fixed'; value: number; archived?: boolean };
@@ -71,13 +86,20 @@ export default function Settings() {
     }
   }, []);
 
-  const userStr = localStorage.getItem('user');
-  const user = userStr ? JSON.parse(userStr) : null;
+  /** Avoid scroll restoration leaving the tab list scrolled to “App Logs” at the bottom */
+  useLayoutEffect(() => {
+    settingsNavScrollRef.current?.scrollTo(0, 0);
+  }, []);
+
+  const user = parseUserFromStorage();
   const isOwner = user?.role === 'owner';
-  
+  const activeBranchId = getTerminalBranchIdString(user);
+
   const tabs = ['General', 'Receipt', 'Hardware', 'Categories', 'Variants', 'Tables', 'Modifiers', 'Tax & Rates', 'Discounts'];
   if (isOwner) {
     tabs.push('Users');
+  }
+  if (isOwner || user?.role === 'manager') {
     tabs.push('Branches');
   }
   tabs.push('App Logs');
@@ -100,7 +122,6 @@ export default function Settings() {
   const fetchSections = async () => {
     setSectionsLoading(true);
     try {
-      const activeBranchId = localStorage.getItem('active_branch_id') || '';
       const query = activeBranchId ? `?branch_id=${activeBranchId}` : '';
       const data = await get<SettingsResponse>(`/settings/${query}`);
       const sectionsList = data.config?.sections;
@@ -145,7 +166,6 @@ export default function Settings() {
   const fetchVariants = async () => {
     setVariantsLoading(true);
     try {
-      const activeBranchId = localStorage.getItem('active_branch_id') || '';
       const query = activeBranchId ? `?branch_id=${activeBranchId}` : '';
       const data = await get<SettingsResponse>(`/settings/${query}`);
       const list = data.config?.variants;
@@ -162,7 +182,6 @@ export default function Settings() {
     setVariantsSaving(true);
     setVariantsFeedback('');
     try {
-      const activeBranchId = localStorage.getItem('active_branch_id') ?? '';
       const query = activeBranchId ? `?branch_id=${activeBranchId}` : '';
       const existing = await get<SettingsResponse>(`/settings/${query}`);
       const currentConfig = (existing?.config ?? {}) as Record<string, unknown>;
@@ -216,7 +235,6 @@ export default function Settings() {
   const fetchDiscounts = async () => {
     setDiscountsLoading(true);
     try {
-      const activeBranchId = localStorage.getItem('active_branch_id') ?? '';
       const query = activeBranchId ? `?branch_id=${activeBranchId}` : '';
       const data = await get<SettingsResponse>(`/settings/${query}`);
       const list = data.config?.discounts;
@@ -232,7 +250,6 @@ export default function Settings() {
     setDiscountsSaving(true);
     setDiscountsFeedback('');
     try {
-      const activeBranchId = localStorage.getItem('active_branch_id') ?? '';
       const query = activeBranchId ? `?branch_id=${activeBranchId}` : '';
       const existing = await get<SettingsResponse>(`/settings/${query}`);
       const currentConfig = (existing?.config ?? {}) as Record<string, unknown>;
@@ -301,7 +318,6 @@ export default function Settings() {
   const fetchTaxSettings = async () => {
     setTaxLoading(true);
     try {
-      const activeBranchId = localStorage.getItem('active_branch_id') || '';
       const query = activeBranchId ? `?branch_id=${activeBranchId}` : '';
       const data = await get<SettingsResponse>(`/settings/${query}`);
       const config = (data?.config ?? {}) as Record<string, unknown>;
@@ -324,7 +340,6 @@ export default function Settings() {
     setTaxSaving(true);
     setTaxFeedback('');
     try {
-      const activeBranchId = localStorage.getItem('active_branch_id') || '';
       const query = activeBranchId ? `?branch_id=${activeBranchId}` : '';
       const existing = await get<SettingsResponse>(`/settings/${query}`);
       const currentConfig = (existing?.config ?? {}) as Record<string, unknown>;
@@ -351,14 +366,40 @@ export default function Settings() {
     setHardwareLoading(true);
     try {
       const data = await get<SettingsResponse>('/settings/?global_only=1');
-      const h = data.config?.hardware as { printer_vendor_id?: string; printer_product_id?: string; paper_width?: string } | undefined;
+      const h = data.config?.hardware as Record<string, string | number | undefined> | undefined;
+      const legacyMode = (String(h?.printer_connection_type || '').toLowerCase() === 'lan') ? 'lan' : 'usb';
+      const receiptMode = (String(h?.receipt_printer_mode || '').toLowerCase() === 'usb')
+        ? 'usb'
+        : (String(h?.receipt_printer_mode || '').toLowerCase() === 'lan' ? 'lan' : legacyMode || 'lan');
+      const kotModeRaw = String(h?.kot_printer_mode || '').toLowerCase();
+      const kotMode = kotModeRaw === 'usb' || kotModeRaw === 'lan' ? kotModeRaw : receiptMode;
       setHardware({
-        printer_vendor_id: h?.printer_vendor_id ?? '',
-        printer_product_id: h?.printer_product_id ?? '',
-        paper_width: h?.paper_width ?? '80mm',
+        receipt_printer_mode: receiptMode,
+        receipt_printer_ip: String(h?.receipt_printer_ip ?? ''),
+        receipt_printer_port: Number(h?.receipt_printer_port ?? 9100) || 9100,
+        receipt_printer_vendor_id: String(h?.receipt_printer_vendor_id ?? h?.printer_vendor_id ?? ''),
+        receipt_printer_product_id: String(h?.receipt_printer_product_id ?? h?.printer_product_id ?? ''),
+        kot_printer_mode: kotMode,
+        kot_printer_ip: String(h?.kot_printer_ip ?? h?.receipt_printer_ip ?? ''),
+        kot_printer_port: Number(h?.kot_printer_port ?? h?.receipt_printer_port ?? 9100) || 9100,
+        kot_printer_vendor_id: String(h?.kot_printer_vendor_id ?? h?.receipt_printer_vendor_id ?? h?.printer_vendor_id ?? ''),
+        kot_printer_product_id: String(h?.kot_printer_product_id ?? h?.receipt_printer_product_id ?? h?.printer_product_id ?? ''),
+        paper_width: String(h?.paper_width ?? '80mm'),
       });
     } catch {
-      setHardware({ printer_vendor_id: '', printer_product_id: '', paper_width: '80mm' });
+      setHardware({
+        receipt_printer_mode: 'lan',
+        receipt_printer_ip: '',
+        receipt_printer_port: 9100,
+        receipt_printer_vendor_id: '',
+        receipt_printer_product_id: '',
+        kot_printer_mode: 'lan',
+        kot_printer_ip: '',
+        kot_printer_port: 9100,
+        kot_printer_vendor_id: '',
+        kot_printer_product_id: '',
+        paper_width: '80mm',
+      });
     } finally {
       setHardwareLoading(false);
     }
@@ -398,11 +439,32 @@ export default function Settings() {
     }
   };
 
+  const handleTestKotPrint = async () => {
+    setTestKotPrintLoading(true);
+    setHardwareFeedback('');
+    try {
+      await saveHardwareSettings();
+      const data = await post<{ success?: boolean; message?: string }>('/printer/test-kot-print', {});
+      if (data?.success) {
+        setHardwareFeedback('Test KOT print job sent successfully!');
+      } else {
+        setHardwareFeedback('error:' + (data?.message ?? 'KOT printer not reachable'));
+      }
+    } catch (e) {
+      setHardwareFeedback('error:' + getUserMessage(e));
+    } finally {
+      setTestKotPrintLoading(false);
+    }
+  };
+
   return (
     <div className="flex flex-col lg:flex-row h-full min-h-0 bg-transparent overflow-hidden">
       
       {/* Sidebar Nav — scrollable on short viewports; xl+ wider rail */}
-      <div className="w-full lg:w-56 xl:w-64 shrink-0 glass-card border-b lg:border-b-0 lg:border-r border-white/20 p-3 lg:p-4 overflow-y-auto max-h-[min(50vh,420px)] lg:max-h-none lg:min-h-0 m-0 lg:m-2">
+      <div
+        ref={settingsNavScrollRef}
+        className="w-full lg:w-56 xl:w-64 shrink-0 glass-card border-b lg:border-b-0 lg:border-r border-white/20 p-3 lg:p-4 overflow-y-auto max-h-[min(50vh,420px)] lg:max-h-none lg:min-h-0 m-0 lg:m-2"
+      >
         <h2 className="text-lg font-bold text-soot-900 mb-4 lg:mb-6 px-2 lg:px-4">System Settings</h2>
         <nav className="space-y-1">
           {tabs.map(tab => (
@@ -468,7 +530,7 @@ export default function Settings() {
             <h3 className="text-2xl font-bold text-soot-900 mb-6">Hardware Configuration</h3>
             <div className="space-y-6">
               <div className="glass-card p-6">
-                <h4 className="font-semibold text-soot-900 mb-4">Thermal Printer (USB ESC/POS)</h4>
+                <h4 className="font-semibold text-soot-900 mb-4">Thermal Printers (Receipt + KOT)</h4>
                 
                 {hardwareLoading ? (
                   <div className="flex items-center gap-2 text-soot-400 py-6">
@@ -477,34 +539,147 @@ export default function Settings() {
                   </div>
                 ) : (
                   <>
-                    <p className="text-sm text-soot-500 mb-4">Connect your thermal receipt printer via USB to the POS terminal. Enter the USB Vendor ID and Product ID below (hex values).</p>
-                    <div className="grid grid-cols-2 gap-4">
-                   <div>
-                     <label className="block text-sm font-medium text-soot-800 mb-1">USB Vendor ID</label>
-                     <input 
-                       type="text"
-                       inputMode="text"
-                       value={hardware.printer_vendor_id}
-                       onChange={e => setHardware({ ...hardware, printer_vendor_id: e.target.value })}
-                       placeholder="e.g. 0x04b8" 
-                       className="w-full px-4 py-3 glass-card font-mono focus:ring-2 focus:ring-brand-500 focus:outline-none"
-                     />
-                     <p className="text-xs text-soot-400 mt-1">Hex value, e.g. 0x04b8 for Epson</p>
-                   </div>
-                   <div>
-                     <label className="block text-sm font-medium text-soot-800 mb-1">USB Product ID</label>
-                     <input 
-                       type="text"
-                       inputMode="text"
-                       value={hardware.printer_product_id}
-                       onChange={e => setHardware({ ...hardware, printer_product_id: e.target.value })}
-                       placeholder="e.g. 0x0202" 
-                       className="w-full px-4 py-3 glass-card font-mono focus:ring-2 focus:ring-brand-500 focus:outline-none"
-                     />
-                     <p className="text-xs text-soot-400 mt-1">Hex value, e.g. 0x0202 for TM-T88</p>
-                   </div>
-                </div>
-                <div className="mt-4">
+                    <p className="text-sm text-soot-500 mb-4">
+                      Configure dedicated printers for customer receipts and KOT tickets. LAN mode supports separate network printers (recommended), and USB mode remains available for local setups.
+                    </p>
+
+                    <div className="rounded-lg border border-soot-200 p-4 space-y-3">
+                      <h5 className="text-sm font-semibold text-soot-900">Order Receipt Printer</h5>
+                      <div>
+                        <label className="block text-sm font-medium text-soot-800 mb-1">Connection Type</label>
+                        <select
+                          value={hardware.receipt_printer_mode}
+                          onChange={e => setHardware({ ...hardware, receipt_printer_mode: e.target.value })}
+                          className="w-full px-4 py-3 glass-card focus:ring-2 focus:ring-brand-500 focus:outline-none"
+                        >
+                          <option value="lan">LAN (IP + Port)</option>
+                          <option value="usb">USB (Vendor/Product ID)</option>
+                        </select>
+                      </div>
+
+                      {hardware.receipt_printer_mode === 'lan' ? (
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-sm font-medium text-soot-800 mb-1">Printer IP / Host</label>
+                            <input
+                              type="text"
+                              inputMode="text"
+                              value={hardware.receipt_printer_ip}
+                              onChange={e => setHardware({ ...hardware, receipt_printer_ip: e.target.value })}
+                              placeholder="e.g. 192.168.1.50"
+                              className="w-full px-4 py-3 glass-card font-mono focus:ring-2 focus:ring-brand-500 focus:outline-none"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-soot-800 mb-1">Port</label>
+                            <input
+                              type="number"
+                              inputMode="numeric"
+                              min={1}
+                              value={hardware.receipt_printer_port}
+                              onChange={e => setHardware({ ...hardware, receipt_printer_port: Number(e.target.value) || 9100 })}
+                              placeholder="9100"
+                              className="w-full px-4 py-3 glass-card font-mono focus:ring-2 focus:ring-brand-500 focus:outline-none"
+                            />
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-sm font-medium text-soot-800 mb-1">USB Vendor ID</label>
+                            <input
+                              type="text"
+                              inputMode="text"
+                              value={hardware.receipt_printer_vendor_id}
+                              onChange={e => setHardware({ ...hardware, receipt_printer_vendor_id: e.target.value })}
+                              placeholder="e.g. 0x04b8"
+                              className="w-full px-4 py-3 glass-card font-mono focus:ring-2 focus:ring-brand-500 focus:outline-none"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-soot-800 mb-1">USB Product ID</label>
+                            <input
+                              type="text"
+                              inputMode="text"
+                              value={hardware.receipt_printer_product_id}
+                              onChange={e => setHardware({ ...hardware, receipt_printer_product_id: e.target.value })}
+                              placeholder="e.g. 0x0202"
+                              className="w-full px-4 py-3 glass-card font-mono focus:ring-2 focus:ring-brand-500 focus:outline-none"
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="rounded-lg border border-soot-200 p-4 space-y-3 mt-4">
+                      <h5 className="text-sm font-semibold text-soot-900">KOT Printer</h5>
+                      <div>
+                        <label className="block text-sm font-medium text-soot-800 mb-1">Connection Type</label>
+                        <select
+                          value={hardware.kot_printer_mode}
+                          onChange={e => setHardware({ ...hardware, kot_printer_mode: e.target.value })}
+                          className="w-full px-4 py-3 glass-card focus:ring-2 focus:ring-brand-500 focus:outline-none"
+                        >
+                          <option value="lan">LAN (IP + Port)</option>
+                          <option value="usb">USB (Vendor/Product ID)</option>
+                        </select>
+                      </div>
+
+                      {hardware.kot_printer_mode === 'lan' ? (
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-sm font-medium text-soot-800 mb-1">Printer IP / Host</label>
+                            <input
+                              type="text"
+                              inputMode="text"
+                              value={hardware.kot_printer_ip}
+                              onChange={e => setHardware({ ...hardware, kot_printer_ip: e.target.value })}
+                              placeholder="e.g. 192.168.1.51"
+                              className="w-full px-4 py-3 glass-card font-mono focus:ring-2 focus:ring-brand-500 focus:outline-none"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-soot-800 mb-1">Port</label>
+                            <input
+                              type="number"
+                              inputMode="numeric"
+                              min={1}
+                              value={hardware.kot_printer_port}
+                              onChange={e => setHardware({ ...hardware, kot_printer_port: Number(e.target.value) || 9100 })}
+                              placeholder="9100"
+                              className="w-full px-4 py-3 glass-card font-mono focus:ring-2 focus:ring-brand-500 focus:outline-none"
+                            />
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-sm font-medium text-soot-800 mb-1">USB Vendor ID</label>
+                            <input
+                              type="text"
+                              inputMode="text"
+                              value={hardware.kot_printer_vendor_id}
+                              onChange={e => setHardware({ ...hardware, kot_printer_vendor_id: e.target.value })}
+                              placeholder="e.g. 0x04b8"
+                              className="w-full px-4 py-3 glass-card font-mono focus:ring-2 focus:ring-brand-500 focus:outline-none"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-soot-800 mb-1">USB Product ID</label>
+                            <input
+                              type="text"
+                              inputMode="text"
+                              value={hardware.kot_printer_product_id}
+                              onChange={e => setHardware({ ...hardware, kot_printer_product_id: e.target.value })}
+                              placeholder="e.g. 0x0202"
+                              className="w-full px-4 py-3 glass-card font-mono focus:ring-2 focus:ring-brand-500 focus:outline-none"
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="mt-4">
                    <div>
                      <label className="block text-sm font-medium text-soot-800 mb-1">Paper Width</label>
                      <select 
@@ -539,11 +714,19 @@ export default function Settings() {
                   </button>
                   <button 
                     onClick={handleTestPrint}
-                    disabled={testPrintLoading || hardwareSaving}
+                    disabled={testPrintLoading || testKotPrintLoading || hardwareSaving}
                     className="bg-white border text-soot-700 border-soot-300 px-6 py-2 rounded-lg text-sm font-medium hover:bg-soot-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
                   >
                     {testPrintLoading && <Loader2 className="w-4 h-4 animate-spin text-soot-500" />}
-                    Test Print Connection
+                    Test Receipt Printer
+                  </button>
+                  <button 
+                    onClick={handleTestKotPrint}
+                    disabled={testKotPrintLoading || testPrintLoading || hardwareSaving}
+                    className="bg-white border text-soot-700 border-soot-300 px-6 py-2 rounded-lg text-sm font-medium hover:bg-soot-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+                  >
+                    {testKotPrintLoading && <Loader2 className="w-4 h-4 animate-spin text-soot-500" />}
+                    Test KOT Printer
                   </button>
                 </div>
                 </>
@@ -1013,22 +1196,117 @@ const LEVEL_DOT: Record<string, string> = {
   error: 'bg-red-500',
 };
 
+type ServerAppEvent = {
+  id: number;
+  created_at: string | null;
+  severity: string;
+  source: string;
+  category: string | null;
+  message: string;
+  requestId: string | null;
+  user_id: number | null;
+  branch_id: number | null;
+  route: string | null;
+  exc_type: string | null;
+  stack_trace: string | null;
+  context: unknown;
+};
+
+function serverEventToLogEntry(e: ServerAppEvent): LogEntry {
+  const sev = e.severity === 'warn' || e.severity === 'info' || e.severity === 'error' ? e.severity : 'error';
+  return {
+    id: 1_000_000_000 + e.id,
+    timestamp: e.created_at ?? new Date().toISOString(),
+    level: sev,
+    source: e.source === 'frontend' ? 'Server · client' : 'Server · backend',
+    message: e.message,
+    data: {
+      route: e.route,
+      category: e.category,
+      exc_type: e.exc_type,
+      stack_trace: e.stack_trace,
+      context: e.context,
+      user_id: e.user_id,
+      branch_id: e.branch_id,
+    },
+    origin: 'server',
+    requestId: e.requestId ?? undefined,
+  };
+}
+
 function AppLogsPanel() {
   const getSnapshot = () => appLogger.getEntries();
   const subscribe = (cb: () => void) => appLogger.subscribe(cb);
-  const entries = useSyncExternalStore(subscribe, getSnapshot);
+  const getServerSnapshot = () => [] as LogEntry[];
+  const localEntries = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+
+  const [serverEvents, setServerEvents] = useState<ServerAppEvent[]>([]);
+  const [serverTotal, setServerTotal] = useState(0);
+  const [serverLoading, setServerLoading] = useState(false);
+  const [serverError, setServerError] = useState<string | null>(null);
 
   const [filter, setFilter] = useState<'all' | 'info' | 'warn' | 'error'>('all');
+  const [originFilter, setOriginFilter] = useState<'all' | 'local' | 'server'>('all');
+  const [requestIdQ, setRequestIdQ] = useState('');
+  const [textQ, setTextQ] = useState('');
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [copyFeedback, setCopyFeedback] = useState('');
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  const filtered = filter === 'all' ? entries : entries.filter(e => e.level === filter);
-  const displayed = filtered.slice(-200).reverse();
+  const loadServer = () => {
+    setServerLoading(true);
+    setServerError(null);
+    const params = new URLSearchParams();
+    params.set('limit', '200');
+    if (requestIdQ.trim()) params.set('requestId', requestIdQ.trim());
+    if (textQ.trim()) params.set('q', textQ.trim());
+    void get<{ events: ServerAppEvent[]; total: number }>(`/settings/app-events?${params.toString()}`)
+      .then(data => {
+        setServerEvents(data.events);
+        setServerTotal(data.total);
+      })
+      .catch(err => {
+        setServerError(getUserMessageWithRef(err));
+      })
+      .finally(() => setServerLoading(false));
+  };
+
+  useEffect(() => {
+    loadServer();
+  }, []);
+
+  const serverEntries = serverEvents.map(serverEventToLogEntry);
+  const merged = [...localEntries, ...serverEntries].sort(
+    (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+  );
+
+  const filtered = merged.filter(e => {
+    if (filter !== 'all' && e.level !== filter) return false;
+    if (originFilter === 'local' && e.origin === 'server') return false;
+    if (originFilter === 'server' && e.origin !== 'server') return false;
+    if (requestIdQ.trim() && e.origin === 'local' && !(e.requestId ?? '').includes(requestIdQ.trim())) return false;
+    if (textQ.trim()) {
+      const t = textQ.trim().toLowerCase();
+      const blob = `${e.message} ${e.source} ${JSON.stringify(e.data ?? '')}`.toLowerCase();
+      if (!blob.includes(t)) return false;
+    }
+    return true;
+  });
+  const displayed = filtered.slice(0, 300);
+
+  const exportMergedText = () =>
+    merged
+      .map(e => {
+        const d = e.data !== undefined ? ' | ' + JSON.stringify(e.data) : '';
+        const ref = e.requestId ? ` [ref:${e.requestId}]` : '';
+        const origin = e.origin === 'server' ? '[server]' : '[device]';
+        return `[${e.timestamp}] [${e.level.toUpperCase()}] ${origin} [${e.source}] ${e.message}${ref}${d}`;
+      })
+      .join('\n');
 
   const handleCopy = async () => {
     try {
-      await navigator.clipboard.writeText(appLogger.exportText());
+      await navigator.clipboard.writeText(exportMergedText());
       setCopyFeedback('Copied!');
     } catch {
       setCopyFeedback('Failed');
@@ -1037,11 +1315,23 @@ function AppLogsPanel() {
   };
 
   const handleDownload = () => {
-    const blob = new Blob([appLogger.exportText()], { type: 'text/plain' });
+    const blob = new Blob([exportMergedText()], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
     a.download = `app-logs-${new Date().toISOString().slice(0, 10)}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleDownloadJson = () => {
+    const blob = new Blob([JSON.stringify({ local: localEntries, server: serverEvents, exportedAt: new Date().toISOString() }, null, 2)], {
+      type: 'application/json',
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `app-logs-${new Date().toISOString().slice(0, 10)}.json`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -1057,46 +1347,99 @@ function AppLogsPanel() {
 
   return (
     <div className="max-w-4xl xl:max-w-5xl">
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
         <div>
           <h3 className="text-2xl font-bold text-soot-900 flex items-center gap-2">
             <ScrollText className="w-6 h-6 text-soot-400" />
             App Logs
           </h3>
-          <p className="text-sm text-soot-500 mt-1">{entries.length} entries captured this session</p>
+          <p className="text-sm text-soot-500 mt-1">
+            {localEntries.length} on this device · {serverTotal} on server (matched)
+            {serverLoading && ' · loading…'}
+          </p>
+          {serverError && (
+            <p className="text-xs text-red-600 mt-2 font-medium">Server log fetch: {serverError}</p>
+          )}
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => loadServer()}
+            disabled={serverLoading}
+            className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-soot-600 bg-white border border-soot-200 rounded-lg hover:bg-soot-50 transition-colors disabled:opacity-50"
+          >
+            <Loader2 className={`w-3.5 h-3.5 ${serverLoading ? 'animate-spin' : ''}`} />
+            Refresh server
+          </button>
           <button onClick={handleCopy} className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-soot-600 bg-white border border-soot-200 rounded-lg hover:bg-soot-50 transition-colors">
             <Copy className="w-3.5 h-3.5" />
             {copyFeedback || 'Copy All'}
           </button>
           <button onClick={handleDownload} className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-soot-600 bg-white border border-soot-200 rounded-lg hover:bg-soot-50 transition-colors">
             <Download className="w-3.5 h-3.5" />
-            Export
+            Export .txt
+          </button>
+          <button onClick={handleDownloadJson} className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-soot-600 bg-white border border-soot-200 rounded-lg hover:bg-soot-50 transition-colors">
+            <Download className="w-3.5 h-3.5" />
+            Export JSON
           </button>
           <button onClick={handleClear} className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-red-600 bg-white border border-red-200 rounded-lg hover:bg-red-50 transition-colors">
             <Trash className="w-3.5 h-3.5" />
-            Clear
+            Clear device
           </button>
         </div>
       </div>
 
-      {/* Filter bar */}
-      <div className="flex items-center gap-1.5 mb-4">
-        {(['all', 'info', 'warn', 'error'] as const).map(level => (
-          <button
-            key={level}
-            onClick={() => setFilter(level)}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors border ${
-              filter === level
-                ? 'bg-soot-800 text-white border-soot-800'
-                : 'bg-white text-soot-500 border-soot-200 hover:bg-soot-50'
-            }`}
-          >
-            {level === 'all' ? `All (${entries.length})` : `${level.charAt(0).toUpperCase() + level.slice(1)} (${entries.filter(e => e.level === level).length})`}
-          </button>
-        ))}
+      <div className="flex flex-col gap-3 mb-4">
+        <div className="flex flex-wrap items-center gap-1.5">
+          {(['all', 'info', 'warn', 'error'] as const).map(level => (
+            <button
+              key={level}
+              type="button"
+              onClick={() => setFilter(level)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors border ${
+                filter === level
+                  ? 'bg-soot-800 text-white border-soot-800'
+                  : 'bg-white text-soot-500 border-soot-200 hover:bg-soot-50'
+              }`}
+            >
+              {level === 'all' ? `All (${merged.length})` : `${level.charAt(0).toUpperCase() + level.slice(1)} (${merged.filter(e => e.level === level).length})`}
+            </button>
+          ))}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs font-semibold text-soot-500">Origin:</span>
+          {(['all', 'local', 'server'] as const).map(o => (
+            <button
+              key={o}
+              type="button"
+              onClick={() => setOriginFilter(o)}
+              className={`px-2.5 py-1 rounded-md text-xs font-semibold border ${
+                originFilter === o ? 'bg-brand-700 text-white border-brand-700' : 'bg-white text-soot-600 border-soot-200'
+              }`}
+            >
+              {o}
+            </button>
+          ))}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <input
+            type="text"
+            value={requestIdQ}
+            onChange={e => setRequestIdQ(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && loadServer()}
+            placeholder="Request ID (server filter — Enter to refresh)"
+            className="flex-1 min-w-[200px] px-3 py-2 text-xs rounded-lg border border-soot-200 bg-white/80"
+          />
+          <input
+            type="text"
+            value={textQ}
+            onChange={e => setTextQ(e.target.value)}
+            placeholder="Search text (client-side filter)"
+            className="flex-1 min-w-[200px] px-3 py-2 text-xs rounded-lg border border-soot-200 bg-white/80"
+          />
+        </div>
       </div>
 
       {/* Log list */}
@@ -1105,12 +1448,18 @@ function AppLogsPanel() {
           <div className="py-16 text-center text-soot-400">
             <ScrollText className="w-10 h-10 mx-auto mb-3 stroke-1" />
             <p className="font-medium">No logs yet</p>
-            <p className="text-xs mt-1">Events will appear here as the app runs.</p>
+            <p className="text-xs mt-1">Events will appear here as the app runs. Use Refresh server to load backend errors.</p>
           </div>
         ) : (
           <div className="divide-y divide-soot-100 max-h-[60vh] overflow-auto">
             {displayed.map(entry => (
-              <LogRow key={entry.id} entry={entry} expanded={expandedId === entry.id} onToggle={() => setExpandedId(expandedId === entry.id ? null : entry.id)} formatTime={formatTime} />
+              <LogRow
+                key={`${entry.origin ?? 'local'}-${entry.id}`}
+                entry={entry}
+                expanded={expandedId === entry.id}
+                onToggle={() => setExpandedId(expandedId === entry.id ? null : entry.id)}
+                formatTime={formatTime}
+              />
             ))}
             <div ref={bottomRef} />
           </div>
@@ -1122,12 +1471,22 @@ function AppLogsPanel() {
 
 function LogRow({ entry, expanded, onToggle, formatTime }: { entry: LogEntry; expanded: boolean; onToggle: () => void; formatTime: (s: string) => string }) {
   const hasData = entry.data !== undefined && entry.data !== null;
+  const dotClass = LEVEL_DOT[entry.level] ?? LEVEL_DOT.error;
+  const levelPillClass = LEVEL_STYLES[entry.level] ?? LEVEL_STYLES.error;
   return (
     <div className="group">
-      <button onClick={onToggle} className="w-full text-left px-4 py-2.5 flex items-start gap-3 hover:bg-white/60 transition-colors">
-        <div className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${LEVEL_DOT[entry.level]}`} />
+      <button type="button" onClick={onToggle} className="w-full text-left px-4 py-2.5 flex items-start gap-2 hover:bg-white/60 transition-colors">
+        <div className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${dotClass}`} />
         <span className="text-[11px] font-mono text-soot-400 shrink-0 mt-0.5 w-16">{formatTime(entry.timestamp)}</span>
-        <span className={`text-[11px] font-bold uppercase shrink-0 mt-0.5 px-1.5 py-0.5 rounded border ${LEVEL_STYLES[entry.level]}`}>{entry.level}</span>
+        <span className={`text-[11px] font-bold uppercase shrink-0 mt-0.5 px-1.5 py-0.5 rounded border ${levelPillClass}`}>{entry.level}</span>
+        {entry.origin === 'server' && (
+          <span className="text-[10px] font-bold uppercase shrink-0 mt-0.5 px-1 py-0.5 rounded bg-brand-100 text-brand-800 border border-brand-200">srv</span>
+        )}
+        {entry.requestId && (
+          <span className="text-[10px] font-mono text-soot-500 shrink-0 mt-0.5 max-w-[7rem] truncate" title={entry.requestId}>
+            {entry.requestId.slice(0, 12)}…
+          </span>
+        )}
         <span className="text-xs font-semibold text-soot-600 shrink-0 mt-0.5">[{entry.source}]</span>
         <span className="text-xs text-soot-700 flex-1 mt-0.5 truncate">{entry.message}</span>
         {hasData && (
@@ -1135,7 +1494,7 @@ function LogRow({ entry, expanded, onToggle, formatTime }: { entry: LogEntry; ex
         )}
       </button>
       {expanded && hasData && (
-        <pre className="mx-4 mb-3 p-3 bg-soot-900 text-brand-400 rounded-lg text-[11px] font-mono overflow-auto max-h-40">
+        <pre className="mx-4 mb-3 p-3 bg-soot-900 text-brand-400 rounded-lg text-[11px] font-mono overflow-auto max-h-48">
           {JSON.stringify(entry.data, null, 2)}
         </pre>
       )}

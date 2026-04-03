@@ -7,12 +7,20 @@
 - Prefer liquid glass (glassmorphism) styling with contrast-safe text and readable surfaces across the app (including kitchen/KDS); keep blur and transparency performance-conscious.
 - Prefer food-forward warm UI accents (terracotta, paprika, gold family) rather than generic green as the primary brand feel.
 - Prefer clear focus-visible affordances and touch-sized targets on glass layouts and smaller viewports.
+- Prefer menu and product card imagery that shows the full photo without cropping (contain-style fitting in fixed-height thumbnails rather than cover-style cropping).
+- Default the Dashboard menu layout toggle to list view on a fresh load (not grid).
+- Label monetary amounts as PKR where shown (e.g. bundled deal pricing); formatting uses Rs. / `en-PK` conventions in the frontend.
+- Kitchen KDS should use consistent KOT card sizes and performance-friendly rendering so the line stays easy to scan under load.
 
 ## Learned Workspace Facts
-- The app is being evolved into a restaurant stall POS with variant/modifier-based items, while preserving existing auth/settings/printer and role flows.
-- Backend and frontend API paths in this workspace use restaurant naming conventions (`/api/menu-items`, `/api/stock`, `/api/orders`).
+- The app is being evolved into a restaurant stall POS with variant/modifier-based items and recipe/BOM-driven ingredient depletion as inventory truth (not retail finished-goods SKU stock), while preserving existing auth/settings/printer and role flows; recipe rows can be scoped per menu variant via `RecipeItem.variant_key` (empty key = base BOM), falling back to the base BOM when no rows exist for a chosen variant.
+- Each POS terminal is scoped to one branch (no in-app branch switching); Branch Management shows only the current branch and its details are editable in Settings by owner and manager; syncing to a central admin panel is a planned direction but building that admin UI is out of current scope.
+- Backend and frontend API paths use restaurant naming (`/api/menu-items`, `/api/stock`, `/api/orders`, etc.); deals/combos use canonical `GET/POST/DELETE /api/menu/deals` (legacy `/api/inventory-advanced/deals` kept for compatibility). Menu Management covers menu items and deals/combos; the Inventory area focuses on ingredients, recipes (BOM), suppliers, and purchase orders. Removing a deal archives the underlying product (`Product.archived_at`, owner-only), keeps combo rows for history, and blocks new sales of archived products while preserving past sale lines.
 - Stock movement reporting is part of the core requirements, including day/week/month/year/custom time filters.
 - Local development expects Dockerized PostgreSQL for the backend startup path.
-- Printed receipts include order type (takeaway, dine-in, or delivery) on the ticket.
+- Printed receipts include order type (takeaway, dine-in, or delivery) on the ticket; deployments may use two LAN printers—one for customer receipts and one for KOTs.
 - Dine-in flows use registered tables in settings, KOT generation for the kitchen, an active dine-in orders view, optional KDS kitchen display on a kitchen-only full-screen `/kitchen` route (kitchen role, not part of the POS nav), and open-tab handling before payment.
+- Kitchen KDS uses `GET /api/orders/kitchen` and `PATCH /api/orders/{sale_id}/kitchen-status`; open dine-in sales include `kitchen_status` (`placed` | `preparing` | `ready`), with new KOTs setting `placed` and NULL/legacy rows treated as `placed` in responses.
+- The HTTP API is FastAPI-only—do not use Flask or Flask-SQLAlchemy for runtime; SQLAlchemy uses per-request sessions (e.g. ContextVar), not Flask globals. Local backend dev server listens on port 5001 by default.
+- With an empty database, auth reports uninitialized; use `/setup` for first registration and clear stale `localStorage` auth tokens if the setup/register screen does not appear.
 - Agents may use Axon MCP for codebase exploration and Google Stitch MCP for UI or design-system inspiration when the user requests those tools.

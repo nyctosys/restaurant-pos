@@ -2,17 +2,18 @@
 Standard error response shape and helpers for global error handling.
 """
 import logging
-from flask import jsonify
+
+from fastapi.responses import JSONResponse
 
 logger = logging.getLogger("app.errors")
 
 
 def error_response(error: str, message: str, status_code: int, details=None):
-    """Build a consistent JSON error response."""
+    """Build a consistent JSON error response (FastAPI-compatible)."""
     payload = {"error": error, "message": message}
     if details is not None:
         payload["details"] = details
-    return jsonify(payload), status_code
+    return JSONResponse(status_code=status_code, content=payload)
 
 
 def handle_http_error(e):

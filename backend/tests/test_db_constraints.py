@@ -1,6 +1,6 @@
 """Test DB check constraints: negative values rejected, rollback on violation."""
 import pytest
-from app.models import db, Sale, SaleItem, Inventory, Product, Branch, User
+from app.models import db, Sale, SaleItem, Product, Branch, User, Ingredient, IngredientBranchStock
 from werkzeug.security import generate_password_hash
 
 
@@ -45,19 +45,19 @@ def test_sale_item_quantity_positive_enforced(app):
             assert "quantity" in str(e).lower() or "check" in str(e).lower() or "constraint" in str(e).lower()
 
 
-def test_inventory_stock_non_negative_enforced(app):
+def test_ingredient_branch_stock_non_negative_enforced(app):
     with app.app_context():
         b = Branch(name="Main")
         db.session.add(b)
         db.session.flush()
-        p = Product(sku="SKU1", title="X", base_price=10)
-        db.session.add(p)
+        ing = Ingredient(name="Sugar", unit="kg", current_stock=0.0)
+        db.session.add(ing)
         db.session.flush()
-        inv = Inventory(branch_id=b.id, product_id=p.id, stock_level=-1)
-        db.session.add(inv)
+        row = IngredientBranchStock(ingredient_id=ing.id, branch_id=b.id, current_stock=-1.0)
+        db.session.add(row)
         try:
             db.session.commit()
-            pytest.fail("Expected constraint violation for negative stock")
+            pytest.fail("Expected constraint violation for negative ingredient branch stock")
         except Exception as e:
             db.session.rollback()
             assert "stock" in str(e).lower() or "check" in str(e).lower() or "constraint" in str(e).lower()

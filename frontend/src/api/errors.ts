@@ -9,6 +9,11 @@ export interface ApiErrorBody {
   error?: string;
   message?: string;
   details?: unknown;
+  /** Correlates with server `X-Request-ID` and Settings → App Logs */
+  requestId?: string;
+  code?: string;
+  /** Present on some 500 responses when APP_DEBUG=1 on server */
+  debug?: unknown;
 }
 
 export class ApiError extends Error {
@@ -24,6 +29,14 @@ export class ApiError extends Error {
   get userMessage(): string {
     return this.body.message ?? this.body.error ?? this.message;
   }
+
+  /** User-facing message plus request reference when available (for support / logs). */
+  get messageWithRef(): string {
+    const base = this.userMessage;
+    const rid = this.body.requestId;
+    if (rid) return `${base} (Ref: ${rid})`;
+    return base;
+  }
 }
 
 export function isApiError(e: unknown): e is ApiError {
@@ -35,4 +48,10 @@ export function getUserMessage(e: unknown): string {
   if (isApiError(e)) return e.userMessage;
   if (e instanceof Error) return e.message;
   return String(e ?? 'An error occurred');
+}
+
+/** Prefer message + request id for toasts and diagnostics. */
+export function getUserMessageWithRef(e: unknown): string {
+  if (isApiError(e)) return e.messageWithRef;
+  return getUserMessage(e);
 }

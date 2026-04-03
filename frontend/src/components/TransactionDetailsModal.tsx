@@ -30,6 +30,7 @@ type TransactionDetails = {
   total_amount: number;
   tax_amount: number;
   delivery_charge?: number;
+  service_charge?: number;
   payment_method: string;
   created_at: string;
   status: string;
@@ -304,6 +305,12 @@ export default function TransactionDetailsModal({ saleId, onClose, onRefresh, ca
               </div>
               
               <div className="border-t border-soot-200 pt-4 flex flex-col items-end text-sm">
+                {(details.service_charge || 0) > 0 && (
+                  <div className="flex justify-between w-48 mb-1">
+                    <span className="text-soot-500">Service charge</span>
+                    <span className="font-medium text-soot-800">{formatCurrency(details.service_charge || 0)}</span>
+                  </div>
+                )}
                 {(details.delivery_charge || 0) > 0 && (
                   <div className="flex justify-between w-48 mb-1">
                     <span className="text-soot-500">Delivery charge</span>

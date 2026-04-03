@@ -6,7 +6,9 @@ from typing import Any
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
-from app.models import Inventory, InventoryTransaction, Product, User, db
+from app.models import Ingredient, IngredientBranchStock, StockMovement, User, db
+from app.services.branch_scope import resolve_terminal_branch_id
+from app.services.sync_outbox import enqueue_sync_event
 from app_fastapi.deps import get_current_user
 
 stock_router = APIRouter(prefix="/api/stock", tags=["stock"])
@@ -43,59 +45,73 @@ def _stock_transactions_time_range(time_filter: str, start_date_str: str | None,
     return start_dt, end_dt
 
 
+def _terminal_branch_id(current_user: User) -> int:
+    return resolve_terminal_branch_id(current_user)
+
+
 @stock_router.get("/")
-def get_inventory(branch_id: int | None = None, current_user: User = Depends(get_current_user)):
-    resolved_branch_id = branch_id
-    if current_user.role != "owner":
-        resolved_branch_id = current_user.branch_id
-    elif not resolved_branch_id:
-        resolved_branch_id = current_user.branch_id or 1
-    records = Inventory.query.filter_by(branch_id=resolved_branch_id).all()
-    stock_map: dict[int, dict[str, int]] = {}
-    for r in records:
-        stock_map.setdefault(r.product_id, {})
-        stock_map[r.product_id][r.variant_sku_suffix] = r.stock_level
-    return {"inventory": stock_map}
+def get_ingredient_stock_map(branch_id: int | None = None, current_user: User = Depends(get_current_user)):
+    """Branch-scoped raw ingredient quantities (restaurant inventory)."""
+    _ = branch_id
+    resolved_branch_id = _terminal_branch_id(current_user)
+    rows = IngredientBranchStock.query.filter_by(branch_id=resolved_branch_id).all()
+    stock_map: dict[str, float] = {str(r.ingredient_id): float(r.current_stock) for r in rows}
+    return {"ingredient_stock": stock_map, "branch_id": resolved_branch_id}
 
 
 @stock_router.post("/update")
-def update_inventory(payload: dict[str, Any] | None = None, current_user: User = Depends(get_current_user)):
+def update_ingredient_stock(payload: dict[str, Any] | None = None, current_user: User = Depends(get_current_user)):
+    """Adjust ingredient quantity at a branch (creates a StockMovement)."""
+    from app.services.branch_ingredient_stock import adjust_branch_ingredient_stock
+
     data = payload or {}
-    branch_id = data.get("branch_id")
-    if current_user.role != "owner":
-        branch_id = current_user.branch_id
-    elif not branch_id:
-        branch_id = current_user.branch_id or 1
-    product_id = data.get("product_id")
-    variant_sku_suffix = data.get("variant_sku_suffix", "")
+    branch_id = _terminal_branch_id(current_user)
+    ingredient_id = data.get("ingredient_id")
     stock_delta = data.get("stock_delta", 0)
-    if not product_id:
-        return JSONResponse(status_code=400, content={"message": "product_id required"})
-    record = Inventory.query.filter_by(
-        branch_id=branch_id, product_id=product_id, variant_sku_suffix=variant_sku_suffix
-    ).first()
-    if not record:
-        record = Inventory(branch_id=branch_id, product_id=product_id, variant_sku_suffix=variant_sku_suffix, stock_level=0)
-        db.session.add(record)
-    record.stock_level += stock_delta
-    db.session.add(
-        InventoryTransaction(
-            branch_id=branch_id,
-            product_id=product_id,
-            variant_sku_suffix=variant_sku_suffix,
-            delta=stock_delta,
-            reason="adjustment",
-            user_id=current_user.id,
-            reference_type=None,
-            reference_id=None,
-        )
-    )
     try:
+        delta = float(stock_delta)
+    except (TypeError, ValueError):
+        return JSONResponse(status_code=400, content={"message": "stock_delta must be a number"})
+    if not ingredient_id:
+        return JSONResponse(status_code=400, content={"message": "ingredient_id required"})
+    ing = Ingredient.query.get(int(ingredient_id))
+    if not ing:
+        return JSONResponse(status_code=404, content={"message": "Ingredient not found"})
+    try:
+        _, qty_after = adjust_branch_ingredient_stock(
+            int(ingredient_id),
+            branch_id,
+            delta,
+            movement_type="adjustment",
+            user_id=current_user.id,
+            reference_id=None,
+            reference_type="manual_adjustment",
+            reason=data.get("reason") or "Manual stock adjustment",
+            unit_cost=float(ing.average_cost or 0),
+            allow_negative=False,
+        )
+        db.session.flush()
+        mv = (
+            StockMovement.query.filter_by(branch_id=branch_id, ingredient_id=int(ingredient_id))
+            .order_by(StockMovement.id.desc())
+            .first()
+        )
+        enqueue_sync_event(
+            branch_id=branch_id,
+            entity_type="stock_movement",
+            entity_id=mv.id if mv else None,
+            event_type="ingredient_stock_adjustment",
+            payload={
+                "ingredient_id": int(ingredient_id),
+                "delta": delta,
+                "quantity_after": qty_after,
+            },
+        )
         db.session.commit()
-        return {"message": "Stock updated", "stock_level": record.stock_level}
+        return {"message": "Stock updated", "stock_level": qty_after}
     except Exception as exc:
         db.session.rollback()
-        return JSONResponse(status_code=500, content={"message": "Error updating stock", "error": str(exc)})
+        return JSONResponse(status_code=400, content={"message": str(exc)})
 
 
 @stock_router.get("/transactions")
@@ -106,32 +122,34 @@ def get_stock_transactions(
     branch_id: int | None = None,
     current_user: User = Depends(get_current_user),
 ):
-    resolved_branch_id = branch_id
-    if current_user.role != "owner":
-        resolved_branch_id = current_user.branch_id
-    elif not resolved_branch_id:
-        resolved_branch_id = current_user.branch_id or 1
+    """Ingredient movement ledger for reporting (replaces finished-goods inventory transactions)."""
+    _ = branch_id
+    resolved_branch_id = _terminal_branch_id(current_user)
     start_dt, end_dt = _stock_transactions_time_range(time_filter, start_date, end_date)
-    query = InventoryTransaction.query.filter_by(branch_id=resolved_branch_id)
+    query = StockMovement.query.filter_by(branch_id=resolved_branch_id)
     if start_dt and end_dt:
-        query = query.filter(InventoryTransaction.created_at >= start_dt, InventoryTransaction.created_at <= end_dt)
-    transactions = query.order_by(InventoryTransaction.created_at.desc()).limit(500).all()
-    product_ids = {t.product_id for t in transactions}
-    products = {p.id: p for p in Product.query.filter(Product.id.in_(product_ids)).all()} if product_ids else {}
+        query = query.filter(StockMovement.created_at >= start_dt, StockMovement.created_at <= end_dt)
+    transactions = query.order_by(StockMovement.created_at.desc()).limit(500).all()
+    ing_ids = {t.ingredient_id for t in transactions}
+    ingredients = {i.id: i for i in Ingredient.query.filter(Ingredient.id.in_(ing_ids)).all()} if ing_ids else {}
     out: list[dict[str, Any]] = []
     for t in transactions:
-        p = products.get(t.product_id)
+        ing = ingredients.get(t.ingredient_id)
+        mt = t.movement_type.value if hasattr(t.movement_type, "value") else t.movement_type
         out.append(
             {
                 "id": t.id,
-                "product_id": t.product_id,
-                "product_title": p.title if p else None,
-                "variant_sku_suffix": t.variant_sku_suffix or "",
-                "delta": t.delta,
-                "reason": t.reason,
+                "ingredient_id": t.ingredient_id,
+                "ingredient_name": ing.name if ing else None,
+                "product_id": None,
+                "product_title": None,
+                "variant_sku_suffix": "",
+                "delta": float(t.quantity_change),
+                "reason": mt,
+                "movement_type": mt,
                 "reference_type": t.reference_type,
                 "reference_id": t.reference_id,
-                "created_at": t.created_at.isoformat(),
+                "created_at": t.created_at.isoformat() if t.created_at else "",
             }
         )
     return {"transactions": out}

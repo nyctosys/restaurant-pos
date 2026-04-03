@@ -7,6 +7,10 @@ interface LogEntry {
   source: string;
   message: string;
   data?: unknown;
+  /** local = this browser session; server = row from API */
+  origin?: 'local' | 'server';
+  /** Correlates with API X-Request-ID / server logs */
+  requestId?: string;
 }
 
 const STORAGE_KEY = 'app_logs';
@@ -15,6 +19,13 @@ const MAX_ENTRIES = 500;
 let entries: LogEntry[] = [];
 let nextId = 1;
 let listeners: Array<() => void> = [];
+
+/** Cached copy for `useSyncExternalStore` — must be stable between mutations or React re-renders forever. */
+let entriesSnapshotCache: LogEntry[] | null = null;
+
+function invalidateEntriesSnapshot() {
+  entriesSnapshotCache = null;
+}
 
 function load() {
   try {
@@ -26,6 +37,7 @@ function load() {
   } catch {
     entries = [];
   }
+  invalidateEntriesSnapshot();
 }
 
 function persist() {
@@ -34,11 +46,12 @@ function persist() {
   } catch {
     // storage full — trim older half and retry
     entries = entries.slice(Math.floor(entries.length / 2));
+    invalidateEntriesSnapshot();
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(entries)); } catch { /* give up */ }
   }
 }
 
-function push(level: LogLevel, source: string, message: string, data?: unknown) {
+function push(level: LogLevel, source: string, message: string, data?: unknown, extra?: Partial<LogEntry>) {
   const entry: LogEntry = {
     id: nextId++,
     timestamp: new Date().toISOString(),
@@ -46,9 +59,12 @@ function push(level: LogLevel, source: string, message: string, data?: unknown) 
     source,
     message,
     data: data !== undefined ? sanitize(data) : undefined,
+    origin: 'local',
+    ...extra,
   };
   entries.push(entry);
   if (entries.length > MAX_ENTRIES) entries = entries.slice(entries.length - MAX_ENTRIES);
+  invalidateEntriesSnapshot();
   persist();
   listeners.forEach(fn => fn());
 }
@@ -70,11 +86,18 @@ const appLogger = {
   warn:  (source: string, message: string, data?: unknown) => push('warn', source, message, data),
   error: (source: string, message: string, data?: unknown) => push('error', source, message, data),
 
-  getEntries: () => [...entries],
+  /** Returns a stable array reference until the next log mutation (required for `useSyncExternalStore`). */
+  getEntries: (): LogEntry[] => {
+    if (entriesSnapshotCache === null) {
+      entriesSnapshotCache = [...entries];
+    }
+    return entriesSnapshotCache;
+  },
 
   clear: () => {
     entries = [];
     nextId = 1;
+    invalidateEntriesSnapshot();
     persist();
     listeners.forEach(fn => fn());
   },
@@ -87,7 +110,8 @@ const appLogger = {
   exportText: () =>
     entries.map(e => {
       const d = e.data !== undefined ? ' | ' + JSON.stringify(e.data) : '';
-      return `[${e.timestamp}] [${e.level.toUpperCase()}] [${e.source}] ${e.message}${d}`;
+      const ref = e.requestId ? ` [ref:${e.requestId}]` : '';
+      return `[${e.timestamp}] [${e.level.toUpperCase()}] [${e.source}] ${e.message}${ref}${d}`;
     }).join('\n'),
 };
 

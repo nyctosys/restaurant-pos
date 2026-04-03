@@ -1,6 +1,5 @@
 """Test auth: setup, login, token required, user not found after decode."""
 import pytest
-from app import create_app
 from app.models import db, User, Branch
 from werkzeug.security import generate_password_hash
 

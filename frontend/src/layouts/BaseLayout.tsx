@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { get } from '../api';
+import { getTerminalBranchIdString, parseUserFromStorage } from '../utils/branchContext';
 import { 
   Package, 
   BarChart3, 
@@ -8,12 +9,14 @@ import {
   LogOut, 
   ShoppingBag,
   UtensilsCrossed,
+  BookOpen,
 } from 'lucide-react';
 
 const baseNavItems = [
   { icon: ShoppingBag, path: '/dashboard', label: 'Order', allowedRoles: ['owner', 'manager', 'cashier'] },
   { icon: UtensilsCrossed, path: '/dine-in', label: 'Dine-in', allowedRoles: ['owner', 'manager', 'cashier'] },
-  { icon: Package, path: '/inventory', label: 'Stock', allowedRoles: ['owner', 'manager', 'cashier', 'inventory_manager'] },
+  { icon: BookOpen, path: '/menu', label: 'Menu', allowedRoles: ['owner', 'manager', 'cashier', 'inventory_manager'] },
+  { icon: Package, path: '/inventory', label: 'Inventory', allowedRoles: ['owner', 'manager', 'cashier', 'inventory_manager'] },
   { icon: BarChart3, path: '/reports', label: 'Reports', allowedRoles: ['owner'] },
   { icon: Settings, path: '/settings', label: 'Settings', allowedRoles: ['owner', 'manager'] },
 ];
@@ -32,7 +35,7 @@ export default function BaseLayout() {
   };
 
   const userStr = localStorage.getItem('user');
-  let user: any = null;
+  let user: ReturnType<typeof parseUserFromStorage> = null;
   try {
     user = userStr ? JSON.parse(userStr) : null;
   } catch {
@@ -47,8 +50,8 @@ export default function BaseLayout() {
     if (isAuthPage || !user) return;
     if (!['owner', 'manager', 'cashier'].includes(userRole)) return;
     try {
-      const activeBranchId = localStorage.getItem('active_branch_id') ?? user?.branch_id ?? '1';
-      const q = user?.role === 'owner' ? `?branch_id=${activeBranchId}` : '';
+      const activeBranchId = getTerminalBranchIdString(user);
+      const q = activeBranchId ? `?branch_id=${activeBranchId}` : '';
       const data = await get<{ sales?: unknown[] }>(`/orders/active${q}`);
       setActiveDineInCount((data.sales ?? []).length);
     } catch {
@@ -108,16 +111,22 @@ export default function BaseLayout() {
       
       {/* Vertical rail: iPad landscape-first (lg) touch targets; xl+ shows icon labels */}
       <aside className="w-[84px] min-w-[84px] xl:w-[108px] xl:min-w-[108px] glass-panel glass-hover flex flex-col items-center py-4 lg:py-5 shrink-0 m-2 lg:m-3 xl:m-4 z-10">
-        {/* App mark */}
+        {/* App mark — first nav item is role-appropriate “home” (e.g. Order vs Menu) */}
         <div className="mb-6 lg:mb-8">
-          <img
-            src="/app-logo.svg"
-            alt=""
-            width={64}
-            height={64}
-            className="w-14 h-14 xl:w-16 xl:h-16 object-contain drop-shadow-md"
-            decoding="async"
-          />
+          <Link
+            to={navItems[0]?.path ?? '/dashboard'}
+            className="block rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 focus-visible:ring-offset-transparent"
+            aria-label={navItems[0] ? `${navItems[0].label} — home` : 'Home'}
+          >
+            <img
+              src="/app-logo.svg"
+              alt=""
+              width={64}
+              height={64}
+              className="w-14 h-14 xl:w-16 xl:h-16 object-contain drop-shadow-md"
+              decoding="async"
+            />
+          </Link>
         </div>
 
         <nav className="flex-1 flex flex-col items-center xl:items-stretch gap-2 lg:gap-2.5 w-full px-1.5 xl:px-2">

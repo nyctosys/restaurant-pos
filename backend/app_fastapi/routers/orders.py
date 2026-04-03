@@ -1,20 +1,41 @@
 from __future__ import annotations
 
-from datetime import datetime, time, timedelta
+from datetime import datetime, time, timedelta, timezone
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
-from sqlalchemy import func, inspect
+from sqlalchemy import and_, func, inspect, or_
 
 from app.order_metadata import normalize_order_type_and_snapshot
-from app.models import Branch, Ingredient, Inventory, InventoryTransaction, Product, Sale, SaleItem, Setting, StockMovement, User, db
+from app.models import Branch, Ingredient, Modifier, Product, Sale, SaleItem, Setting, User, db
+from app.services.branch_scope import resolve_terminal_branch_id
 from app.services.printer_service import PrinterService
+from app.services.recipe_variants import combo_items_for_variant, normalize_variant_key, recipe_rows_for_variant
+from app.services.sync_outbox import enqueue_sync_event
 from app_fastapi.deps import get_current_user, require_owner
 from app_fastapi.routers.common import yes
 
 orders_router = APIRouter(prefix="/api/orders", tags=["orders"])
 DELIVERY_CHARGE = 300.0
+# Open KOT / kitchen tickets (unpaid tabs before payment)
+KITCHEN_OPEN_ORDER_TYPES = ("dine_in", "takeaway", "delivery")
+# Paid takeaway/delivery (and paid dine-in) are status=completed but must stay on KDS until kitchen workflow finishes.
+KITCHEN_COMPLETED_LOOKBACK_DAYS = 7
+
+
+# POST /kot must be registered before any /{sale_id} route; otherwise Starlette matches
+# GET /{sale_id} for path "kot" and returns 405 for POST (Method Not Allowed).
+@orders_router.post("/kot")
+def create_open_kot(payload: dict[str, Any] | None = None, current_user: User = Depends(get_current_user)):
+    """Create an open KOT for dine-in, takeaway, or delivery (unpaid tab; kitchen + printer)."""
+    return _create_open_kot_response(payload or {}, current_user, order_type_fixed=None)
+
+
+@orders_router.post("/dine-in/kot")
+def dine_in_kot(payload: dict[str, Any] | None = None, current_user: User = Depends(get_current_user)):
+    """Create an open dine-in sale, deduct stock, print KOT (kitchen ticket). No payment yet."""
+    return _create_open_kot_response(payload or {}, current_user, order_type_fixed="dine_in")
 
 
 def _sales_table_columns() -> set[str]:
@@ -28,8 +49,52 @@ def _json_error(error: str, message: str, status_code: int, details: Any = None)
     return JSONResponse(status_code=status_code, content=payload)
 
 
-def _delivery_charge_for_order_type(order_type: str | None) -> float:
-    return DELIVERY_CHARGE if order_type == "delivery" else 0.0
+def _terminal_branch_or_error(user: User) -> tuple[int | None, JSONResponse | None]:
+    try:
+        return resolve_terminal_branch_id(user), None
+    except HTTPException as exc:
+        detail = exc.detail
+        body: dict[str, Any] = detail if isinstance(detail, dict) else {"message": str(detail)}
+        return None, JSONResponse(status_code=exc.status_code, content=body)
+
+
+def _forbidden_unless_sale_branch(sale: Sale, current_user: User) -> JSONResponse | None:
+    tid, terr = _terminal_branch_or_error(current_user)
+    if terr:
+        return terr
+    assert tid is not None
+    if sale.branch_id != tid:
+        return _json_error("Forbidden", "Not allowed for this branch", 403)
+    return None
+
+
+def _parse_optional_non_negative_charge(value: Any, default: float) -> float:
+    if value is None:
+        return default
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return default
+    if v < 0:
+        return 0.0
+    return min(round(v, 2), 9_999_999.99)
+
+
+def _order_charges(order_type: str | None, payload: dict[str, Any]) -> tuple[float, float]:
+    """
+    Returns (delivery_charge, service_charge) for checkout/finalize.
+    Delivery orders default delivery_charge to DELIVERY_CHARGE when the key is omitted.
+    """
+    ot = (order_type or "").strip().lower()
+    if ot == "delivery":
+        if "delivery_charge" in payload:
+            dc = _parse_optional_non_negative_charge(payload.get("delivery_charge"), 0.0)
+        else:
+            dc = float(DELIVERY_CHARGE)
+        return dc, 0.0
+    if ot == "dine_in":
+        return 0.0, _parse_optional_non_negative_charge(payload.get("service_charge"), 0.0)
+    return 0.0, 0.0
 
 
 def get_time_filter_ranges(time_filter: str, start_date_str: str | None, end_date_str: str | None):
@@ -63,81 +128,236 @@ def get_time_filter_ranges(time_filter: str, start_date_str: str | None, end_dat
     return start_dt, end_dt
 
 
-def _process_modifiers(modifiers: list[str], qty: int, branch_id: int, current_user_id: int, sale_id: int) -> tuple[bool, str]:
-    """Deduct stock for ingredient modifiers (if any match by exact name)."""
-    for mod_name in modifiers:
-        ingredient = Ingredient.query.filter_by(name=mod_name).first()
-        if ingredient:
-            if ingredient.current_stock < qty:
-                return False, f"Insufficient stock for modifier: {mod_name}"
-            # Deduct ingredient
-            qty_before = ingredient.current_stock
-            qty_after = qty_before - qty
-            ingredient.current_stock = qty_after
-            db.session.add(
-                StockMovement(
-                    ingredient_id=ingredient.id,
-                    movement_type="sale_deduction",
-                    quantity_change=-qty,
-                    quantity_before=qty_before,
-                    quantity_after=qty_after,
-                    unit_cost=ingredient.average_cost,
-                    reference_id=sale_id,
-                    reference_type="sale",
-                    reason=f"Modifier '{mod_name}' used in sale",
-                    created_by=current_user_id,
-                    branch_id=branch_id
-                )
+def _modifiers_for_display(value: Any) -> list[str]:
+    """Normalize stored sale line modifiers (strings or {modifier_id, name}) for KDS / UI."""
+    if not isinstance(value, list):
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in value:
+        if isinstance(raw, str):
+            name = raw.strip()
+            if name and name not in seen:
+                seen.add(name)
+                out.append(name)
+        elif isinstance(raw, dict):
+            name = (raw.get("name") or "").strip()
+            if name and name not in seen:
+                seen.add(name)
+                out.append(name)
+    return out
+
+
+def _modifiers_payload_for_api(value: Any) -> list[dict[str, Any]]:
+    """POS order detail: modifiers with ids for cart rehydration."""
+    if not isinstance(value, list):
+        return []
+    out: list[dict[str, Any]] = []
+    for raw in value:
+        if isinstance(raw, dict) and raw.get("modifier_id") is not None:
+            mid = int(raw["modifier_id"])
+            m = Modifier.query.get(mid)
+            price = float(m.price) if m and m.price is not None else None
+            out.append(
+                {
+                    "id": mid,
+                    "name": (raw.get("name") or (m.name if m else "")) or "",
+                    "price": price,
+                }
             )
+        elif isinstance(raw, str) and raw.strip():
+            out.append({"id": 0, "name": raw.strip(), "price": None})
+    return out
+
+
+def _resolve_modifier_snapshots(
+    modifier_ids: list[int],
+) -> tuple[bool, str, list[dict[str, Any]]]:
+    snapshots: list[dict[str, Any]] = []
+    seen_ids: set[int] = set()
+    for mid in modifier_ids:
+        if mid in seen_ids:
+            continue
+        seen_ids.add(mid)
+        m = Modifier.query.get(mid)
+        if m is None or m.archived_at is not None:
+            return False, f"Unknown or archived modifier (id {mid})", []
+        snapshots.append({"modifier_id": m.id, "name": m.name})
+    return True, "", snapshots
+
+
+def _process_modifier_depletions(
+    modifier_ids: list[int],
+    line_qty: int,
+    branch_id: int,
+    current_user_id: int,
+    sale_id: int,
+) -> tuple[bool, str]:
+    from app.services.branch_ingredient_stock import InsufficientIngredientStock, adjust_branch_ingredient_stock
+
+    for mid in modifier_ids:
+        mod = Modifier.query.get(mid)
+        if mod is None or mod.ingredient_id is None:
+            continue
+        dep = float(mod.depletion_quantity) if mod.depletion_quantity is not None else 1.0
+        total = dep * line_qty
+        ing = mod.ingredient
+        try:
+            adjust_branch_ingredient_stock(
+                mod.ingredient_id,
+                branch_id,
+                -total,
+                movement_type="sale_deduction",
+                user_id=current_user_id,
+                reference_id=sale_id,
+                reference_type="sale",
+                reason=f"Modifier '{mod.name}' on sale",
+                unit_cost=float(ing.average_cost) if ing else 0.0,
+            )
+        except InsufficientIngredientStock as exc:
+            return False, str(exc)
     return True, ""
 
 
-def _normalize_modifiers(value: Any) -> list[str]:
-    if not isinstance(value, list):
+def _normalize_product_variant_labels(raw: Any) -> list[str]:
+    if not isinstance(raw, list):
         return []
+    out: list[str] = []
     seen: set[str] = set()
-    normalized: list[str] = []
-    for raw in value:
-        if not isinstance(raw, str):
-            continue
-        mod_name = raw.strip()
-        if not mod_name or mod_name in seen:
-            continue
-        seen.add(mod_name)
-        normalized.append(mod_name)
-    return normalized
+    for x in raw:
+        if isinstance(x, str):
+            v = x.strip()
+            if v and v not in seen:
+                seen.add(v)
+                out.append(v)
+    return out
 
 
-def _restore_modifiers(
-    modifiers: list[str],
+def _deduct_recipe_for_product(
+    product: Product,
+    qty: int,
+    branch_id: int,
+    current_user_id: int,
+    sale_id: int,
+    variant_key: str | None = None,
+) -> tuple[bool, str]:
+    from app.services.branch_ingredient_stock import InsufficientIngredientStock, adjust_branch_ingredient_stock
+
+    recipe_items = recipe_rows_for_variant(product, variant_key)
+    if not recipe_items:
+        vk = normalize_variant_key(variant_key)
+        if vk:
+            return (
+                False,
+                f'Add a recipe (BOM) for "{product.title}" (variant "{vk}") in Inventory → Recipes, '
+                "or add a base recipe that applies to all variants.",
+            )
+        return False, f"Add a recipe (BOM) for menu item: {product.title}"
+
+    for recipe_item in recipe_items:
+        ingredient = recipe_item.ingredient
+        if ingredient is None:
+            continue
+        total_ing = float(recipe_item.quantity) * qty
+        try:
+            adjust_branch_ingredient_stock(
+                ingredient.id,
+                branch_id,
+                -total_ing,
+                movement_type="sale_deduction",
+                user_id=current_user_id,
+                reference_id=sale_id,
+                reference_type="sale",
+                reason=f"Sold {qty}x {product.title}",
+                unit_cost=float(ingredient.average_cost or 0),
+            )
+        except InsufficientIngredientStock as exc:
+            return False, str(exc)
+    return True, ""
+
+
+def _restore_recipe_for_sale_item(
+    product: Product,
     qty: int,
     branch_id: int,
     current_user_id: int,
     sale_id: int,
     reason: str,
+    variant_key: str | None = None,
 ) -> None:
-    for mod_name in _normalize_modifiers(modifiers):
-        ingredient = Ingredient.query.filter_by(name=mod_name).first()
-        if not ingredient:
+    from app.services.branch_ingredient_stock import adjust_branch_ingredient_stock
+
+    for recipe_item in recipe_rows_for_variant(product, variant_key):
+        ingredient = recipe_item.ingredient
+        if ingredient is None:
             continue
-        qty_before = ingredient.current_stock
-        qty_after = qty_before + qty
-        ingredient.current_stock = qty_after
-        db.session.add(
-            StockMovement(
-                ingredient_id=ingredient.id,
+        restored_qty = float(recipe_item.quantity) * qty
+        adjust_branch_ingredient_stock(
+            ingredient.id,
+            branch_id,
+            restored_qty,
+            movement_type="adjustment",
+            user_id=current_user_id,
+            reference_id=sale_id,
+            reference_type="sale",
+            reason=reason,
+            unit_cost=float(ingredient.average_cost or 0),
+            allow_negative=False,
+        )
+
+
+def _restore_modifier_depletions_from_sale_item(
+    sale_item: SaleItem,
+    branch_id: int,
+    current_user_id: int,
+    reason: str,
+) -> None:
+    from app.services.branch_ingredient_stock import adjust_branch_ingredient_stock
+
+    raw = sale_item.modifiers or []
+    if not isinstance(raw, list):
+        return
+    qty = int(sale_item.quantity)
+    sale_id = int(sale_item.sale_id)
+    for entry in raw:
+        if isinstance(entry, dict) and entry.get("modifier_id") is not None:
+            mod = Modifier.query.get(int(entry["modifier_id"]))
+            if mod is None or mod.ingredient_id is None:
+                continue
+            dep = float(mod.depletion_quantity) if mod.depletion_quantity is not None else 1.0
+            total = dep * qty
+            ing = mod.ingredient
+            adjust_branch_ingredient_stock(
+                mod.ingredient_id,
+                branch_id,
+                total,
                 movement_type="adjustment",
-                quantity_change=qty,
-                quantity_before=qty_before,
-                quantity_after=qty_after,
-                unit_cost=ingredient.average_cost,
+                user_id=current_user_id,
                 reference_id=sale_id,
                 reference_type="sale",
                 reason=reason,
-                created_by=current_user_id,
-                branch_id=branch_id,
+                unit_cost=float(ing.average_cost) if ing else 0.0,
+                allow_negative=False,
             )
-        )
+        elif isinstance(entry, str):
+            mod_name = entry.strip()
+            if not mod_name:
+                continue
+            ingredient = Ingredient.query.filter_by(name=mod_name).first()
+            if ingredient is None:
+                continue
+            adjust_branch_ingredient_stock(
+                ingredient.id,
+                branch_id,
+                float(qty),
+                movement_type="adjustment",
+                user_id=current_user_id,
+                reference_id=sale_id,
+                reference_type="sale",
+                reason=f"{reason} (legacy modifier name)",
+                unit_cost=float(ingredient.average_cost or 0),
+                allow_negative=False,
+            )
 
 
 def _restore_sale_item_side_effects(
@@ -147,64 +367,23 @@ def _restore_sale_item_side_effects(
     reason: str,
     inventory_reason: str,
 ) -> None:
+    del inventory_reason  # retail finished-goods ledger removed; kept for API compatibility
     product = sale_item.product
     if not product:
         return
 
     if not product.is_deal:
-        inventory = Inventory.query.filter_by(
-            branch_id=branch_id,
-            product_id=sale_item.product_id,
-            variant_sku_suffix=sale_item.variant_sku_suffix or "",
-        ).first()
-        if inventory is not None:
-            inventory.stock_level += sale_item.quantity
-            db.session.add(
-                InventoryTransaction(
-                    branch_id=branch_id,
-                    product_id=sale_item.product_id,
-                    variant_sku_suffix=sale_item.variant_sku_suffix or "",
-                    delta=sale_item.quantity,
-                    reason=inventory_reason,
-                    user_id=current_user_id,
-                    reference_type="sale",
-                    reference_id=sale_item.sale_id,
-                )
-            )
+        _restore_recipe_for_sale_item(
+            product,
+            int(sale_item.quantity),
+            branch_id,
+            current_user_id,
+            int(sale_item.sale_id),
+            reason,
+            variant_key=sale_item.variant_sku_suffix or "",
+        )
 
-        if hasattr(product, "recipe_items"):
-            for recipe_item in product.recipe_items:
-                ingredient = recipe_item.ingredient
-                if not ingredient:
-                    continue
-                restored_qty = recipe_item.quantity * sale_item.quantity
-                qty_before = ingredient.current_stock
-                qty_after = qty_before + restored_qty
-                ingredient.current_stock = qty_after
-                db.session.add(
-                    StockMovement(
-                        ingredient_id=ingredient.id,
-                        movement_type="adjustment",
-                        quantity_change=restored_qty,
-                        quantity_before=qty_before,
-                        quantity_after=qty_after,
-                        unit_cost=ingredient.average_cost,
-                        reference_id=sale_item.sale_id,
-                        reference_type="sale",
-                        reason=reason,
-                        created_by=current_user_id,
-                        branch_id=branch_id,
-                    )
-                )
-
-    _restore_modifiers(
-        sale_item.modifiers or [],
-        sale_item.quantity,
-        branch_id,
-        current_user_id,
-        sale_item.sale_id,
-        reason,
-    )
+    _restore_modifier_depletions_from_sale_item(sale_item, branch_id, current_user_id, reason)
 
 
 def _nest_sale_item_dicts(flat_items: list[dict[str, Any]]) -> dict[int, list[dict[str, Any]]]:
@@ -232,103 +411,63 @@ def _deduct_product_inventory_and_create_sale_items(
     parent_sale_item_id: int | None = None,
     is_deal_child: bool = False
 ) -> tuple[bool, str, float]:
-    """Deduct stock and create SaleItem rows, handling deals recursively."""
-    qty = item_dict["quantity"]
-    variant_suf = item_dict.get("variant_sku_suffix", "")
-    modifiers = _normalize_modifiers(item_dict.get("modifiers", []))
+    """Create SaleItem rows; deduct branch ingredient stock via recipe (BOM) and modifier mappings."""
+    qty = int(item_dict["quantity"])
+    modifier_ids = item_dict.get("modifier_ids") or []
+    line_variant = normalize_variant_key(item_dict.get("variant_sku_suffix"))
 
-    # Unit price is 0 for deal children, so total stays correct on the parent deal
+    ok_snap, err_snap, mod_snapshots = _resolve_modifier_snapshots(modifier_ids)
+    if not ok_snap:
+        return False, err_snap, 0.0
+
     unit_price = 0.0 if is_deal_child else float(product.base_price)
     subtotal = unit_price * qty
 
-    # Create the SaleItem row first (parent deal row or regular item)
     sale_item = SaleItem(
         sale_id=sale_id,
         product_id=product.id,
-        variant_sku_suffix=variant_suf,
+        variant_sku_suffix=line_variant[:50] if line_variant else "",
         quantity=qty,
         unit_price=unit_price,
         subtotal=subtotal,
-        modifiers=modifiers if not is_deal_child else [],
+        modifiers=mod_snapshots if (mod_snapshots and not is_deal_child) else None,
         parent_sale_item_id=parent_sale_item_id
     )
     db.session.add(sale_item)
-    db.session.flush() # Get sale_item.id
+    db.session.flush()
 
-    if not is_deal_child and modifiers:
-        # Process modifiers if this is a top-level item with modifiers
-        ok, err = _process_modifiers(modifiers, qty, branch_id, current_user_id, sale_id)
+    if not is_deal_child and modifier_ids:
+        ok, err = _process_modifier_depletions(modifier_ids, qty, branch_id, current_user_id, sale_id)
         if not ok:
             return False, err, 0.0
 
     if not product.is_deal:
-        # 1. Deduct finished goods Inventory
-        inventory = Inventory.query.filter_by(
-            branch_id=branch_id, product_id=product.id, variant_sku_suffix=variant_suf
-        ).first()
-
-        if not inventory or inventory.stock_level < qty:
-            msg = f"Insufficient stock for {product.title}"
-            return False, msg, 0.0
-
-        inventory.stock_level -= qty
-        db.session.add(
-            InventoryTransaction(
-                branch_id=branch_id,
-                product_id=product.id,
-                variant_sku_suffix=variant_suf,
-                delta=-qty,
-                reason="sale",
-                user_id=current_user_id,
-                reference_type="sale",
-                reference_id=sale_id,
-            )
+        ok_r, err_r = _deduct_recipe_for_product(
+            product, qty, branch_id, current_user_id, sale_id, variant_key=line_variant or None
         )
-
-        # 2. Deduct Raw Materials based on recipe_items
-        if hasattr(product, 'recipe_items'):
-            for recipe_item in product.recipe_items:
-                ingredient = recipe_item.ingredient
-                if ingredient:
-                    total_ing_qty = recipe_item.quantity * qty
-                    if ingredient.current_stock < total_ing_qty:
-                        return False, f"Insufficient raw material: {ingredient.name}", 0.0
-                    
-                    qty_before = ingredient.current_stock
-                    qty_after = qty_before - total_ing_qty
-                    ingredient.current_stock = qty_after
-                    
-                    db.session.add(
-                        StockMovement(
-                            ingredient_id=ingredient.id,
-                            movement_type='sale_deduction',
-                            quantity_change=-total_ing_qty,
-                            quantity_before=qty_before,
-                            quantity_after=qty_after,
-                            unit_cost=ingredient.average_cost,
-                            reference_id=sale_id,
-                            reference_type='sale',
-                            reason=f"Sold {qty}x {product.title}",
-                            created_by=current_user_id,
-                            branch_id=branch_id
-                        )
-                    )
-
+        if not ok_r:
+            return False, err_r, 0.0
     else:
-        # It is a Deal/Combo, recursively process child products
-        # Standard: do NOT deduct stock for the deal itself, because deals don't have stock
-        # But we DO need to recursively deduct the components and create sub-items
-        for combo_item in product.combo_items:
+        expanded = combo_items_for_variant(product, line_variant or None)
+        if not expanded:
+            vk = normalize_variant_key(line_variant)
+            return (
+                False,
+                f'No combo lines for deal "{product.title}"'
+                + (f' (variant "{vk}")' if vk else "")
+                + ". Configure combo items for this deal in Menu → Deals.",
+                0.0,
+            )
+        for combo_item in expanded:
             child = combo_item.child_product
             if child:
                 child_dict = {
                     "product_id": child.id,
-                    "variant_sku_suffix": "", 
                     "quantity": qty * combo_item.quantity,
-                    "modifiers": []
+                    "modifier_ids": [],
                 }
                 ok, err, _ = _deduct_product_inventory_and_create_sale_items(
-                    child, child_dict, branch_id, current_user_id, sale_id, 
+                    child, child_dict, branch_id, current_user_id, sale_id,
                     parent_sale_item_id=sale_item.id, is_deal_child=True
                 )
                 if not ok:
@@ -347,13 +486,10 @@ def checkout(payload: dict[str, Any] | None = None, current_user: User = Depends
     if verr:
         return verr
     assert items is not None
-    branch_id = data.get("branch_id")
-    if current_user.role != "owner":
-        branch_id = current_user.branch_id
-    elif not branch_id:
-        branch_id = current_user.branch_id or 1
-    if not branch_id:
-        return _json_error("Bad Request", "Branch ID must be provided or linked to the user", 400)
+    branch_id, berr = _terminal_branch_or_error(current_user)
+    if berr:
+        return berr
+    assert branch_id is not None
 
     order_type_norm, order_snapshot_norm, order_err = normalize_order_type_and_snapshot(data)
     if order_err:
@@ -414,13 +550,26 @@ def checkout(payload: dict[str, Any] | None = None, current_user: User = Depends
                 discount_id = discount_data.get("id")
                 discount_snapshot = {"name": discount_data.get("name") or "Discount", "type": d_type, "value": d_value}
         discounted_subtotal = total_amount - discount_amount
-        delivery_charge = _delivery_charge_for_order_type(order_type_norm)
+        delivery_charge, service_charge = _order_charges(order_type_norm, data)
         new_sale.discount_amount = discount_amount
         new_sale.discount_id = discount_id
         new_sale.discount_snapshot = discount_snapshot
         new_sale.delivery_charge = delivery_charge
+        new_sale.service_charge = service_charge
         new_sale.tax_amount = discounted_subtotal * tax_rate
-        new_sale.total_amount = discounted_subtotal + new_sale.tax_amount + delivery_charge
+        new_sale.total_amount = discounted_subtotal + new_sale.tax_amount + delivery_charge + service_charge
+        db.session.flush()
+        enqueue_sync_event(
+            branch_id=branch_id,
+            entity_type="sale",
+            entity_id=new_sale.id,
+            event_type="checkout_completed",
+            payload={
+                "payment_method": data.get("payment_method"),
+                "total": float(new_sale.total_amount),
+                "order_type": order_type_norm,
+            },
+        )
         db.session.commit()
         printer_service = PrinterService()
         branch_name = "Main Branch"
@@ -446,6 +595,7 @@ def checkout(payload: dict[str, Any] | None = None, current_user: User = Depends
                 "tax_rate": float(tax_rate),
                 "discount_amount": float(discount_amount),
                 "delivery_charge": float(delivery_charge),
+                "service_charge": float(service_charge),
                 "discount_name": discount_name or "Discount",
                 "operator": current_user.username,
                 "branch": branch_name,
@@ -505,12 +655,11 @@ def get_sales(
             query = query.filter(Sale.archived_at == None)  # noqa: E711
         if not yes(include_open) and has_status_col:
             query = query.filter(Sale.status != "open")
-        if current_user.role != "owner":
-            query = query.filter(Sale.branch_id == current_user.branch_id)
-        elif branch_id:
-            query = query.filter(Sale.branch_id == int(branch_id))
-        elif current_user.branch_id:
-            query = query.filter(Sale.branch_id == current_user.branch_id)
+        _ = branch_id
+        tid, terr = _terminal_branch_or_error(current_user)
+        if terr:
+            return terr
+        query = query.filter(Sale.branch_id == tid)
         if start_dt and end_dt:
             query = query.filter(Sale.created_at >= start_dt, Sale.created_at <= end_dt)
 
@@ -561,12 +710,11 @@ def get_analytics(
         query = db.session.query(Sale.id, Sale.total_amount, Sale.branch_id, Sale.created_at)
         if has_status_col:
             query = query.add_columns(Sale.status).filter(Sale.status != "refunded", Sale.status != "open")
-        if current_user.role != "owner":
-            query = query.filter(Sale.branch_id == current_user.branch_id)
-        elif branch_id:
-            query = query.filter(Sale.branch_id == int(branch_id))
-        elif current_user.branch_id:
-            query = query.filter(Sale.branch_id == current_user.branch_id)
+        _ = branch_id
+        tid, terr = _terminal_branch_or_error(current_user)
+        if terr:
+            return terr
+        query = query.filter(Sale.branch_id == tid)
         if start_dt and end_dt:
             query = query.filter(Sale.created_at >= start_dt, Sale.created_at <= end_dt)
         q_sales = query.all()
@@ -606,26 +754,67 @@ def _validate_cart_items(items: list) -> tuple[Optional[list[dict]], Optional[JS
             return None, _json_error("Bad Request", f"Item at index {idx} quantity must be a positive integer", 400)
         if qty <= 0:
             return None, _json_error("Bad Request", f"Item at index {idx} quantity must be positive", 400)
+        raw_mod_ids = item.get("modifier_ids")
+        if raw_mod_ids is None:
+            raw_mod_ids = item.get("modifierIds")
+        if not isinstance(raw_mod_ids, list):
+            raw_mod_ids = []
+        modifier_ids: list[int] = []
+        for x in raw_mod_ids:
+            try:
+                modifier_ids.append(int(x))
+            except (TypeError, ValueError):
+                return None, _json_error("Bad Request", f"Item at index {idx} has invalid modifier_ids", 400)
+
+        pid = int(item["product_id"])
+        product = Product.query.get(pid)
+        if product is None:
+            return None, _json_error("Bad Request", f"Item at index {idx}: product_id {pid} not found", 400)
+        if getattr(product, "archived_at", None) is not None:
+            return None, _json_error(
+                "Bad Request",
+                f'Item at index {idx}: "{product.title}" is no longer on the menu',
+                400,
+            )
+
+        raw_v = item.get("variant_sku_suffix")
+        if raw_v is None:
+            raw_v = item.get("variant")
+        vk = str(raw_v or "").strip()
+        if len(vk) > 50:
+            return None, _json_error("Bad Request", f"Item at index {idx}: variant too long (max 50)", 400)
+
+        allowed = _normalize_product_variant_labels(getattr(product, "variants", None))
+        if allowed:
+            if not vk:
+                return None, _json_error(
+                    "Bad Request",
+                    f'Item at index {idx}: choose a variant for "{product.title}"',
+                    400,
+                )
+            if vk not in allowed:
+                return None, _json_error(
+                    "Bad Request",
+                    f'Item at index {idx}: unknown variant "{vk}" for "{product.title}"',
+                    400,
+                )
+        else:
+            vk = ""
+
         normalized.append(
             {
-                "product_id": int(item["product_id"]),
-                "variant_sku_suffix": item.get("variant_sku_suffix", "") or "",
+                "product_id": pid,
                 "quantity": qty,
-                "modifiers": _normalize_modifiers(item.get("modifiers") or []),
+                "modifier_ids": modifier_ids,
+                "variant_sku_suffix": vk,
             }
         )
     return normalized, None
 
 
 def _resolve_branch_id(data: dict[str, Any], current_user: User) -> tuple[int | None, JSONResponse | None]:
-    branch_id = data.get("branch_id")
-    if current_user.role != "owner":
-        branch_id = current_user.branch_id
-    elif not branch_id:
-        branch_id = current_user.branch_id or 1
-    if not branch_id:
-        return None, _json_error("Bad Request", "Branch ID must be provided or linked to the user", 400)
-    return int(branch_id), None
+    _ = data
+    return _terminal_branch_or_error(current_user)
 
 
 @orders_router.get("/active")
@@ -670,17 +859,16 @@ def list_active_dine_in_orders(
             query = query.filter(Sale.status == "open")
 
         if has_order_type_col:
-            query = query.filter(Sale.order_type == "dine_in")
+            query = query.filter(or_(Sale.order_type.in_(KITCHEN_OPEN_ORDER_TYPES), Sale.order_type.is_(None)))
 
         if has_archived_at_col and not yes(include_archived):
             query = query.filter(Sale.archived_at == None)  # noqa: E711
 
-        if current_user.role != "owner":
-            query = query.filter(Sale.branch_id == current_user.branch_id)
-        elif branch_id is not None:
-            query = query.filter(Sale.branch_id == int(branch_id))
-        elif current_user.branch_id:
-            query = query.filter(Sale.branch_id == current_user.branch_id)
+        _ = branch_id
+        tid, terr = _terminal_branch_or_error(current_user)
+        if terr:
+            return terr
+        query = query.filter(Sale.branch_id == tid)
 
         query = query.order_by(Sale.created_at.desc())
         rows = query.all()
@@ -749,7 +937,7 @@ def list_active_dine_in_orders(
                         "product_title": item.title if item.title else "Unknown",
                         "variant_sku_suffix": item.variant_sku_suffix or "",
                         "quantity": item.quantity,
-                        "modifiers": _normalize_modifiers(item.modifiers or []),
+                        "modifiers": _modifiers_for_display(item.modifiers or []),
                         "parent_sale_item_id": item.parent_sale_item_id,
                         "is_deal": item.is_deal,
                         "children": [],
@@ -766,28 +954,55 @@ def list_active_dine_in_orders(
         raise
 
 
+def _line_dict_from_nested_node(n: dict[str, Any]) -> dict[str, Any]:
+    mods_raw = n.get("modifiers") or []
+    mod_strs: list[str] = []
+    if isinstance(mods_raw, list):
+        for m in mods_raw:
+            if isinstance(m, str):
+                mod_strs.append(m)
+            elif isinstance(m, dict) and m.get("name"):
+                mod_strs.append(str(m["name"]))
+    return {
+        "product_title": n.get("product_title") or "Unknown",
+        "variant_sku_suffix": (n.get("variant_sku_suffix") or "") or "",
+        "quantity": int(n.get("quantity") or 0),
+        "modifiers": mod_strs,
+    }
+
+
 def _flatten_kitchen_display_lines(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Flatten nested sale items (deals/children) into KDS line rows."""
+    """Flatten nested sale items (deals/children) into KDS line rows (full expansion)."""
     lines: list[dict[str, Any]] = []
     for n in nodes:
-        mods_raw = n.get("modifiers") or []
-        mod_strs: list[str] = []
-        if isinstance(mods_raw, list):
-            for m in mods_raw:
-                if isinstance(m, str):
-                    mod_strs.append(m)
-                elif isinstance(m, dict) and m.get("name"):
-                    mod_strs.append(str(m["name"]))
-        lines.append(
-            {
-                "product_title": n.get("product_title") or "Unknown",
-                "variant_sku_suffix": (n.get("variant_sku_suffix") or "") or "",
-                "quantity": int(n.get("quantity") or 0),
-                "modifiers": mod_strs,
-            }
-        )
+        lines.append(_line_dict_from_nested_node(n))
         for ch in n.get("children") or []:
             lines.extend(_flatten_kitchen_display_lines([ch]))
+    return lines
+
+
+def _kds_card_lines(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """KDS ticket: show deal/combo as one line only; expand non-deal children as today."""
+    lines: list[dict[str, Any]] = []
+    for n in nodes:
+        if n.get("is_deal"):
+            lines.append(_line_dict_from_nested_node(n))
+            continue
+        lines.append(_line_dict_from_nested_node(n))
+        for ch in n.get("children") or []:
+            lines.extend(_kds_card_lines([ch]))
+    return lines
+
+
+def _kds_prep_lines(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Queue totals: for deals, count component lines (children), not the deal parent line."""
+    lines: list[dict[str, Any]] = []
+    for n in nodes:
+        if n.get("is_deal"):
+            for ch in n.get("children") or []:
+                lines.extend(_flatten_kitchen_display_lines([ch]))
+        else:
+            lines.extend(_flatten_kitchen_display_lines([n]))
     return lines
 
 
@@ -798,30 +1013,61 @@ def _kitchen_status_value(sale: Sale) -> str:
     return "placed"
 
 
+KDS_READY_RETENTION = timedelta(days=1)
+
+
+def _kitchen_ready_reference_utc(sale: Sale) -> datetime | None:
+    """Timestamp used to expire READY tickets from KDS (prefer first marked ready, else order created_at)."""
+    kr = getattr(sale, "kitchen_ready_at", None)
+    if kr is not None:
+        if kr.tzinfo is None:
+            return kr.replace(tzinfo=timezone.utc)
+        return kr
+    ca = sale.created_at
+    if ca is None:
+        return None
+    if ca.tzinfo is None:
+        return ca.replace(tzinfo=timezone.utc)
+    return ca
+
+
+def _sale_visible_on_kds(sale: Sale) -> bool:
+    """Hide READY tickets from KDS after 24h from ready time (or created_at if legacy)."""
+    if _kitchen_status_value(sale) != "ready":
+        return True
+    ref = _kitchen_ready_reference_utc(sale)
+    if ref is None:
+        return True
+    return ref >= datetime.now(timezone.utc) - KDS_READY_RETENTION
+
+
 @orders_router.get("/kitchen")
 def list_kitchen_orders(
     branch_id: int | None = None,
     current_user: User = Depends(get_current_user),
 ):
-    """Kitchen Display: open dine-in tickets with items and workflow status (placed → preparing → ready)."""
+    """Kitchen Display: open KOT tickets (dine-in, takeaway, delivery) with workflow status (placed → preparing → ready)."""
     try:
-        if current_user.role != "owner":
-            bid = current_user.branch_id
-        elif branch_id is not None:
-            bid = int(branch_id)
-        else:
-            bid = current_user.branch_id or 1
-        if not bid:
-            return {"orders": []}
+        _ = branch_id
+        bid, berr = _terminal_branch_or_error(current_user)
+        if berr:
+            return berr
+        assert bid is not None
 
+        recent_completed = datetime.now(timezone.utc) - timedelta(days=KITCHEN_COMPLETED_LOOKBACK_DAYS)
+        # Open tabs (dine-in KOT, etc.) + recently completed kitchen orders (takeaway/delivery pay+KOT flow
+        # finalizes immediately; they are no longer status=open but kitchen must still see them).
         q = Sale.query.filter(
-            Sale.status == "open",
             Sale.branch_id == bid,
             Sale.archived_at == None,  # noqa: E711
+            or_(
+                Sale.status == "open",
+                and_(Sale.status == "completed", Sale.created_at >= recent_completed),
+            ),
         )
         if hasattr(Sale, "order_type"):
-            q = q.filter(Sale.order_type == "dine_in")
-        sales = q.order_by(Sale.created_at.desc()).all()
+            q = q.filter(or_(Sale.order_type.in_(KITCHEN_OPEN_ORDER_TYPES), Sale.order_type.is_(None)))
+        sales = [s for s in q.order_by(Sale.created_at.desc()).all() if _sale_visible_on_kds(s)]
         if not sales:
             return {"orders": []}
 
@@ -851,7 +1097,7 @@ def list_kitchen_orders(
                     "product_title": item.title if item.title else "Unknown",
                     "variant_sku_suffix": item.variant_sku_suffix or "",
                     "quantity": item.quantity,
-                    "modifiers": _normalize_modifiers(item.modifiers or []),
+                    "modifiers": _modifiers_for_display(item.modifiers or []),
                     "parent_sale_item_id": item.parent_sale_item_id,
                     "is_deal": item.is_deal,
                     "children": [],
@@ -864,15 +1110,17 @@ def list_kitchen_orders(
             snap = sale.order_snapshot or {}
             table_name = snap.get("table_name") if isinstance(snap, dict) else None
             nested = items_by_sale.get(sale.id, [])
+            ot = getattr(sale, "order_type", None) or "dine_in"
             out.append(
                 {
                     "id": sale.id,
                     "created_at": sale.created_at.isoformat() if sale.created_at else "",
-                    "order_type": getattr(sale, "order_type", None) or "dine_in",
+                    "order_type": ot,
                     "order_snapshot": snap,
                     "table_name": table_name,
                     "kitchen_status": _kitchen_status_value(sale),
-                    "items": _flatten_kitchen_display_lines(nested),
+                    "items": _kds_card_lines(nested),
+                    "prep_lines": _kds_prep_lines(nested),
                     "modifications": [],
                 }
             )
@@ -894,19 +1142,33 @@ def update_kitchen_status(
     sale = Sale.query.get(sale_id)
     if not sale:
         return _json_error("Not Found", "Order not found", 404)
-    if current_user.role != "owner" and sale.branch_id != current_user.branch_id:
-        return _json_error("Forbidden", "Not allowed for this branch", 403)
-    if sale.status != "open":
-        return _json_error("Bad Request", "Order is not open", 400)
+    fb = _forbidden_unless_sale_branch(sale, current_user)
+    if fb:
+        return fb
+    ot = getattr(sale, "order_type", None)
+    kitchen_eligible = ot is None or ot in KITCHEN_OPEN_ORDER_TYPES
+    if sale.status == "open":
+        pass
+    elif sale.status == "completed" and kitchen_eligible:
+        pass
+    else:
+        return _json_error("Bad Request", "Order is not eligible for kitchen status updates", 400)
     sale.kitchen_status = status_new
+    if status_new == "ready":
+        sale.kitchen_ready_at = datetime.now(timezone.utc)
+    else:
+        sale.kitchen_ready_at = None
     db.session.commit()
     return {"ok": True, "id": sale.id, "kitchen_status": status_new}
 
 
-@orders_router.post("/dine-in/kot")
-def dine_in_kot(payload: dict[str, Any] | None = None, current_user: User = Depends(get_current_user)):
-    """Create an open dine-in sale, deduct stock, print KOT (kitchen ticket). No payment yet."""
-    data = payload or {}
+def _create_open_kot_response(
+    data: dict[str, Any],
+    current_user: User,
+    *,
+    order_type_fixed: str | None = None,
+):
+    """Create an open sale, deduct stock, print KOT. Used for dine-in, takeaway, and delivery tabs before payment."""
     if "items" not in data:
         return _json_error("Bad Request", "Missing items", 400)
     items, verr = _validate_cart_items(data["items"])
@@ -919,12 +1181,12 @@ def dine_in_kot(payload: dict[str, Any] | None = None, current_user: User = Depe
         return berr
     assert bid is not None
 
+    ot_src = order_type_fixed if order_type_fixed is not None else (data.get("order_type") or "dine_in")
     order_type_norm, order_snapshot_norm, order_err = normalize_order_type_and_snapshot(
-        {"order_type": "dine_in", "order_snapshot": data.get("order_snapshot")}
+        {"order_type": ot_src, "order_snapshot": data.get("order_snapshot")}
     )
     if order_err:
         return _json_error("Bad Request", order_err, 400)
-    assert order_type_norm == "dine_in"
 
     try:
         new_sale = Sale(
@@ -964,6 +1226,14 @@ def dine_in_kot(payload: dict[str, Any] | None = None, current_user: User = Depe
         new_sale.total_amount = total_amount
         new_sale.tax_amount = 0
         new_sale.kitchen_status = "placed"
+        db.session.flush()
+        enqueue_sync_event(
+            branch_id=bid,
+            entity_type="sale",
+            entity_id=new_sale.id,
+            event_type="dine_in_kot",
+            payload={"total": float(total_amount)},
+        )
         db.session.commit()
 
         branch_name = "Main Branch"
@@ -995,7 +1265,7 @@ def dine_in_kot(payload: dict[str, Any] | None = None, current_user: User = Depe
                     "product_title": item.title if item.title else "Unknown",
                     "variant_sku_suffix": item.variant_sku_suffix or "",
                     "quantity": item.quantity,
-                    "modifiers": _normalize_modifiers(item.modifiers or []),
+                    "modifiers": _modifiers_for_display(item.modifiers or []),
                     "parent_sale_item_id": item.parent_sale_item_id,
                     "is_deal": item.is_deal,
                     "children": [],
@@ -1010,6 +1280,7 @@ def dine_in_kot(payload: dict[str, Any] | None = None, current_user: User = Depe
                 "branch": branch_name,
                 "operator": current_user.username,
                 "table_name": table_name,
+                "order_type": order_type_norm,
                 "items": kot_items,
             }
         )
@@ -1032,8 +1303,9 @@ def update_open_sale_items(sale_id: int, payload: dict[str, Any] | None = None, 
     sale = Sale.query.get(sale_id)
     if not sale:
         raise HTTPException(status_code=404, detail="Not Found")
-    if current_user.role != "owner" and sale.branch_id != current_user.branch_id:
-        return _json_error("Forbidden", "Unauthorized", 403)
+    fb = _forbidden_unless_sale_branch(sale, current_user)
+    if fb:
+        return fb
     if getattr(sale, "status", "") != "open":
         return _json_error("Bad Request", "Only open unpaid orders can be edited", 400)
     data = payload or {}
@@ -1093,8 +1365,9 @@ def finalize_open_sale(sale_id: int, payload: dict[str, Any] | None = None, curr
     sale = Sale.query.get(sale_id)
     if not sale:
         raise HTTPException(status_code=404, detail="Not Found")
-    if current_user.role != "owner" and sale.branch_id != current_user.branch_id:
-        return _json_error("Forbidden", "Unauthorized", 403)
+    fb = _forbidden_unless_sale_branch(sale, current_user)
+    if fb:
+        return fb
     if getattr(sale, "status", "") != "open":
         return _json_error("Bad Request", "Order is not awaiting payment", 400)
     data = payload or {}
@@ -1127,9 +1400,10 @@ def finalize_open_sale(sale_id: int, payload: dict[str, Any] | None = None, curr
             discount_id = discount_data.get("id")
             discount_snapshot = {"name": discount_data.get("name") or "Discount", "type": d_type, "value": d_value}
     discounted_subtotal = items_sum - discount_amount
-    delivery_charge = _delivery_charge_for_order_type(getattr(sale, "order_type", None))
+    ot = getattr(sale, "order_type", None)
+    delivery_charge, service_charge = _order_charges(ot, data)
     tax_amount = discounted_subtotal * tax_rate
-    total_with_tax = discounted_subtotal + tax_amount + delivery_charge
+    total_with_tax = discounted_subtotal + tax_amount + delivery_charge + service_charge
 
     try:
         sale.payment_method = data["payment_method"]
@@ -1137,9 +1411,18 @@ def finalize_open_sale(sale_id: int, payload: dict[str, Any] | None = None, curr
         sale.discount_id = discount_id
         sale.discount_snapshot = discount_snapshot
         sale.delivery_charge = delivery_charge
+        sale.service_charge = service_charge
         sale.tax_amount = tax_amount
         sale.total_amount = total_with_tax
         sale.status = "completed"
+        db.session.flush()
+        enqueue_sync_event(
+            branch_id=sale.branch_id,
+            entity_type="sale",
+            entity_id=sale.id,
+            event_type="dine_in_finalized",
+            payload={"total": float(sale.total_amount), "payment_method": data.get("payment_method")},
+        )
         db.session.commit()
 
         branch_name = "Main Branch"
@@ -1163,6 +1446,7 @@ def finalize_open_sale(sale_id: int, payload: dict[str, Any] | None = None, curr
                 "tax_rate": float(tax_rate),
                 "discount_amount": float(discount_amount),
                 "delivery_charge": float(delivery_charge),
+                "service_charge": float(service_charge),
                 "discount_name": discount_name or "Discount",
                 "operator": current_user.username,
                 "branch": branch_name,
@@ -1192,8 +1476,9 @@ def cancel_open_sale(sale_id: int, current_user: User = Depends(get_current_user
     sale = Sale.query.get(sale_id)
     if not sale:
         raise HTTPException(status_code=404, detail="Not Found")
-    if current_user.role != "owner" and sale.branch_id != current_user.branch_id:
-        return _json_error("Forbidden", "Unauthorized", 403)
+    fb = _forbidden_unless_sale_branch(sale, current_user)
+    if fb:
+        return fb
     if getattr(sale, "status", "") != "open":
         return _json_error("Bad Request", "Only open unpaid orders can be cancelled this way", 400)
     try:
@@ -1218,8 +1503,9 @@ def get_sale_details(sale_id: int, current_user: User = Depends(get_current_user
     sale = Sale.query.get(sale_id)
     if not sale:
         raise HTTPException(status_code=404, detail="Not Found")
-    if current_user.role != "owner" and sale.branch_id != current_user.branch_id:
-        return _json_error("Forbidden", "Unauthorized", 403)
+    fb = _forbidden_unless_sale_branch(sale, current_user)
+    if fb:
+        return fb
     flat_items: list[dict[str, Any]] = []
     for i in sale.items:
         flat_items.append(
@@ -1232,7 +1518,7 @@ def get_sale_details(sale_id: int, current_user: User = Depends(get_current_user
                 "quantity": i.quantity,
                 "unit_price": float(i.unit_price),
                 "subtotal": float(i.subtotal),
-                "modifiers": _normalize_modifiers(i.modifiers or []),
+                "modifiers": _modifiers_payload_for_api(i.modifiers or []),
                 "parent_sale_item_id": i.parent_sale_item_id,
                 "is_deal": bool(i.product.is_deal) if i.product else False,
                 "children": [],
@@ -1251,6 +1537,7 @@ def get_sale_details(sale_id: int, current_user: User = Depends(get_current_user
         "status": getattr(sale, "status", "completed"),
         "discount_amount": float(getattr(sale, "discount_amount", 0) or 0),
         "delivery_charge": float(getattr(sale, "delivery_charge", 0) or 0),
+        "service_charge": float(getattr(sale, "service_charge", 0) or 0),
         "discount_snapshot": getattr(sale, "discount_snapshot", None),
         "order_type": getattr(sale, "order_type", None),
         "order_snapshot": getattr(sale, "order_snapshot", None),
@@ -1266,8 +1553,9 @@ def rollback_sale(sale_id: int, current_user: User = Depends(get_current_user)):
     sale = Sale.query.get(sale_id)
     if not sale:
         raise HTTPException(status_code=404, detail="Not Found")
-    if current_user.role != "owner" and sale.branch_id != current_user.branch_id:
-        return _json_error("Forbidden", "Unauthorized", 403)
+    fb = _forbidden_unless_sale_branch(sale, current_user)
+    if fb:
+        return fb
     if getattr(sale, "status", "completed") == "open":
         return _json_error("Bad Request", "Unpaid dine-in order: cancel from Active Dine-In or void the open tab first", 400)
     if getattr(sale, "status", "completed") == "refunded":
@@ -1282,6 +1570,14 @@ def rollback_sale(sale_id: int, current_user: User = Depends(get_current_user)):
                 reason=f"Sale #{sale_id} refunded",
                 inventory_reason="refund",
             )
+        db.session.flush()
+        enqueue_sync_event(
+            branch_id=sale.branch_id,
+            entity_type="sale",
+            entity_id=sale.id,
+            event_type="sale_refunded",
+            payload={"status": "refunded"},
+        )
         db.session.commit()
         return {"message": "Sale rolled back successfully"}
     except Exception as exc:
@@ -1294,8 +1590,9 @@ def archive_sale(sale_id: int, current_user: User = Depends(get_current_user)):
     sale = Sale.query.get(sale_id)
     if not sale:
         raise HTTPException(status_code=404, detail="Not Found")
-    if current_user.role != "owner" and sale.branch_id != current_user.branch_id:
-        return _json_error("Forbidden", "Unauthorized", 403)
+    fb = _forbidden_unless_sale_branch(sale, current_user)
+    if fb:
+        return fb
     if not hasattr(sale, "archived_at"):
         return _json_error("Bad Request", "Archive not supported", 400)
     try:
@@ -1312,8 +1609,9 @@ def unarchive_sale(sale_id: int, current_user: User = Depends(get_current_user))
     sale = Sale.query.get(sale_id)
     if not sale:
         raise HTTPException(status_code=404, detail="Not Found")
-    if current_user.role != "owner" and sale.branch_id != current_user.branch_id:
-        return _json_error("Forbidden", "Unauthorized", 403)
+    fb = _forbidden_unless_sale_branch(sale, current_user)
+    if fb:
+        return fb
     if not hasattr(sale, "archived_at"):
         return _json_error("Bad Request", "Unarchive not supported", 400)
     try:
@@ -1330,8 +1628,9 @@ def delete_sale_permanent(sale_id: int, current_user: User = Depends(require_own
     sale = Sale.query.get(sale_id)
     if not sale:
         raise HTTPException(status_code=404, detail="Not Found")
-    if current_user.role != "owner" and sale.branch_id != current_user.branch_id:
-        return _json_error("Forbidden", "Unauthorized", 403)
+    fb = _forbidden_unless_sale_branch(sale, current_user)
+    if fb:
+        return fb
     items_count = len(sale.items)
     try:
         db.session.delete(sale)
@@ -1347,13 +1646,15 @@ def print_sale(sale_id: int, current_user: User = Depends(get_current_user)):
     sale = Sale.query.get(sale_id)
     if not sale:
         raise HTTPException(status_code=404, detail="Not Found")
-    if current_user.role != "owner" and sale.branch_id != current_user.branch_id:
-        return _json_error("Forbidden", "Unauthorized", 403)
+    fb = _forbidden_unless_sale_branch(sale, current_user)
+    if fb:
+        return fb
     if getattr(sale, "status", "") == "open":
         return _json_error("Bad Request", "Finalize payment before printing a customer receipt", 400)
     discount_amount = float(getattr(sale, "discount_amount", 0) or 0)
     delivery_charge = float(getattr(sale, "delivery_charge", 0) or 0)
-    discounted_subtotal = float(sale.total_amount) - float(sale.tax_amount) - delivery_charge
+    service_charge = float(getattr(sale, "service_charge", 0) or 0)
+    discounted_subtotal = float(sale.total_amount) - float(sale.tax_amount) - delivery_charge - service_charge
     subtotal = discounted_subtotal + discount_amount
     tax_rate = (float(sale.tax_amount) / discounted_subtotal) if discounted_subtotal else 0
     discount_name = sale.discount_snapshot.get("name") if isinstance(getattr(sale, "discount_snapshot", None), dict) else None
@@ -1365,6 +1666,7 @@ def print_sale(sale_id: int, current_user: User = Depends(get_current_user)):
         "tax_rate": tax_rate,
         "discount_amount": discount_amount,
         "delivery_charge": delivery_charge,
+        "service_charge": service_charge,
         "discount_name": discount_name,
         "operator": sale.user.username if sale.user else "Unknown",
         "branch": sale.branch.name if sale.branch else "Main Branch",

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, X, Loader2, Pencil, Package } from 'lucide-react';
 import { get, post, put, getUserMessage } from '../../api';
+import { getTerminalBranchIdString, parseUserFromStorage } from '../../utils/branchContext';
 import { showToast } from '../Toast';
 import { formatCurrency } from '../../utils/formatCurrency';
 
@@ -39,6 +40,8 @@ export default function IngredientsTab() {
   const [formUnit, setFormUnit] = useState('kg');
   const [formMinStock, setFormMinStock] = useState('0');
   const [formReorderQty, setFormReorderQty] = useState('0');
+  const [formLastPurchasePrice, setFormLastPurchasePrice] = useState('0');
+  const [formAverageCost, setFormAverageCost] = useState('0');
   const [formSupplierId, setFormSupplierId] = useState('');
   const [formCategory, setFormCategory] = useState('');
   const [formError, setFormError] = useState('');
@@ -51,8 +54,12 @@ export default function IngredientsTab() {
   const fetchData = async () => {
     setLoading(true);
     try {
+      const activeBranchId = getTerminalBranchIdString(parseUserFromStorage());
+      const ingPath = activeBranchId
+        ? `/inventory-advanced/ingredients?branch_id=${activeBranchId}`
+        : '/inventory-advanced/ingredients';
       const [ingRes, supRes] = await Promise.all([
-        get<{ ingredients: Ingredient[] }>('/inventory-advanced/ingredients'),
+        get<{ ingredients: Ingredient[] }>(ingPath),
         get<{ suppliers: Supplier[] }>('/inventory-advanced/suppliers')
       ]);
       setIngredients(ingRes.ingredients || []);
@@ -70,6 +77,8 @@ export default function IngredientsTab() {
     setFormUnit('kg');
     setFormMinStock('0');
     setFormReorderQty('0');
+    setFormLastPurchasePrice('0');
+    setFormAverageCost('0');
     setFormSupplierId('');
     setFormCategory('');
     setFormError('');
@@ -88,6 +97,8 @@ export default function IngredientsTab() {
     setFormUnit(ing.unit || 'kg');
     setFormMinStock(ing.minimum_stock.toString());
     setFormReorderQty(ing.reorder_quantity.toString());
+    setFormLastPurchasePrice(String(ing.last_purchase_price ?? 0));
+    setFormAverageCost(String(ing.average_cost ?? 0));
     setFormSupplierId(ing.preferred_supplier_id ? ing.preferred_supplier_id.toString() : '');
     setFormCategory(ing.category || '');
     setFormError('');
@@ -101,6 +112,19 @@ export default function IngredientsTab() {
       return;
     }
 
+    const parseMoney = (raw: string) => {
+      const t = raw.trim();
+      if (t === '') return 0;
+      const n = parseFloat(t);
+      return Number.isNaN(n) ? NaN : n;
+    };
+    const lastPurchase = parseMoney(formLastPurchasePrice);
+    const avgCost = parseMoney(formAverageCost);
+    if (Number.isNaN(lastPurchase) || lastPurchase < 0 || Number.isNaN(avgCost) || avgCost < 0) {
+      setFormError('Cost fields must be valid amounts (0 or greater).');
+      return;
+    }
+
     setSubmitting(true);
     setFormError('');
     try {
@@ -110,6 +134,8 @@ export default function IngredientsTab() {
         unit: formUnit,
         minimum_stock: parseFloat(formMinStock) || 0,
         reorder_quantity: parseFloat(formReorderQty) || 0,
+        last_purchase_price: lastPurchase,
+        average_cost: avgCost,
         preferred_supplier_id: formSupplierId ? parseInt(formSupplierId, 10) : undefined,
         category: formCategory.trim() || undefined,
       };
@@ -251,6 +277,32 @@ export default function IngredientsTab() {
                  <div>
                     <label className="block text-sm font-medium text-neutral-700 mb-1">Reorder Quantity</label>
                     <input type="number" step="any" min="0" value={formReorderQty} onChange={e => setFormReorderQty(e.target.value)} className="w-full px-4 py-2.5 glass-card text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none" />
+                 </div>
+
+                 <div>
+                    <label className="block text-sm font-medium text-neutral-700 mb-1">Average cost (PKR / unit)</label>
+                    <input
+                      type="number"
+                      step="any"
+                      min="0"
+                      value={formAverageCost}
+                      onChange={e => setFormAverageCost(e.target.value)}
+                      className="w-full px-4 py-2.5 glass-card text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none"
+                    />
+                    <p className="text-xs text-neutral-500 mt-1">Used in the materials list and for recipe cost context.</p>
+                 </div>
+
+                 <div>
+                    <label className="block text-sm font-medium text-neutral-700 mb-1">Last purchase price (PKR / unit)</label>
+                    <input
+                      type="number"
+                      step="any"
+                      min="0"
+                      value={formLastPurchasePrice}
+                      onChange={e => setFormLastPurchasePrice(e.target.value)}
+                      className="w-full px-4 py-2.5 glass-card text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none"
+                    />
+                    <p className="text-xs text-neutral-500 mt-1">Latest price paid per unit (optional reference).</p>
                  </div>
                  
                  <div className="col-span-2">

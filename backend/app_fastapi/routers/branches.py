@@ -6,11 +6,19 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 
-from app.models import Branch, Inventory, Sale, Setting, User, db
-from app_fastapi.deps import get_current_user, require_owner
+from app.models import Branch, Ingredient, IngredientBranchStock, Inventory, Sale, Setting, User, db
+from app_fastapi.deps import get_current_user, require_owner, require_owner_or_manager
 from app_fastapi.routers.common import yes
 
 branches_router = APIRouter(prefix="/api/branches", tags=["branches"])
+
+
+def _assert_branch_access(branch_id: int, user: User) -> None:
+    if user.role == "owner":
+        return
+    if user.role == "manager" and user.branch_id == branch_id:
+        return
+    raise HTTPException(status_code=403, detail={"message": "Not allowed for this branch"})
 
 
 def _branch_to_dict(b: Branch) -> dict[str, Any]:
@@ -46,6 +54,12 @@ def create_branch(payload: dict[str, Any] | None = None, _: User = Depends(requi
     try:
         branch = Branch(name=data["name"].strip(), address=data.get("address", "").strip(), phone=data.get("phone", "").strip())
         db.session.add(branch)
+        db.session.flush()
+        for ing in Ingredient.query.filter(Ingredient.is_active == True).all():  # noqa: E712
+            if not IngredientBranchStock.query.filter_by(ingredient_id=ing.id, branch_id=branch.id).first():
+                db.session.add(
+                    IngredientBranchStock(ingredient_id=ing.id, branch_id=branch.id, current_stock=0.0)
+                )
         db.session.commit()
         return JSONResponse(
             status_code=201,
@@ -64,7 +78,8 @@ def create_branch(payload: dict[str, Any] | None = None, _: User = Depends(requi
 
 
 @branches_router.put("/{branch_id}")
-def update_branch(branch_id: int, payload: dict[str, Any] | None = None, _: User = Depends(require_owner)):
+def update_branch(branch_id: int, payload: dict[str, Any] | None = None, current_user: User = Depends(require_owner_or_manager)):
+    _assert_branch_access(branch_id, current_user)
     branch = Branch.query.get(branch_id)
     if not branch:
         return JSONResponse(status_code=404, content={"message": "Branch not found"})
@@ -135,11 +150,13 @@ def delete_branch(branch_id: int, cascade: str | None = None, _: User = Depends(
         try:
             users_count = len(branch.users)
             inv_count = Inventory.query.filter_by(branch_id=branch_id).count()
+            ibs_count = IngredientBranchStock.query.filter_by(branch_id=branch_id).count()
             sales_count = Sale.query.filter_by(branch_id=branch_id).count()
             setting = Setting.query.filter_by(branch_id=branch_id).first()
             for u in branch.users:
                 u.branch_id = None
             Inventory.query.filter_by(branch_id=branch_id).delete()
+            IngredientBranchStock.query.filter_by(branch_id=branch_id).delete()
             for sale in Sale.query.filter_by(branch_id=branch_id).all():
                 db.session.delete(sale)
             if setting:
@@ -151,6 +168,7 @@ def delete_branch(branch_id: int, cascade: str | None = None, _: User = Depends(
                 "related_deleted": {
                     "users_reassigned": users_count,
                     "inventory_rows": inv_count,
+                    "ingredient_branch_stock_rows": ibs_count,
                     "sales": sales_count,
                     "settings": 1 if setting else 0,
                 },
@@ -165,10 +183,14 @@ def delete_branch(branch_id: int, cascade: str | None = None, _: User = Depends(
                 "message": f'Cannot delete branch "{branch.name}" — it has {len(branch.users)} user(s). Reassign them or use permanent delete with cascade.'
             },
         )
-    if len(branch.inventory) > 0:
+    legacy_inv = len(branch.inventory) > 0
+    has_ingredient_stock = IngredientBranchStock.query.filter_by(branch_id=branch_id).count() > 0
+    if legacy_inv or has_ingredient_stock:
         return JSONResponse(
             status_code=409,
-            content={"message": f'Cannot delete branch "{branch.name}" — it has inventory. Use permanent delete with cascade to remove everything.'},
+            content={
+                "message": f'Cannot delete branch "{branch.name}" — it has stock records. Use permanent delete with cascade to remove everything.'
+            },
         )
     try:
         setting = Setting.query.filter_by(branch_id=branch_id).first()
@@ -183,7 +205,8 @@ def delete_branch(branch_id: int, cascade: str | None = None, _: User = Depends(
 
 
 @branches_router.get("/{branch_id}/users")
-def get_branch_users(branch_id: int, _: User = Depends(require_owner)):
+def get_branch_users(branch_id: int, current_user: User = Depends(require_owner_or_manager)):
+    _assert_branch_access(branch_id, current_user)
     branch = Branch.query.get(branch_id)
     if not branch:
         return JSONResponse(status_code=404, content={"message": "Branch not found"})

@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, memo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { get, patch, getUserMessage } from '../api';
+import { getTerminalBranchIdString, parseUserFromStorage } from '../utils/branchContext';
 import { getSocket } from '../realtime/socket';
 import {
   Loader2, LogOut, ChefHat, Clock, UtensilsCrossed,
@@ -17,11 +18,22 @@ type KdsOrder = {
   order_snapshot?: Record<string, unknown> | null;
   table_name?: string | null;
   kitchen_status: KitchenStatus;
+  /** Lines shown on the ticket card (deal shows as one line). */
   items?: KdsLine[];
+  /** Expanded lines for queue totals (deal components, not the deal parent). */
+  prep_lines?: KdsLine[];
   modifications?: { type: string; description: string; timestamp: string }[];
 };
 
 type FilterTab = 'placed' | 'preparing' | 'ready';
+
+function normalizeKitchenStatus(s: string | null | undefined): KitchenStatus {
+  const v = String(s ?? '')
+    .trim()
+    .toLowerCase();
+  if (v === 'preparing' || v === 'ready') return v;
+  return 'placed';
+}
 
 /* ── helpers ── */
 function formatReceivedTime(iso: string): string {
@@ -61,48 +73,315 @@ function getOrderTypeConfig(t?: string | null) {
   return ORDER_TYPE_CONFIG[t || ''] || { label: t || 'Order', pillColor: 'bg-neutral-100 text-neutral-700 border-neutral-200', bgClass: 'bg-neutral-50/40', icon: ShoppingBag };
 }
 
+/** Stable key: same dish + variant + modifier set aggregates together (e.g. two 1× Burger orders → 2× Burger). */
+function lineAggregateKey(line: KdsLine): string {
+  const vk = String(line.variant_sku_suffix ?? '').trim();
+  const mods = [...(line.modifiers ?? [])].map(m => String(m).trim()).filter(Boolean).sort();
+  return `${line.product_title}\0${vk}\0${mods.join('\x1f')}`;
+}
+
+type CollectiveLine = {
+  quantity: number;
+  product_title: string;
+  variant_sku_suffix?: string;
+  modifiers: string[];
+};
+
+/** Reused context so repeated KOTs do not leak AudioContext instances. */
+let kotAudioContext: AudioContext | null = null;
+
+function getKotAudioContext(): AudioContext | null {
+  try {
+    if (typeof window === 'undefined') return null;
+    if (!kotAudioContext) {
+      const Ctor = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!Ctor) return null;
+      kotAudioContext = new Ctor();
+    }
+    return kotAudioContext;
+  } catch {
+    return null;
+  }
+}
+
+/** Short kitchen bell / double-tone so cooks notice a new ticket (respects autoplay until user has interacted). */
+function playKotAlertSound(): void {
+  const ctx = getKotAudioContext();
+  if (!ctx) return;
+  const start = () => {
+    const t0 = ctx.currentTime;
+    const ding = (freq: number, offset: number, duration: number) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, t0 + offset);
+      gain.gain.setValueAtTime(0, t0 + offset);
+      gain.gain.linearRampToValueAtTime(0.18, t0 + offset + 0.015);
+      gain.gain.exponentialRampToValueAtTime(0.001, t0 + offset + duration);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(t0 + offset);
+      osc.stop(t0 + offset + duration + 0.05);
+    };
+    ding(784, 0, 0.22);
+    ding(1046.5, 0.18, 0.28);
+  };
+  if (ctx.state === 'suspended') {
+    void ctx.resume().then(start).catch(() => {});
+  } else {
+    start();
+  }
+}
+
+function aggregateCollectiveLines(orders: KdsOrder[]): CollectiveLine[] {
+  const map = new Map<string, CollectiveLine>();
+  for (const order of orders) {
+    const source = order.prep_lines != null ? order.prep_lines : order.items ?? [];
+    for (const line of source) {
+      const q = Math.max(0, Math.floor(Number(line.quantity) || 0));
+      if (q <= 0) continue;
+      const key = lineAggregateKey(line);
+      const mods = [...(line.modifiers ?? [])].map(m => String(m).trim()).filter(Boolean).sort();
+      const vk = String(line.variant_sku_suffix ?? '').trim();
+      const prev = map.get(key);
+      if (prev) {
+        prev.quantity += q;
+      } else {
+        map.set(key, {
+          quantity: q,
+          product_title: line.product_title || 'Unknown',
+          variant_sku_suffix: vk || undefined,
+          modifiers: mods,
+        });
+      }
+    }
+  }
+  return [...map.values()].sort((a, b) => {
+    if (b.quantity !== a.quantity) return b.quantity - a.quantity;
+    return a.product_title.localeCompare(b.product_title, undefined, { sensitivity: 'base' });
+  });
+}
+
+function HeaderClock() {
+  const [clock, setClock] = useState(() => new Date());
+  useEffect(() => {
+    const id = setInterval(() => setClock(new Date()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  return (
+    <span className="font-mono font-bold text-neutral-700 text-sm">
+      {clock.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}
+    </span>
+  );
+}
+
+const OrderCard = memo(function OrderCard({
+  order,
+  isBusy,
+  onUpdateStatus,
+}: {
+  order: KdsOrder;
+  isBusy: boolean;
+  onUpdateStatus: (id: number, status: KitchenStatus) => void;
+}) {
+  const [nowMs, setNowMs] = useState(Date.now());
+  const ks = normalizeKitchenStatus(order.kitchen_status);
+
+  useEffect(() => {
+    if (ks === 'ready') return;
+    const id = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [ks]);
+
+  const priority = getPriorityColor(ks, order.created_at, nowMs);
+  const otCfg = getOrderTypeConfig(order.order_type);
+  const OtIcon = otCfg.icon;
+  const lines = order.items ?? [];
+  const snap = order.order_snapshot || {};
+  const tableName = order.table_name || (snap as Record<string, string>).table_name;
+  const customerName = (snap as Record<string, string>).customer_name;
+
+  let cardBg = 'bg-white/80 border-white/60 shadow-black/5';
+  let timerColor = 'text-neutral-700';
+
+  if (priority === 'yellow') {
+    cardBg = 'bg-amber-100/90 border-amber-300 shadow-amber-900/10 shadow-lg ring-1 ring-amber-400/50';
+    timerColor = 'text-amber-700';
+  } else if (priority === 'red') {
+    cardBg = 'bg-red-100/90 border-red-400 shadow-red-900/15 shadow-xl ring-2 ring-red-500/50';
+    timerColor = 'text-red-700';
+  }
+
+  return (
+    <div
+      className={`flex flex-col relative rounded-2xl overflow-hidden backdrop-blur-md border transition-all h-[460px] ${cardBg} ${priority === 'white' ? otCfg.bgClass : ''}`}
+      style={{ animation: '0.3s ease-out 0s 1 normal forwards running kds-pop' }}
+    >
+      {/* Subtle stripe across top */}
+      <div className={`absolute top-0 left-0 right-0 h-1.5 z-10 ${priority === 'white' ? 'bg-gradient-to-r from-white to-white/50' : priority === 'yellow' ? 'bg-amber-500' : 'bg-red-600'}`} />
+
+      {/* Card Header */}
+      <div className="px-5 pt-6 pb-3 flex justify-between items-start border-b border-black/5 shrink-0">
+        <div className="min-w-0 pr-2">
+          <span className="text-3xl font-black text-neutral-900 tracking-tight leading-none block truncate">#{order.id}</span>
+          <div className={`mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded border font-bold text-[10px] uppercase tracking-wider ${otCfg.pillColor}`}>
+            <OtIcon className="w-3 h-3 shrink-0" strokeWidth={2.5} />
+            <span className="truncate">{otCfg.label}</span>
+          </div>
+        </div>
+        <div className="text-right flex flex-col items-end shrink-0">
+          <span className="text-xs font-bold text-neutral-500 block">
+            {formatReceivedTime(order.created_at)}
+          </span>
+          {ks !== 'ready' && (
+            <div className={`mt-1 flex items-center justify-end gap-1.5 font-mono font-black text-xl tracking-tight ${timerColor}`}>
+              <Clock className="w-4 h-4" strokeWidth={3} />
+              <span>{formatElapsed(order.created_at, nowMs)}</span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Card Meta (Table / Customer) */}
+      {(tableName || customerName) && (
+        <div className="px-5 py-2.5 bg-black/5 flex flex-col gap-0.5 border-b border-black/5 shrink-0">
+          {tableName && <div className="text-[13px] text-neutral-600 flex gap-2"><span className="font-bold uppercase text-[11px] opacity-70 mt-0.5">Table</span> <strong className="text-neutral-900 font-black truncate">{tableName}</strong></div>}
+          {customerName && <div className="text-[13px] text-neutral-600 flex gap-2"><span className="font-bold uppercase text-[11px] opacity-70 mt-0.5">Cust</span> <strong className="text-neutral-900 font-black truncate">{customerName}</strong></div>}
+        </div>
+      )}
+
+      {/* Items list */}
+      <div className="flex-1 px-5 py-4 flex flex-col gap-3 overflow-y-auto custom-scrollbar">
+        {lines.map((line, idx) => (
+          <div key={idx} className="flex gap-3 items-start">
+            <div className="min-w-[36px] h-9 rounded-lg shrink-0 flex items-center justify-center bg-white border border-black/5 font-black text-[15px] text-neutral-900 shadow-sm">
+              {line.quantity}×
+            </div>
+            <div className="flex-1 min-w-0 pt-0.5">
+              <span className="block text-[15px] font-bold text-neutral-900 leading-tight">{line.product_title}</span>
+              {line.variant_sku_suffix && <span className="block text-[13px] font-semibold text-neutral-500 mt-0.5">{line.variant_sku_suffix}</span>}
+              {line.modifiers && line.modifiers.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  {line.modifiers.map((m, mi) => (
+                    <span key={mi} className="text-[11px] font-bold px-2 py-0.5 rounded flex items-center bg-white/60 border border-white text-neutral-700 shadow-sm">
+                      {m}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+
+        {/* Modifications Alert */}
+        {order.modifications && order.modifications.length > 0 && (
+          <div className="mt-3 rounded-xl bg-amber-500/15 border border-amber-500/30 backdrop-blur-md p-3 shadow-inner">
+            <div className="flex items-center gap-1.5 mb-2 font-bold text-amber-900 text-[11px] uppercase tracking-wider">
+              <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+              Modifications
+            </div>
+            <ul className="space-y-1.5">
+              {order.modifications.map((mod: any, i: number) => (
+                <li key={i} className="flex gap-2 items-start text-sm font-semibold text-amber-950 bg-white/40 border border-white/50 rounded-lg p-2.5 shadow-sm">
+                  <span className="shrink-0 text-amber-700 font-black mt-0.5">
+                    {mod.type === 'add' ? '+' : mod.type === 'remove' ? '-' : '•'}
+                  </span>
+                  <div className="flex flex-col leading-tight">
+                    <span>{mod.description}</span>
+                    <span className="text-[10px] text-amber-700/80 font-bold mt-0.5">
+                      {new Date(mod.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+
+      {/* Actions */}
+      <div className="px-5 pb-5 pt-2 shrink-0">
+        {ks === 'placed' && (
+          <button
+            disabled={isBusy}
+            onClick={() => onUpdateStatus(order.id, 'preparing')}
+            className="w-full py-3.5 rounded-xl font-black text-sm uppercase tracking-wider flex items-center justify-center gap-2 bg-brand-700 text-white hover:bg-brand-600 transition-all shadow-sm active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <Play className="w-4 h-4 fill-white" />
+            {isBusy ? 'Wait...' : 'Start Preparing'}
+          </button>
+        )}
+        {ks === 'preparing' && (
+          <button
+            disabled={isBusy}
+            onClick={() => onUpdateStatus(order.id, 'ready')}
+            className="w-full py-3.5 rounded-xl font-black text-sm uppercase tracking-wider flex items-center justify-center gap-2 bg-emerald-600 text-white hover:bg-emerald-500 transition-all shadow-sm active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed border border-emerald-500"
+          >
+            <CheckCircle2 className="w-4 h-4" />
+            {isBusy ? 'Wait...' : 'Order Ready'}
+          </button>
+        )}
+        {ks === 'ready' && (
+          <div className="w-full py-3.5 rounded-xl font-black text-sm uppercase tracking-wider flex items-center justify-center gap-2 bg-neutral-100 text-neutral-400 border border-neutral-200">
+            <CheckCircle2 className="w-4 h-4" />
+            Ready
+          </div>
+        )}
+      </div>
+    </div>
+  );
+});
+
 export default function KitchenKds() {
   const navigate = useNavigate();
   const [orders, setOrders] = useState<KdsOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<FilterTab>('placed');
-  const [, setTick] = useState(0);
-  const [clock, setClock] = useState(() => new Date());
   const [busyIds, setBusyIds] = useState<Set<number>>(new Set());
-  const prevMetricsRef = useRef({ newCount: 0, modsCount: 0 });
+  /** After first successful kitchen fetch, tracks sale IDs so we only ding on genuinely new KOTs. */
+  const priorKitchenSaleIdsRef = useRef<Set<number> | null>(null);
 
-  const userStr = localStorage.getItem('user');
-  const user = userStr ? JSON.parse(userStr) : null;
-  const nowMs = Date.now();
+  const terminalBranchId = getTerminalBranchIdString(parseUserFromStorage());
 
   useEffect(() => {
-    const id = setInterval(() => { setClock(new Date()); setTick(x => x + 1); }, 1000);
-    return () => clearInterval(id);
+    const primeAudio = () => {
+      const ctx = getKotAudioContext();
+      if (ctx?.state === 'suspended') void ctx.resume().catch(() => {});
+    };
+    window.addEventListener('pointerdown', primeAudio, { passive: true, once: true });
   }, []);
 
   const load = useCallback(async () => {
     setError(null);
     try {
-      const activeBranchId = localStorage.getItem('active_branch_id') || user?.branch_id || '1';
-      const url = `/orders/kitchen?branch_id=${activeBranchId}`;
+      const url = terminalBranchId ? `/orders/kitchen?branch_id=${terminalBranchId}` : '/orders/kitchen';
       const data = await get<{ orders?: KdsOrder[] }>(url);
       const fetched = data.orders ?? [];
-      const newCount = fetched.filter(o => o.kitchen_status === 'placed').length;
-      const modsCount = fetched.reduce((sum, o) => sum + (o.modifications?.length || 0), 0);
-      
-      const prev = prevMetricsRef.current;
-      if ((newCount > prev.newCount && prev.newCount >= 0) || (modsCount > prev.modsCount && prev.modsCount >= 0)) {
-        try { new Audio('data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=').play(); } catch {}
+      const currentIds = new Set(fetched.map(o => o.id));
+      const prior = priorKitchenSaleIdsRef.current;
+      if (prior === null) {
+        priorKitchenSaleIdsRef.current = currentIds;
+      } else {
+        let hasNewKot = false;
+        for (const id of currentIds) {
+          if (!prior.has(id)) {
+            hasNewKot = true;
+            break;
+          }
+        }
+        if (hasNewKot) {
+          playKotAlertSound();
+        }
+        priorKitchenSaleIdsRef.current = currentIds;
       }
-      prevMetricsRef.current = { newCount, modsCount };
       setOrders(fetched);
     } catch (e) {
       setError(getUserMessage(e));
     } finally {
       setLoading(false);
     }
-  }, [user?.branch_id, user?.role]);
+  }, [terminalBranchId]);
 
   useEffect(() => { void load(); }, [load]);
   useEffect(() => {
@@ -131,16 +410,19 @@ export default function KitchenKds() {
   }, [load]);
 
   const filtered = orders.filter(o => {
-    if (activeTab === 'placed') return o.kitchen_status === 'placed';
-    if (activeTab === 'preparing') return o.kitchen_status === 'preparing';
-    return o.kitchen_status === 'ready';
+    const ks = normalizeKitchenStatus(o.kitchen_status);
+    if (activeTab === 'placed') return ks === 'placed';
+    if (activeTab === 'preparing') return ks === 'preparing';
+    return ks === 'ready';
   });
   
   const tabCounts: Record<FilterTab, number> = {
-    placed: orders.filter(o => o.kitchen_status === 'placed').length,
-    preparing: orders.filter(o => o.kitchen_status === 'preparing').length,
-    ready: orders.filter(o => o.kitchen_status === 'ready').length
+    placed: orders.filter(o => normalizeKitchenStatus(o.kitchen_status) === 'placed').length,
+    preparing: orders.filter(o => normalizeKitchenStatus(o.kitchen_status) === 'preparing').length,
+    ready: orders.filter(o => normalizeKitchenStatus(o.kitchen_status) === 'ready').length
   };
+
+  const collectiveLines = useMemo(() => aggregateCollectiveLines(filtered), [filtered]);
 
   return (
     <div className="flex flex-col h-screen min-h-0 bg-neutral-50/50 text-neutral-900 font-sans overflow-hidden">
@@ -155,9 +437,7 @@ export default function KitchenKds() {
           </div>
           <div className="flex items-center gap-2 px-4 py-1.5 rounded-full bg-neutral-100/80 border border-neutral-200">
             <Clock className="w-4 h-4 text-neutral-500" />
-            <span className="font-mono font-bold text-neutral-700 text-sm">
-              {clock.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}
-            </span>
+            <HeaderClock />
           </div>
         </div>
         <div className="flex items-center gap-3">
@@ -202,6 +482,45 @@ export default function KitchenKds() {
 
       {error && <div className="m-6 mb-0 p-4 rounded-xl bg-red-50 border border-red-200 text-red-800 font-semibold shadow-sm">{error}</div>}
 
+      {/* Collective queue totals — sums items across all tickets in this tab */}
+      {!loading && filtered.length > 0 && collectiveLines.length > 0 && (
+        <div className="shrink-0 px-6 pt-4 pb-0">
+          <div className="rounded-2xl border border-white/60 bg-white/70 backdrop-blur-md shadow-sm px-5 py-4 ring-1 ring-black/5">
+            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 mb-3">
+              <span className="text-[11px] font-black uppercase tracking-widest text-neutral-500">Queue totals</span>
+              <span className="text-[11px] font-semibold text-neutral-400">
+                {activeTab === 'placed' && 'New queue'}
+                {activeTab === 'preparing' && 'In prep'}
+                {activeTab === 'ready' && 'Ready to serve'}
+              </span>
+            </div>
+            <div className="flex flex-wrap gap-2.5">
+              {collectiveLines.map((row, i) => (
+                <div
+                  key={`${row.product_title}-${row.variant_sku_suffix ?? ''}-${row.modifiers.join(',')}-${i}`}
+                  className="inline-flex items-center gap-2 rounded-xl border border-brand-200/80 bg-gradient-to-br from-brand-50/95 to-amber-50/40 px-3.5 py-2 shadow-sm"
+                >
+                  <span className="min-w-[2.25rem] text-center font-black text-lg tabular-nums text-brand-900 leading-none">
+                    {row.quantity}×
+                  </span>
+                  <span className="font-bold text-[15px] text-neutral-900 leading-tight">
+                    {row.product_title}
+                    {row.variant_sku_suffix ? (
+                      <span className="font-semibold text-neutral-500"> · {row.variant_sku_suffix}</span>
+                    ) : null}
+                  </span>
+                  {row.modifiers.length > 0 && (
+                    <span className="text-[11px] font-bold text-neutral-600 max-w-[min(100%,14rem)] truncate" title={row.modifiers.join(', ')}>
+                      + {row.modifiers.join(', ')}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Grid view */}
       <div className="flex-1 overflow-y-auto p-6 min-h-0">
         {loading && orders.length === 0 ? (
@@ -216,141 +535,14 @@ export default function KitchenKds() {
           </div>
         ) : (
           <div className="grid grid-cols-[repeat(auto-fill,minmax(340px,1fr))] gap-6 items-start">
-            {filtered.map(order => {
-              const priority = getPriorityColor(order.kitchen_status, order.created_at, nowMs);
-              const otCfg = getOrderTypeConfig(order.order_type);
-              const OtIcon = otCfg.icon;
-              const lines = order.items ?? [];
-              const isBusy = busyIds.has(order.id);
-              const snap = order.order_snapshot || {};
-              const tableName = order.table_name || (snap as Record<string, string>).table_name;
-              const customerName = (snap as Record<string, string>).customer_name;
-
-              // Compute dynamic card classes
-              // Default state builds upon glassmorphism, priority states use bold solid/translucent aesthetics.
-              let cardBg = 'bg-white/80 border-white/60 shadow-black/5';
-              let timerColor = 'text-neutral-700';
-
-              if (priority === 'yellow') {
-                cardBg = 'bg-amber-100/90 border-amber-300 shadow-amber-900/10 shadow-lg ring-1 ring-amber-400/50';
-                timerColor = 'text-amber-700';
-              } else if (priority === 'red') {
-                cardBg = 'bg-red-100/90 border-red-400 shadow-red-900/15 shadow-xl ring-2 ring-red-500/50';
-                timerColor = 'text-red-700';
-              }
-
-              return (
-                <div
-                  key={order.id}
-                  className={`flex flex-col relative rounded-2xl overflow-hidden backdrop-blur-md border transition-all ${cardBg} ${priority === 'white' ? otCfg.bgClass : ''}`}
-                  style={{ animation: '0.3s ease-out 0s 1 normal forwards running kds-pop' }}
-                >
-                  {/* Subtle stripe across top */}
-                  <div className={`absolute top-0 left-0 right-0 h-1.5 z-10 ${priority === 'white' ? 'bg-gradient-to-r from-white to-white/50' : priority === 'yellow' ? 'bg-amber-500' : 'bg-red-600'}`} />
-
-                  {/* Card Header */}
-                  <div className="px-5 pt-6 pb-3 flex justify-between items-start border-b border-black/5">
-                    <div>
-                      <span className="text-3xl font-black text-neutral-900 tracking-tight leading-none block">#{order.id}</span>
-                      <div className={`mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded border font-bold text-[10px] uppercase tracking-wider ${otCfg.pillColor}`}>
-                        <OtIcon className="w-3 h-3" strokeWidth={2.5} />
-                        <span>{otCfg.label}</span>
-                      </div>
-                    </div>
-                    <div className="text-right flex flex-col items-end">
-                      <span className="text-xs font-bold text-neutral-500 block">
-                        {formatReceivedTime(order.created_at)}
-                      </span>
-                      <div className={`mt-1 flex items-center justify-end gap-1.5 font-mono font-black text-xl tracking-tight ${timerColor}`}>
-                        <Clock className="w-4 h-4" strokeWidth={3} />
-                        <span>{formatElapsed(order.created_at, nowMs)}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Card Meta (Table / Customer) */}
-                  {(tableName || customerName) && (
-                    <div className="px-5 py-2.5 bg-black/5 flex flex-col gap-0.5 border-b border-black/5">
-                      {tableName && <div className="text-[13px] text-neutral-600 flex gap-2"><span className="font-bold uppercase text-[11px] opacity-70 mt-0.5">Table</span> <strong className="text-neutral-900 font-black">{tableName}</strong></div>}
-                      {customerName && <div className="text-[13px] text-neutral-600 flex gap-2"><span className="font-bold uppercase text-[11px] opacity-70 mt-0.5">Cust</span> <strong className="text-neutral-900 font-black">{customerName}</strong></div>}
-                    </div>
-                  )}
-
-                  {/* Items list */}
-                  <div className="flex-1 px-5 py-4 flex flex-col gap-3">
-                    {lines.map((line, idx) => (
-                      <div key={idx} className="flex gap-3 items-start">
-                        <div className="min-w-[36px] h-9 rounded-lg shrink-0 flex items-center justify-center bg-white border border-black/5 font-black text-[15px] text-neutral-900 shadow-sm">
-                          {line.quantity}×
-                        </div>
-                        <div className="flex-1 min-w-0 pt-0.5">
-                          <span className="block text-[15px] font-bold text-neutral-900 leading-tight">{line.product_title}</span>
-                          {line.variant_sku_suffix && <span className="block text-[13px] font-semibold text-neutral-500 mt-0.5">{line.variant_sku_suffix}</span>}
-                          {line.modifiers && line.modifiers.length > 0 && (
-                            <div className="flex flex-wrap gap-1.5 mt-2">
-                              {line.modifiers.map((m, mi) => (
-                                <span key={mi} className="text-[11px] font-bold px-2 py-0.5 rounded flex items-center bg-white/60 border border-white text-neutral-700 shadow-sm">
-                                  {m}
-                                </span>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-
-                    {/* Modifications Alert */}
-                    {order.modifications && order.modifications.length > 0 && (
-                      <div className="mt-3 rounded-xl bg-amber-500/15 border border-amber-500/30 backdrop-blur-md p-3 shadow-inner">
-                        <div className="flex items-center gap-1.5 mb-2 font-bold text-amber-900 text-[11px] uppercase tracking-wider">
-                          <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
-                          Modifications
-                        </div>
-                        <ul className="space-y-1.5">
-                          {order.modifications.map((mod: any, i: number) => (
-                            <li key={i} className="flex gap-2 items-start text-sm font-semibold text-amber-950 bg-white/40 border border-white/50 rounded-lg p-2.5 shadow-sm">
-                              <span className="shrink-0 text-amber-700 font-black mt-0.5">
-                                {mod.type === 'add' ? '+' : mod.type === 'remove' ? '-' : '•'}
-                              </span>
-                              <div className="flex flex-col leading-tight">
-                                <span>{mod.description}</span>
-                                <span className="text-[10px] text-amber-700/80 font-bold mt-0.5">
-                                  {new Date(mod.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                </span>
-                              </div>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Actions */}
-                  <div className="px-5 pb-5 pt-2">
-                    {order.kitchen_status === 'placed' && (
-                      <button
-                        disabled={isBusy}
-                        onClick={() => updateStatus(order.id, 'preparing')}
-                        className="w-full py-3.5 rounded-xl font-black text-sm uppercase tracking-wider flex items-center justify-center gap-2 bg-brand-700 text-white hover:bg-brand-600 transition-all shadow-sm active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        <Play className="w-4 h-4 fill-white" />
-                        {isBusy ? 'Wait...' : 'Start Preparing'}
-                      </button>
-                    )}
-                    {order.kitchen_status === 'preparing' && (
-                      <button
-                        disabled={isBusy}
-                        onClick={() => updateStatus(order.id, 'ready')}
-                        className="w-full py-3.5 rounded-xl font-black text-sm uppercase tracking-wider flex items-center justify-center gap-2 bg-emerald-600 text-white hover:bg-emerald-500 transition-all shadow-sm active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed border border-emerald-500"
-                      >
-                        <CheckCircle2 className="w-4 h-4" />
-                        {isBusy ? 'Wait...' : 'Order Ready'}
-                      </button>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
+            {filtered.map(order => (
+              <OrderCard
+                key={order.id}
+                order={order}
+                isBusy={busyIds.has(order.id)}
+                onUpdateStatus={updateStatus}
+              />
+            ))}
           </div>
         )}
       </div>
@@ -359,6 +551,19 @@ export default function KitchenKds() {
         @keyframes kds-pop {
           from { transform: scale(0.96); opacity: 0; }
           to { transform: scale(1); opacity: 1; }
+        }
+        .custom-scrollbar::-webkit-scrollbar {
+          width: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+          background: transparent;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+          background-color: rgba(0,0,0,0.1);
+          border-radius: 10px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+          background-color: rgba(0,0,0,0.2);
         }
       `}</style>
     </div>

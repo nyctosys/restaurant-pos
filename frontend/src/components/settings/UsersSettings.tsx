@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
-import { Plus, Trash2, Edit2, Loader2, X, Filter, Building2, Archive, ArchiveRestore } from 'lucide-react';
+import { Plus, Trash2, Edit2, Loader2, X, Building2, Archive, ArchiveRestore } from 'lucide-react';
 import { showToast } from '../Toast';
 import { showConfirm } from '../ConfirmDialog';
 import { get, post, put, patch, del, getUserMessage } from '../../api';
+import { getTerminalBranchId, parseUserFromStorage } from '../../utils/branchContext';
 
 type User = {
   id: number;
@@ -12,11 +13,6 @@ type User = {
   branch_name: string;
   created_at: string;
   archived_at?: string | null;
-};
-
-type Branch = {
-  id: number;
-  name: string;
 };
 
 export default function UsersSettings() {
@@ -29,33 +25,20 @@ export default function UsersSettings() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [role, setRole] = useState('cashier');
-  const [selectedBranchId, setSelectedBranchId] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
 
   // Filters & External Data
-  const [branches, setBranches] = useState<Branch[]>([]);
-  const [branchFilter, setBranchFilter] = useState<string>('all');
   const [includeArchived, setIncludeArchived] = useState(false);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
 
   useEffect(() => {
     const userStr = localStorage.getItem('user');
     if (userStr) setCurrentUser(JSON.parse(userStr));
-    fetchBranches();
   }, []);
 
   useEffect(() => {
     fetchUsers();
   }, [includeArchived]);
-
-  const fetchBranches = async () => {
-    try {
-      const data = await get<Branch[]>('/branches/');
-      setBranches(Array.isArray(data) ? data : []);
-    } catch {
-      setBranches([]);
-    }
-  };
 
   const fetchUsers = async () => {
     try {
@@ -76,15 +59,11 @@ export default function UsersSettings() {
       setUsername(user.username);
       setPassword(''); // Don't pre-fill password
       setRole(user.role);
-      setSelectedBranchId(user.branch_id);
     } else {
       setEditingUser(null);
       setUsername('');
       setPassword('');
       setRole('cashier');
-      // Default to global switcher's branch, or currentUser's branch
-      const activeBranchId = localStorage.getItem('active_branch_id');
-      setSelectedBranchId(activeBranchId ? parseInt(activeBranchId) : (currentUser?.branch_id || null));
     }
     setModalOpen(true);
   };
@@ -102,11 +81,13 @@ export default function UsersSettings() {
 
     setSaving(true);
     try {
-      const payload: { username: string; role: string; branch_id: number | null; password?: string } = {
+      const payload: { username: string; role: string; branch_id?: number | null; password?: string } = {
         username: username.trim(),
         role,
-        branch_id: selectedBranchId,
       };
+      if (!editingUser) {
+        payload.branch_id = getTerminalBranchId(parseUserFromStorage()) ?? currentUser?.branch_id ?? null;
+      }
       if (password) payload.password = password;
 
       if (editingUser) {
@@ -162,40 +143,22 @@ export default function UsersSettings() {
     }
   };
 
-  const filteredUsers = users.filter(user => {
-    if (branchFilter === 'all') return true;
-    if (branchFilter === 'global') return user.branch_id == null;
-    return user.branch_id === parseInt(branchFilter);
-  });
+  const terminalId = getTerminalBranchId(parseUserFromStorage());
+  const filteredUsers =
+    terminalId == null ? users : users.filter(u => u.branch_id === terminalId);
 
   return (
     <div className="max-w-6xl">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
         <div>
           <h3 className="text-2xl font-bold text-soot-900">User Management</h3>
-          <p className="text-sm text-soot-500 mt-1">Manage staff access, roles, and branch assignments.</p>
+          <p className="text-sm text-soot-500 mt-1">Manage staff access and roles.</p>
         </div>
         <div className="flex items-center gap-3 flex-wrap">
           <label className="flex items-center gap-2 cursor-pointer select-none text-sm font-medium text-soot-700">
             <input type="checkbox" checked={includeArchived} onChange={() => setIncludeArchived(v => !v)} className="rounded border-soot-300 text-brand-600 focus:ring-brand-500" />
             Include archived
           </label>
-          <div className="relative group">
-            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-soot-400">
-              <Filter className="w-4 h-4" />
-            </div>
-            <select
-              value={branchFilter}
-              onChange={(e) => setBranchFilter(e.target.value)}
-              className="pl-10 pr-4 py-2 glass-card text-sm font-medium text-soot-700 focus:ring-2 focus:ring-brand-500 focus:outline-none appearance-none cursor-pointer hover:border-soot-300 transition-colors min-w-[160px]"
-            >
-              <option value="all">All Branches</option>
-              <option value="global">Global Users</option>
-              {branches.map(b => (
-                <option key={b.id} value={b.id}>{b.name}</option>
-              ))}
-            </select>
-          </div>
           <button
             onClick={() => openModal()}
             className="flex items-center gap-2 bg-brand-700 text-white px-5 py-2.5 rounded-lg font-medium hover:bg-brand-600 transition-colors shadow-sm"
@@ -347,31 +310,11 @@ export default function UsersSettings() {
                       <option value="kitchen">Kitchen (display only)</option>
                     </select>
                     <p className="mt-1 text-xs text-soot-500">
-                      Kitchen users only see the kitchen display after login. Assign a branch so they see that branch&apos;s queue.
+                      Kitchen users only see the kitchen display after login — scoped to this terminal&apos;s branch.
                     </p>
                   </>
                 )}
               </div>
-
-              {/* Branch Assignment - Visible only to Owners */}
-              {currentUser?.role === 'owner' && (
-                <div>
-                  <label className="block text-sm font-medium text-soot-700 mb-1">Branch Assignment</label>
-                  <select
-                    value={selectedBranchId || 'global'}
-                    onChange={(e) => setSelectedBranchId(e.target.value === 'global' ? null : parseInt(e.target.value))}
-                    className="w-full px-4 py-2 glass-card focus:ring-2 focus:ring-brand-500 focus:outline-none"
-                  >
-                    <option value="global">Global (No Branch)</option>
-                    {branches.map(b => (
-                      <option key={b.id} value={b.id}>{b.name}</option>
-                    ))}
-                  </select>
-                  <p className="mt-1 text-xs text-soot-500">
-                    Assign this user to a specific branch or keep them universal.
-                  </p>
-                </div>
-              )}
             </div>
 
             <div className="px-5 lg:px-6 py-4 bg-white/20 border-t border-soot-100 flex flex-col-reverse sm:flex-row justify-end gap-2 sm:gap-3 rounded-b-2xl shrink-0">

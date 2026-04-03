@@ -1,8 +1,7 @@
-from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import CheckConstraint
 from datetime import datetime
 
-db = SQLAlchemy()
+from app.db import db
 
 class Branch(db.Model):
     __tablename__ = 'branches'
@@ -67,6 +66,11 @@ class Modifier(db.Model):
     price = db.Column(db.Numeric(12, 2), nullable=True, default=0)
     created_at = db.Column(db.DateTime(timezone=True), default=datetime.utcnow)
     archived_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    # Optional BOM link: when set, selling this modifier deducts ingredient at this branch.
+    ingredient_id = db.Column(db.Integer, db.ForeignKey('ingredients.id'), nullable=True)
+    depletion_quantity = db.Column(db.Float, nullable=True)
+
+    ingredient = db.relationship('Ingredient', foreign_keys=[ingredient_id], lazy=True)
 
 class ComboItem(db.Model):
     __tablename__ = 'combo_items'
@@ -74,6 +78,8 @@ class ComboItem(db.Model):
     combo_id = db.Column(db.Integer, db.ForeignKey('products.id'), nullable=False)
     product_id = db.Column(db.Integer, db.ForeignKey('products.id'), nullable=False)
     quantity = db.Column(db.Integer, nullable=False, default=1)
+    # When set, this line applies only to deal lines sold with this variant label (empty = base / all).
+    variant_key = db.Column(db.String(100), nullable=False, default='')
 
     combo = db.relationship('Product', foreign_keys=[combo_id], back_populates='combo_items')
     child_product = db.relationship('Product', foreign_keys=[product_id])
@@ -126,11 +132,13 @@ class Sale(db.Model):
     discount_id = db.Column(db.String(64), nullable=True)
     discount_snapshot = db.Column(db.JSON, nullable=True)  # { name, type, value } for receipt/audit
     delivery_charge = db.Column(db.Numeric(12, 2), nullable=True, default=0)
+    service_charge = db.Column(db.Numeric(12, 2), nullable=True, default=0)
     archived_at = db.Column(db.DateTime(timezone=True), nullable=True)
     order_type = db.Column(db.String(20), nullable=True)  # takeaway, dine_in, delivery
     order_snapshot = db.Column(db.JSON, nullable=True)  # dine_in: { table_name }; delivery: { customer_name, phone, address }
     # Kitchen display workflow (open dine-in / KOT tickets)
     kitchen_status = db.Column(db.String(20), nullable=True)  # placed | preparing | ready
+    kitchen_ready_at = db.Column(db.DateTime(timezone=True), nullable=True)  # set when status → ready; KDS drops after 24h
 
     items = db.relationship('SaleItem', backref='sale', lazy=True, cascade="all, delete-orphan")
 
@@ -238,6 +246,27 @@ class Ingredient(db.Model):
     stock_movements = db.relationship("StockMovement", back_populates="ingredient")
     purchase_order_items = db.relationship("PurchaseOrderItem", back_populates="ingredient")
     stock_take_items = db.relationship("StockTakeItem", back_populates="ingredient")
+    branch_stocks = db.relationship(
+        "IngredientBranchStock", back_populates="ingredient", cascade="all, delete-orphan"
+    )
+
+
+class IngredientBranchStock(db.Model):
+    """Per-branch on-hand quantity for a raw ingredient (restaurant inventory truth)."""
+
+    __tablename__ = "ingredient_branch_stocks"
+    __table_args__ = (
+        db.UniqueConstraint("ingredient_id", "branch_id", name="uq_ingredient_branch_stock"),
+        CheckConstraint("current_stock >= 0", name="ck_ingredient_branch_stock_nonneg"),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    ingredient_id = db.Column(db.Integer, db.ForeignKey("ingredients.id"), nullable=False)
+    branch_id = db.Column(db.Integer, db.ForeignKey("branches.id"), nullable=False)
+    current_stock = db.Column(db.Float, nullable=False, default=0.0)
+
+    ingredient = db.relationship("Ingredient", back_populates="branch_stocks")
+    branch = db.relationship("Branch", lazy=True)
 
 
 # --- Recipe / Bill of Materials ---
@@ -251,6 +280,8 @@ class RecipeItem(db.Model):
     quantity = db.Column(db.Float, nullable=False)   # Per 1 unit of product sold
     unit = db.Column(db.Enum(UnitOfMeasure), nullable=False)
     notes = db.Column(db.String(500))
+    # Empty = base BOM for the product; non-empty = BOM for that menu variant label (matches SaleItem.variant_sku_suffix)
+    variant_key = db.Column(db.String(100), nullable=False, default="")
     created_at = db.Column(db.DateTime(timezone=True), default=datetime.utcnow)
 
     product = db.relationship("Product", back_populates="recipe_items")
@@ -348,3 +379,41 @@ class StockTakeItem(db.Model):
 
     stock_take = db.relationship("StockTake", back_populates="items")
     ingredient = db.relationship("Ingredient", back_populates="stock_take_items")
+
+
+class SyncOutbox(db.Model):
+    """Durable outbox for branch-scoped mutations (future admin sync worker)."""
+
+    __tablename__ = "sync_outbox"
+
+    id = db.Column(db.Integer, primary_key=True)
+    branch_id = db.Column(db.Integer, db.ForeignKey("branches.id"), nullable=False)
+    entity_type = db.Column(db.String(64), nullable=False)
+    entity_id = db.Column(db.Integer, nullable=True)
+    event_type = db.Column(db.String(64), nullable=False)
+    payload = db.Column(db.JSON, nullable=False, default=dict)
+    occurred_at = db.Column(db.DateTime(timezone=True), default=datetime.utcnow)
+    sync_status = db.Column(db.String(32), nullable=False, default="pending")
+    attempt_count = db.Column(db.Integer, nullable=False, default=0)
+    last_error = db.Column(db.Text, nullable=True)
+    synced_at = db.Column(db.DateTime(timezone=True), nullable=True)
+
+
+class AppEventLog(db.Model):
+    """Persisted diagnostics for Settings → App Logs (server-side errors and events)."""
+
+    __tablename__ = "app_event_logs"
+
+    id = db.Column(db.Integer, primary_key=True)
+    created_at = db.Column(db.DateTime(timezone=True), default=datetime.utcnow, index=True)
+    severity = db.Column(db.String(16), nullable=False, default="error")  # info | warn | error
+    source = db.Column(db.String(32), nullable=False, default="backend")
+    category = db.Column(db.String(128), nullable=True)
+    message = db.Column(db.Text, nullable=False)
+    request_id = db.Column(db.String(128), nullable=True, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    branch_id = db.Column(db.Integer, db.ForeignKey("branches.id"), nullable=True)
+    route = db.Column(db.String(1024), nullable=True)
+    exc_type = db.Column(db.String(255), nullable=True)
+    stack_trace = db.Column(db.Text, nullable=True)
+    context_json = db.Column(db.JSON, nullable=True)

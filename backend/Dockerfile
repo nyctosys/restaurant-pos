@@ -22,6 +22,5 @@ COPY . .
 # Expose port
 EXPOSE 5000
 
-# Define entrypoint to run the Flask application with Eventlet via Gunicorn
-# Note: For Flask-SocketIO in production, gunicorn + eventlet is recommended
-CMD ["gunicorn", "--worker-class", "eventlet", "-w", "1", "--bind", "0.0.0.0:5000", "run:app"]
+# ASGI: FastAPI is the only HTTP surface (Flask is used only for Flask-SQLAlchemy context).
+CMD ["uvicorn", "app_fastapi.main:app", "--host", "0.0.0.0", "--port", "5000"]

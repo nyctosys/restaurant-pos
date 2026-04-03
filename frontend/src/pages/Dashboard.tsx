@@ -4,6 +4,7 @@ import { useScanner } from '../hooks/useScanner';
 import { ShoppingBag, Plus, Minus, Trash2, Search, Loader2, CreditCard, Banknote, Smartphone, LayoutGrid, List, X, Printer, Usb, Tag, ChevronDown, ChevronRight, CheckCircle, XCircle, Package, UtensilsCrossed, Truck, ClipboardList } from 'lucide-react';
 import { formatCurrency } from '../utils/formatCurrency';
 import { get, post, patch, getUserMessage } from '../api';
+import { getTerminalBranchIdString, parseUserFromStorage } from '../utils/branchContext';
 
 type Product = {
   id: number;
@@ -13,6 +14,7 @@ type Product = {
   section: string;
   variants: string[];
   image_url?: string;
+  is_deal?: boolean;
 };
 
 type CartItem = {
@@ -39,6 +41,9 @@ const ORDER_TYPE_OPTIONS: { id: OrderType; label: string; Icon: typeof Package }
 
 const PRODUCT_PLACEHOLDER_IMAGE = '/product-placeholder.svg';
 
+/** Default delivery fee when not specified (matches backend `DELIVERY_CHARGE`). */
+const DEFAULT_DELIVERY_CHARGE_PKR = 300;
+
 function getProductImageUrl(product: Product): string {
   return (product.image_url && product.image_url.trim()) ? product.image_url.trim() : PRODUCT_PLACEHOLDER_IMAGE;
 }
@@ -57,11 +62,18 @@ type OrderDetailResponse = {
   status?: string;
   kitchen_status?: string;
   order_type?: string | null;
-  order_snapshot?: { table_name?: string } | null;
+  delivery_charge?: number;
+  service_charge?: number;
+  order_snapshot?: {
+    table_name?: string;
+    customer_name?: string;
+    phone?: string;
+    address?: string;
+  } | null;
   items?: OrderDetailLine[];
 };
 
-type Modifier = { id: number; name: string; price: number | null };
+type Modifier = { id: number; name: string; price: number | null; ingredient_id?: number | null; depletion_quantity?: number | null };
 type ActiveSale = { id: number; order_snapshot?: { table_name?: string } | null; table_name?: string | null; status: string; order_type?: string | null };
 
 export default function Dashboard() {
@@ -72,13 +84,12 @@ export default function Dashboard() {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [activeCategory, setActiveCategory] = useState('All Items');
   const [searchQuery, setSearchQuery] = useState('');
-  const [layoutView, setLayoutView] = useState<'grid' | 'list'>('grid');
+  const [layoutView, setLayoutView] = useState<'grid' | 'list'>('list');
   const [products, setProducts] = useState<Product[]>([]);
   const [sections, setSections] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [isRightPanelOpen, setIsRightPanelOpen] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<'Card' | 'Cash' | 'Online Transfer'>('Card');
-  const [inventory, setInventory] = useState<Record<string, Record<string, number>>>({});
   const [notification, setNotification] = useState<{ type: 'ok' | 'error'; msg: string } | null>(null);
   const [taxEnabled, setTaxEnabled] = useState<boolean>(true);
   const [taxRatesByPaymentMethod, setTaxRatesByPaymentMethod] = useState<Record<string, number>>({ Cash: 0, Card: 8, 'Online Transfer': 8 });
@@ -99,29 +110,37 @@ export default function Dashboard() {
   const [deliveryCustomerName, setDeliveryCustomerName] = useState('');
   const [deliveryPhone, setDeliveryPhone] = useState('');
   const [deliveryAddress, setDeliveryAddress] = useState('');
-  /** Table / delivery fields — collapsed by default to save vertical space */
-  const [orderMetaSectionExpanded, setOrderMetaSectionExpanded] = useState(false);
+  const [serviceChargePkr, setServiceChargePkr] = useState(0);
+  const [deliveryChargePkr, setDeliveryChargePkr] = useState(DEFAULT_DELIVERY_CHARGE_PKR);
   const [checkoutSubmitting, setCheckoutSubmitting] = useState(false);
   /** Set when resuming an open dine-in sale from Active Dine-in → Modify */
   const [editingOpenSaleId, setEditingOpenSaleId] = useState<number | null>(null);
 
   const ACTIVE_COUPON_STORAGE_KEY = 'pos_active_coupon';
 
-  const userStr = localStorage.getItem('user');
-  const user = userStr ? JSON.parse(userStr) : null;
+  const terminalBranchKey = getTerminalBranchIdString(parseUserFromStorage());
 
   const fetchData = useCallback(async () => {
     setLoading(true);
-    const activeBranchId = localStorage.getItem('active_branch_id') ?? user?.branch_id ?? '1';
+    const activeBranchId = terminalBranchKey;
     try {
-      const [prodData, settingsData, invData, activeSalesData, modsData] = await Promise.all([
+      const [prodResult, settingsResult, activeSalesResult, modsResult] = await Promise.allSettled([
         get<{ products?: Product[] }>(`/menu-items/`),
         get<{ config?: Record<string, unknown> }>(`/settings/?branch_id=${activeBranchId}`),
-        get<{ inventory?: Record<string, Record<string, number>> }>(`/stock/?branch_id=${activeBranchId}`),
         get<{ sales?: ActiveSale[] }>(`/orders/active?branch_id=${activeBranchId}`),
         get<{ modifiers?: Modifier[] }>(`/modifiers/`),
       ]);
-      setProducts(prodData?.products ?? []);
+
+      if (prodResult.status !== 'fulfilled') {
+        throw prodResult.reason;
+      }
+
+      setProducts(prodResult.value?.products ?? []);
+
+      const settingsData = settingsResult.status === 'fulfilled' ? settingsResult.value : null;
+      const activeSalesData = activeSalesResult.status === 'fulfilled' ? activeSalesResult.value : null;
+      const modsData = modsResult.status === 'fulfilled' ? modsResult.value : null;
+
       const config = settingsData?.config ?? {};
       setSections(Array.isArray(config?.sections) ? (config.sections as string[]) : []);
       setTaxEnabled((config.tax_enabled as boolean) !== false);
@@ -135,9 +154,13 @@ export default function Dashboard() {
       setDiscounts(rawDiscounts.filter(d => !d.archived));
       const tablesList = config?.tables;
       setTables(Array.isArray(tablesList) ? (tablesList as string[]) : []);
-      setInventory(invData?.inventory ?? {});
       setActiveDineInSales(activeSalesData?.sales ?? []);
       setModifiers(modsData?.modifiers ?? []);
+
+      if (modsResult.status !== 'fulfilled') {
+        setNotification({ type: 'error', msg: 'Modifiers could not be loaded. Menu items are still available.' });
+        setTimeout(() => setNotification(null), 4000);
+      }
 
       const storedActive = localStorage.getItem(`${ACTIVE_COUPON_STORAGE_KEY}_${activeBranchId}`);
       if (storedActive) {
@@ -166,18 +189,15 @@ export default function Dashboard() {
     } finally {
       setLoading(false);
     }
-  }, [user?.branch_id]);
+  }, [terminalBranchKey]);
 
   useEffect(() => {
     setDineInTable(null);
     setDeliveryCustomerName('');
     setDeliveryPhone('');
     setDeliveryAddress('');
-    setOrderMetaSectionExpanded(false);
-    if (orderType !== 'dine_in') {
-      setEditingOpenSaleId(null);
-      editOrderLoadedRef.current = null;
-    }
+    setServiceChargePkr(0);
+    setDeliveryChargePkr(DEFAULT_DELIVERY_CHARGE_PKR);
   }, [orderType]);
 
   useEffect(() => {
@@ -199,7 +219,8 @@ export default function Dashboard() {
       try {
         const d = await get<OrderDetailResponse>(`/orders/${num}`);
         if (cancelled) return;
-        if (d.status !== 'open' || d.order_type !== 'dine_in') {
+        const ot = (d.order_type || '') as OrderType;
+        if (d.status !== 'open' || !['dine_in', 'takeaway', 'delivery'].includes(ot)) {
           setNotification({ type: 'error', msg: 'This order cannot be edited here.' });
           setTimeout(() => setNotification(null), 4000);
           setSearchParams({}, { replace: true });
@@ -207,16 +228,31 @@ export default function Dashboard() {
         }
         editOrderLoadedRef.current = num;
         setEditingOpenSaleId(num);
-        setOrderType('dine_in');
+        setOrderType(ot);
         const table = d.order_snapshot?.table_name;
         if (table) setDineInTable(table);
-        setOrderMetaSectionExpanded(true);
+        if (ot === 'delivery' && d.order_snapshot) {
+          setDeliveryCustomerName(d.order_snapshot.customer_name ?? '');
+          setDeliveryPhone(d.order_snapshot.phone ?? '');
+          setDeliveryAddress(d.order_snapshot.address ?? '');
+        } else {
+          setDeliveryCustomerName('');
+          setDeliveryPhone('');
+          setDeliveryAddress('');
+        }
+        setServiceChargePkr(typeof d.service_charge === 'number' ? d.service_charge : 0);
+        setDeliveryChargePkr(
+          typeof d.delivery_charge === 'number' ? d.delivery_charge : DEFAULT_DELIVERY_CHARGE_PKR
+        );
         setCart(
           (d.items || []).map(line => {
             const pid = line.product_id;
             const prod = products.find(p => p.id === pid);
-            const variant = line.variant_sku_suffix || '';
-            const uniqueId = variant ? `${pid}-${variant}` : `${pid}`;
+            const v = (line.variant_sku_suffix || '').trim();
+            const uniqueId = v ? `${pid}-${v}` : `${pid}`;
+            const mods = (line.modifiers || []).filter(
+              (m: { id?: number }) => m && typeof m.id === 'number' && m.id > 0
+            ) as { id: number; name: string; price: number | null }[];
             return {
               uniqueId,
               id: pid,
@@ -224,8 +260,8 @@ export default function Dashboard() {
               price: line.unit_price,
               quantity: line.quantity,
               image: prod ? getProductImageUrl(prod) : PRODUCT_PLACEHOLDER_IMAGE,
-              variant: variant || undefined,
-              modifiers: line.modifiers ?? [],
+              modifiers: mods,
+              ...(v ? { variant: v } : {}),
             };
           })
         );
@@ -269,8 +305,18 @@ export default function Dashboard() {
     checkPrinter();
   }, [fetchData]);
 
-  // Categories come from the sections defined in Settings
-  const categories = ['All Items', ...sections];
+  // Categories: settings sections, plus "Deals" when any deal product exists (section may be missing from settings JSON).
+  const categories = useMemo(() => {
+    const fromSettings = Array.isArray(sections) ? sections : [];
+    const hasDeals = products.some(
+      p => p.is_deal === true || (p.section || '').trim() === 'Deals'
+    );
+    const merged =
+      hasDeals && !fromSettings.some(s => (s || '').trim() === 'Deals')
+        ? [...fromSettings, 'Deals']
+        : fromSettings;
+    return ['All Items', ...merged];
+  }, [sections, products]);
 
   useEffect(() => {
     if (lastScannedBarcode) {
@@ -288,27 +334,25 @@ export default function Dashboard() {
   }, [lastScannedBarcode]);
 
   const handleProductClick = (product: Product) => {
-    const variant = product.variants && product.variants.length > 0 ? product.variants[0] : undefined;
-    const stockKey = variant || '';
-    const stock = inventory[product.id.toString()]?.[stockKey] || 0;
-    if (stock <= 0) return; // Prevent adding if out of stock
+    const defaultVariant = product.variants?.length ? product.variants[0] : undefined;
     handleAddToCart({
       id: product.id,
       title: product.title,
       price: product.base_price,
       image: getProductImageUrl(product),
-      variant,
+      variant: defaultVariant,
     });
   };
 
   const handleAddToCart = (product: { id: number; title: string; price: number; image: string; variant?: string }) => {
     setCart(prev => {
-      const uniqueId = product.variant ? `${product.id}-${product.variant}` : `${product.id}`;
+      const variant = product.variant?.trim() || undefined;
+      const uniqueId = variant ? `${product.id}-${variant}` : `${product.id}`;
       const existing = prev.find(i => i.uniqueId === uniqueId);
       if (existing) {
         return prev.map(i => i.uniqueId === uniqueId ? { ...i, quantity: i.quantity + 1 } : i);
       }
-      return [...prev, { ...product, uniqueId, quantity: 1, modifiers: [] }];
+      return [...prev, { ...product, uniqueId, quantity: 1, modifiers: [], variant }];
     });
   };
 
@@ -349,23 +393,27 @@ export default function Dashboard() {
   const submitCheckout = async (orderSnapshot: OrderSnapshotPayload | null) => {
     const items = cart.map(item => ({
       product_id: item.id,
-      variant_sku_suffix: item.variant || '',
       quantity: item.quantity,
       modifier_ids: (item.modifiers || []).map(m => m.id),
+      ...(item.variant ? { variant_sku_suffix: item.variant } : {}),
     }));
 
     setCheckoutSubmitting(true);
     try {
-      const activeBranchId = localStorage.getItem('active_branch_id') ?? user?.branch_id ?? '1';
       const body: Record<string, unknown> = {
         payment_method: paymentMethod,
         items,
-        branch_id: parseInt(activeBranchId, 10),
         discount: appliedDiscount ? { id: appliedDiscount.id, name: appliedDiscount.name, type: appliedDiscount.type, value: appliedDiscount.value } : null,
         order_type: orderType,
       };
       if (orderSnapshot) {
         body.order_snapshot = orderSnapshot;
+      }
+      if (orderType === 'dine_in') {
+        body.service_charge = Math.max(0, Number(serviceChargePkr) || 0);
+      }
+      if (orderType === 'delivery') {
+        body.delivery_charge = Math.max(0, Number(deliveryChargePkr) || 0);
       }
       const data = await post<{ sale_id?: number; total?: number; message?: string; print_success?: boolean }>('/orders/checkout', body);
       const saleId = data?.sale_id ?? 0;
@@ -385,7 +433,8 @@ export default function Dashboard() {
       setDeliveryCustomerName('');
       setDeliveryPhone('');
       setDeliveryAddress('');
-      setOrderMetaSectionExpanded(false);
+      setServiceChargePkr(0);
+      setDeliveryChargePkr(DEFAULT_DELIVERY_CHARGE_PKR);
     } catch (e) {
       setNotification({ type: 'error', msg: getUserMessage(e) });
       setTimeout(() => setNotification(null), 4000);
@@ -398,19 +447,26 @@ export default function Dashboard() {
     if (!editingOpenSaleId || cart.length === 0 || checkoutSubmitting) return;
     const items = cart.map(item => ({
       product_id: item.id,
-      variant_sku_suffix: item.variant || '',
       quantity: item.quantity,
       modifier_ids: (item.modifiers || []).map(m => m.id),
+      ...(item.variant ? { variant_sku_suffix: item.variant } : {}),
     }));
     setCheckoutSubmitting(true);
     try {
       await patch(`/orders/${editingOpenSaleId}/items`, { items });
-      const data = await post<{ sale_id?: number; print_success?: boolean }>(`/orders/${editingOpenSaleId}/finalize`, {
+      const finalizeBody: Record<string, unknown> = {
         payment_method: paymentMethod,
         discount: appliedDiscount
           ? { id: appliedDiscount.id, name: appliedDiscount.name, type: appliedDiscount.type, value: appliedDiscount.value }
           : null,
-      });
+      };
+      if (orderType === 'dine_in') {
+        finalizeBody.service_charge = Math.max(0, Number(serviceChargePkr) || 0);
+      }
+      if (orderType === 'delivery') {
+        finalizeBody.delivery_charge = Math.max(0, Number(deliveryChargePkr) || 0);
+      }
+      const data = await post<{ sale_id?: number; print_success?: boolean }>(`/orders/${editingOpenSaleId}/finalize`, finalizeBody);
       const saleId = data?.sale_id ?? editingOpenSaleId;
       if (data?.print_success === false) {
         setNotification({ type: 'error', msg: `Payment OK, but Printer Error — Order #ORD-${String(saleId).padStart(4, '0')}` });
@@ -428,7 +484,8 @@ export default function Dashboard() {
       setDeliveryCustomerName('');
       setDeliveryPhone('');
       setDeliveryAddress('');
-      setOrderMetaSectionExpanded(false);
+      setServiceChargePkr(0);
+      setDeliveryChargePkr(DEFAULT_DELIVERY_CHARGE_PKR);
     } catch (e) {
       setNotification({ type: 'error', msg: getUserMessage(e) });
       setTimeout(() => setNotification(null), 4000);
@@ -441,9 +498,9 @@ export default function Dashboard() {
     if (!editingOpenSaleId || checkoutSubmitting || cart.length === 0) return;
     const items = cart.map(item => ({
       product_id: item.id,
-      variant_sku_suffix: item.variant || '',
       quantity: item.quantity,
       modifier_ids: (item.modifiers || []).map(m => m.id),
+      ...(item.variant ? { variant_sku_suffix: item.variant } : {}),
     }));
     setCheckoutSubmitting(true);
     try {
@@ -455,7 +512,6 @@ export default function Dashboard() {
       editOrderLoadedRef.current = null;
       fetchData();
       setDineInTable(null);
-      setOrderMetaSectionExpanded(false);
     } catch (e) {
       setNotification({ type: 'error', msg: getUserMessage(e) });
       setTimeout(() => setNotification(null), 4000);
@@ -482,24 +538,24 @@ export default function Dashboard() {
       setTimeout(() => setNotification(null), 4000);
       return;
     }
-    void submitDineInKot();
+    void submitDineInOpenKot();
   };
 
-  const submitDineInKot = async () => {
+  /** Dine-in only: open tab + KOT to kitchen (payment later). */
+  const submitDineInOpenKot = async () => {
     const items = cart.map(item => ({
       product_id: item.id,
-      variant_sku_suffix: item.variant || '',
       quantity: item.quantity,
       modifier_ids: (item.modifiers || []).map(m => m.id),
+      ...(item.variant ? { variant_sku_suffix: item.variant } : {}),
     }));
     setCheckoutSubmitting(true);
     try {
-      const activeBranchId = localStorage.getItem('active_branch_id') ?? user?.branch_id ?? '1';
-      const data = await post<{ sale_id?: number; print_success?: boolean; message?: string }>('/orders/dine-in/kot', {
+      const order_snapshot = dineInTable ? { table_name: dineInTable } : undefined;
+      const data = await post<{ sale_id?: number; print_success?: boolean; message?: string }>('/orders/kot', {
         items,
-        branch_id: parseInt(activeBranchId, 10),
         order_type: 'dine_in',
-        order_snapshot: { table_name: dineInTable },
+        ...(order_snapshot ? { order_snapshot } : {}),
       });
       const saleId = data?.sale_id ?? 0;
       if (data?.print_success === false) {
@@ -508,14 +564,99 @@ export default function Dashboard() {
           msg: `KOT saved (#${saleId}), but the kitchen printer reported an error.`,
         });
       } else {
-        setNotification({ type: 'ok', msg: `Kitchen order sent — tab #${saleId} (table ${dineInTable})` });
+        setNotification({
+          type: 'ok',
+          msg: `Kitchen order sent — tab #${saleId}${dineInTable ? ` (table ${dineInTable})` : ''}`,
+        });
       }
       setTimeout(() => setNotification(null), 4000);
       setCart([]);
       setOrderId(`#ORD-${String(saleId + 1).padStart(4, '0')}`);
       fetchData();
       setDineInTable(null);
-      setOrderMetaSectionExpanded(false);
+    } catch (e) {
+      setNotification({ type: 'error', msg: getUserMessage(e) });
+      setTimeout(() => setNotification(null), 4000);
+    } finally {
+      setCheckoutSubmitting(false);
+    }
+  };
+
+  /** Takeaway / delivery: KOT to kitchen + payment + receipt in one step. */
+  const submitTakeawayDeliveryKotAndPay = async () => {
+    if (cart.length === 0 || checkoutSubmitting || editingOpenSaleId) return;
+    if (orderType === 'delivery') {
+      const name = deliveryCustomerName.trim();
+      const phone = deliveryPhone.trim();
+      const address = deliveryAddress.trim();
+      if (!name || !phone || !address) {
+        setNotification({
+          type: 'error',
+          msg: 'Enter customer name, phone, and delivery address to complete this order.',
+        });
+        setTimeout(() => setNotification(null), 5000);
+        return;
+      }
+    }
+    const items = cart.map(item => ({
+      product_id: item.id,
+      quantity: item.quantity,
+      modifier_ids: (item.modifiers || []).map(m => m.id),
+      ...(item.variant ? { variant_sku_suffix: item.variant } : {}),
+    }));
+    setCheckoutSubmitting(true);
+    try {
+      let order_snapshot: Record<string, string> | undefined;
+      if (orderType === 'delivery') {
+        order_snapshot = {
+          customer_name: deliveryCustomerName.trim(),
+          phone: deliveryPhone.trim(),
+          address: deliveryAddress.trim(),
+        };
+      }
+      const kotData = await post<{ sale_id?: number; print_success?: boolean; message?: string }>('/orders/kot', {
+        items,
+        order_type: orderType,
+        ...(order_snapshot ? { order_snapshot } : {}),
+      });
+      const saleId = kotData?.sale_id ?? 0;
+      if (!saleId) {
+        setNotification({ type: 'error', msg: 'Could not create order.' });
+        setTimeout(() => setNotification(null), 4000);
+        return;
+      }
+      const finBody: Record<string, unknown> = {
+        payment_method: paymentMethod,
+        discount: appliedDiscount
+          ? { id: appliedDiscount.id, name: appliedDiscount.name, type: appliedDiscount.type, value: appliedDiscount.value }
+          : null,
+      };
+      if (orderType === 'delivery') {
+        finBody.delivery_charge = Math.max(0, Number(deliveryChargePkr) || 0);
+      }
+      const finData = await post<{ sale_id?: number; print_success?: boolean }>(`/orders/${saleId}/finalize`, finBody);
+      const kotPrintOk = kotData?.print_success !== false;
+      const finPrintOk = finData?.print_success !== false;
+      if (!kotPrintOk || !finPrintOk) {
+        setNotification({
+          type: 'error',
+          msg: `Order #${saleId} completed, but a printer reported an error (kitchen or receipt).`,
+        });
+      } else {
+        setNotification({
+          type: 'ok',
+          msg: `Paid & sent to kitchen — Order #${saleId}`,
+        });
+      }
+      setTimeout(() => setNotification(null), 4000);
+      setCart([]);
+      setOrderId(`#ORD-${String(saleId + 1).padStart(4, '0')}`);
+      setAppliedDiscount(activeCoupon);
+      fetchData();
+      setDeliveryCustomerName('');
+      setDeliveryPhone('');
+      setDeliveryAddress('');
+      setDeliveryChargePkr(DEFAULT_DELIVERY_CHARGE_PKR);
     } catch (e) {
       setNotification({ type: 'error', msg: getUserMessage(e) });
       setTimeout(() => setNotification(null), 4000);
@@ -585,7 +726,7 @@ export default function Dashboard() {
     setCouponDropdownOpen(false);
   };
 
-  const getActiveBranchId = () => localStorage.getItem('active_branch_id') ?? user?.branch_id ?? '1';
+  const getActiveBranchId = () => terminalBranchKey;
 
   const activateCouponForAllOrders = () => {
     if (!appliedDiscount) return;
@@ -616,10 +757,21 @@ export default function Dashboard() {
   const taxPct = taxEnabled ? (taxRatesByPaymentMethod[paymentMethod] ?? 0) : 0;
   const taxRate = taxPct / 100;
   const tax = discountedSubtotal * taxRate;
-  const total = discountedSubtotal + tax;
+  const orderFeePkr =
+    orderType === 'delivery'
+      ? Math.max(0, Number(deliveryChargePkr) || 0)
+      : orderType === 'dine_in'
+        ? Math.max(0, Number(serviceChargePkr) || 0)
+        : 0;
+  const total = discountedSubtotal + tax + orderFeePkr;
 
   const filteredProducts = products.filter(p => {
-    const matchesCategory = activeCategory === 'All Items' || p.section === activeCategory;
+    const sec = (p.section || '').trim();
+    const isDealProduct = p.is_deal === true || sec === 'Deals';
+    const matchesCategory =
+      activeCategory === 'All Items' ||
+      sec === activeCategory ||
+      (activeCategory === 'Deals' && isDealProduct);
     const matchesSearch = p.title.toLowerCase().includes(searchQuery.toLowerCase());
     return matchesCategory && matchesSearch;
   });
@@ -705,8 +857,8 @@ export default function Dashboard() {
                 
                 {/* Main Item Row */}
                 <div className="flex items-start gap-3">
-                  <div className="w-12 h-12 rounded-lg bg-white/20 flex items-center justify-center overflow-hidden shrink-0 border border-white/30">
-                    <img src={item.image} alt="" className="w-full h-full object-cover" />
+                  <div className="w-12 h-12 rounded-lg bg-white/20 flex items-center justify-center overflow-hidden shrink-0 border border-white/30 p-0.5">
+                    <img src={item.image} alt="" className="h-full w-full object-contain object-center" />
                   </div>
                   
                   <div className="flex-1 min-w-0 flex flex-col">
@@ -717,18 +869,30 @@ export default function Dashboard() {
                       </button>
                     </div>
 
-                    {/* Inline Variant Dropdown */}
+                    {/* Variant selector — compact but still reads as a control */}
                     {hasVariants ? (
-                      <div className="mt-1">
-                        <select
-                          value={item.variant || ''}
-                          onChange={(e) => handleChangeVariant(item.uniqueId, e.target.value)}
-                          className="text-xs font-bold text-neutral-700 bg-white/80 border border-white/60 rounded px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-brand-500 max-w-full shadow-sm"
-                        >
-                          {(baseProd?.variants || []).map((v: string) => (
-                            <option key={v} value={v}>{v}</option>
-                          ))}
-                        </select>
+                      <div className="mt-1.5 w-full max-w-[min(100%,8.5rem)]">
+                        <label htmlFor={`cart-variant-${item.uniqueId.replace(/\W/g, '-')}`} className="sr-only">
+                          Variant
+                        </label>
+                        <div className="relative">
+                          <select
+                            id={`cart-variant-${item.uniqueId.replace(/\W/g, '-')}`}
+                            value={item.variant || ''}
+                            onChange={(e) => handleChangeVariant(item.uniqueId, e.target.value)}
+                            aria-label={`Variant for ${item.title}`}
+                            className="w-full min-h-[32px] appearance-none py-1 pl-2 pr-8 text-xs font-bold text-neutral-800 bg-white border border-brand-300/80 rounded-lg shadow-sm hover:border-brand-400 hover:bg-brand-50/30 focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500 transition-colors cursor-pointer"
+                          >
+                            {(baseProd?.variants || []).map((v: string) => (
+                              <option key={v} value={v}>{v}</option>
+                            ))}
+                          </select>
+                          <ChevronDown
+                            className="pointer-events-none absolute right-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-brand-600/90"
+                            strokeWidth={2.25}
+                            aria-hidden
+                          />
+                        </div>
                       </div>
                     ) : item.variant ? (
                       <span className="inline-block mt-0.5 px-1.5 py-0.5 bg-neutral-200/80 text-neutral-700 text-[10px] font-bold rounded">
@@ -832,6 +996,18 @@ export default function Dashboard() {
                 <span className="text-red-500 tabular-nums">-{formatCurrency(discountAmount)}</span>
               </div>
             )}
+            {orderType === 'dine_in' && orderFeePkr > 0 && (
+              <div className="flex justify-between items-center text-[13px] font-bold text-neutral-500">
+                <span>Service charge</span>
+                <span className="text-neutral-800 tabular-nums">{formatCurrency(orderFeePkr)}</span>
+              </div>
+            )}
+            {orderType === 'delivery' && orderFeePkr > 0 && (
+              <div className="flex justify-between items-center text-[13px] font-bold text-neutral-500">
+                <span>Delivery charge</span>
+                <span className="text-neutral-800 tabular-nums">{formatCurrency(orderFeePkr)}</span>
+              </div>
+            )}
             {taxEnabled && (
               <div className="flex justify-between items-center text-[13px] font-bold text-neutral-500">
                 <span>Tax</span>
@@ -902,25 +1078,21 @@ export default function Dashboard() {
           ) : (
             <div className={layoutView === 'grid' ? "grid grid-cols-1 sm:grid-cols-2 md:grid-cols-[repeat(auto-fill,minmax(220px,1fr))] tap-highlight-transparent gap-5 lg:gap-6 pb-20 lg:pb-6 w-full" : "flex flex-col gap-4 pb-20 lg:pb-6 w-full"}>
               {filteredProducts.map(product => {
-                const stockQty = (!product.variants || product.variants.length === 0) ? (inventory[product.id.toString()]?.[''] || 0) : 1; 
-                const isOutOfStock = stockQty <= 0;
                 return (
                 <button
                   key={product.id}
                   onClick={() => handleProductClick(product)}
-                  className={`glass-card bg-white/80 overflow-hidden w-full transition-all duration-200 group text-left border border-white/50 shadow-sm ${layoutView === 'grid' ? 'flex flex-col rounded-xl min-h-[220px]' : 'flex items-center p-4 lg:p-5 rounded-xl'} ${isOutOfStock ? 'opacity-50 grayscale cursor-not-allowed border-neutral-200/50' : 'hover:shadow-md hover:border-brand-300 hover:bg-white hover:scale-[1.02] active:scale-[0.98]'}`}
+                  className={`glass-card bg-white/80 overflow-hidden w-full transition-all duration-200 group text-left border border-white/50 shadow-sm ${layoutView === 'grid' ? 'flex flex-col rounded-xl min-h-[220px]' : 'flex items-center p-4 lg:p-5 rounded-xl'} hover:shadow-md hover:border-brand-300 hover:bg-white hover:scale-[1.02] active:scale-[0.98]`}
                 >
-                  <div className={`${layoutView === 'grid' ? 'w-full h-36 shrink-0' : 'w-24 h-24 shrink-0 rounded-lg'} flex items-center justify-center overflow-hidden transition-colors relative ${isOutOfStock ? 'bg-neutral-100/50' : 'bg-gradient-to-br from-brand-50/40 to-brand-100/40 group-hover:from-brand-100/50 group-hover:to-brand-200/50'}`}>
-                    <img src={getProductImageUrl(product)} alt="" className="w-full h-full object-cover" />
+                  <div className={`${layoutView === 'grid' ? 'w-full h-36 shrink-0 p-2' : 'w-24 h-24 shrink-0 rounded-lg p-1'} flex items-center justify-center overflow-hidden transition-colors relative bg-gradient-to-br from-brand-50/40 to-brand-100/40 group-hover:from-brand-100/50 group-hover:to-brand-200/50`}>
+                    <img src={getProductImageUrl(product)} alt="" className="h-full w-full object-contain object-center" />
                     <div className="absolute inset-0 bg-brand-900/0 group-hover:bg-brand-900/5 transition-colors duration-300" />
                   </div>
                   <div className={layoutView === 'grid' ? "p-4 flex-1 flex flex-col justify-between gap-1 w-full" : "ml-5 flex-1 min-w-0 flex flex-col justify-center gap-1"}>
                     <p className="text-lg font-semibold text-neutral-800 leading-tight line-clamp-2">{product.title}</p>
                     <div className="flex items-center justify-between gap-2 mt-auto pt-2">
                       <p className="text-xl font-bold text-brand-700 whitespace-nowrap">{formatCurrency(product.base_price)}</p>
-                      {isOutOfStock ? (
-                         <span className="text-[10px] font-bold text-red-600 bg-red-100 px-2 py-0.5 rounded border border-red-200 uppercase whitespace-nowrap shadow-sm">Out of Stock</span>
-                      ) : product.section ? (
+                      {product.section ? (
                          <span className="text-[10px] font-bold text-brand-700 bg-brand-100 px-2 py-0.5 rounded border border-brand-200 truncate min-w-0 shadow-sm">{product.section}</span>
                       ) : null}
                     </div>
@@ -956,7 +1128,7 @@ export default function Dashboard() {
         <div className="flex-1 overflow-auto p-4 lg:p-5 space-y-4 lg:space-y-6">
           
           {/* SECTION 1: ORDER INFO */}
-          <div className="glass-card p-4 rounded-xl shadow-sm border border-white/60 bg-white/70">
+          <div className="glass-card !overflow-visible p-4 rounded-xl shadow-sm border border-white/60 bg-white/70">
             <h3 className="text-sm font-black text-neutral-800 mb-3 tracking-wide">ORDER INFO</h3>
             
             {/* Order Type Buttons */}
@@ -969,7 +1141,11 @@ export default function Dashboard() {
                     type="button"
                     role="radio"
                     aria-checked={selected}
-                    onClick={() => setOrderType(id)}
+                    onClick={() => {
+                      setEditingOpenSaleId(null);
+                      editOrderLoadedRef.current = null;
+                      setOrderType(id);
+                    }}
                     className={`min-h-[48px] py-2 px-1 flex flex-col items-center justify-center gap-1 rounded-xl border-2 transition-all active:scale-95 ${
                       selected
                         ? 'bg-brand-50 border-brand-500 text-brand-800 shadow-md shadow-brand-500/10'
@@ -983,41 +1159,21 @@ export default function Dashboard() {
               })}
             </div>
 
-            {/* Table / Delivery Selection conditional */}
+            {/* Table / delivery — always visible for dine-in and delivery */}
             {(orderType === 'dine_in' || orderType === 'delivery') && (
               <div className="mt-4 pt-4 border-t border-black/10">
-                <button
-                  type="button"
-                  onClick={() => setOrderMetaSectionExpanded(prev => !prev)}
-                  className="w-full flex items-center justify-between gap-2 py-1.5 px-2 -mx-2 rounded-lg hover:bg-white/60 text-left transition-colors"
-                >
-                  <span className="min-w-0 flex-1">
-                    <span className="block text-sm font-bold text-neutral-800">
-                      {orderType === 'dine_in' ? 'Table Selection' : 'Delivery Details'}
-                    </span>
-                    {!orderMetaSectionExpanded && (
-                      <span className="block text-[11px] font-bold text-neutral-500 truncate mt-0.5 opacity-80">
-                        {orderType === 'dine_in'
-                          ? dineInTable
-                            ? `Selected · ${dineInTable}`
-                            : 'Tap to choose table'
-                          : deliveryCustomerName.trim() || deliveryPhone.trim() || deliveryAddress.trim()
-                            ? [deliveryCustomerName.trim(), deliveryPhone.trim()].filter(Boolean).join(' · ') || '…'
-                            : 'Tap to enter name, phone & address'}
-                      </span>
-                    )}
-                  </span>
-                  {orderMetaSectionExpanded ? <ChevronDown className="w-4.5 h-4.5 shrink-0 text-neutral-500 bg-white/50 rounded-full p-0.5" /> : <ChevronRight className="w-4.5 h-4.5 shrink-0 text-neutral-500 bg-white/50 rounded-full p-0.5" />}
-                </button>
+                <h4 className="text-sm font-bold text-neutral-800 mb-3">
+                  {orderType === 'dine_in' ? 'Table Selection' : 'Delivery Details'}
+                </h4>
 
-                {orderMetaSectionExpanded && orderType === 'dine_in' && (
-                  <div className="mt-3">
+                {orderType === 'dine_in' && (
+                  <div>
                     {tables.length === 0 ? (
                       <p className="text-xs text-amber-800 bg-amber-50/90 border border-amber-200/80 rounded-lg px-3 py-2 font-medium">
                         No tables registered. Add names under Settings → Tables.
                       </p>
                     ) : (
-                      <div className="grid grid-cols-4 gap-2 max-h-[min(12rem,30vh)] overflow-y-auto pr-1">
+                      <div className="grid grid-cols-4 gap-2 max-h-[min(12rem,30vh)] overflow-y-auto p-2 pr-1">
                         {freeTables.map(t => {
                           const selected = dineInTable === t;
                           return (
@@ -1037,14 +1193,40 @@ export default function Dashboard() {
                         })}
                       </div>
                     )}
+                    <label className="mt-4 block">
+                      <span className="text-[11px] font-bold text-neutral-600 uppercase tracking-wide">Service charge (PKR)</span>
+                      <input
+                        type="number"
+                        inputMode="decimal"
+                        min={0}
+                        step={1}
+                        value={serviceChargePkr || ''}
+                        onChange={e => setServiceChargePkr(e.target.value === '' ? 0 : Number(e.target.value))}
+                        className="mt-1.5 w-full px-3.5 py-3 rounded-xl border border-white/80 bg-white text-sm font-semibold text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-brand-500 transition-all shadow-sm"
+                        placeholder="0"
+                      />
+                    </label>
                   </div>
                 )}
 
-                {orderMetaSectionExpanded && orderType === 'delivery' && (
-                  <div className="mt-3 space-y-2.5">
+                {orderType === 'delivery' && (
+                  <div className="space-y-2.5">
                     <input type="text" value={deliveryCustomerName} onChange={e => setDeliveryCustomerName(e.target.value)} placeholder="Customer name" className="w-full px-3.5 py-3 rounded-xl border border-white/80 bg-white text-sm font-semibold text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-brand-500 transition-all shadow-sm" />
                     <input type="tel" value={deliveryPhone} onChange={e => setDeliveryPhone(e.target.value)} placeholder="Phone number" className="w-full px-3.5 py-3 rounded-xl border border-white/80 bg-white text-sm font-semibold text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-brand-500 transition-all shadow-sm" />
                     <textarea value={deliveryAddress} onChange={e => setDeliveryAddress(e.target.value)} placeholder="Delivery address" rows={2} className="w-full px-3.5 py-3 rounded-xl border border-white/80 bg-white text-sm font-semibold text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-brand-500 resize-y min-h-[80px] transition-all shadow-sm" />
+                    <label className="block">
+                      <span className="text-[11px] font-bold text-neutral-600 uppercase tracking-wide">Delivery charge (PKR)</span>
+                      <input
+                        type="number"
+                        inputMode="decimal"
+                        min={0}
+                        step={1}
+                        value={deliveryChargePkr || ''}
+                        onChange={e => setDeliveryChargePkr(e.target.value === '' ? 0 : Number(e.target.value))}
+                        className="mt-1.5 w-full px-3.5 py-3 rounded-xl border border-white/80 bg-white text-sm font-semibold text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-brand-500 transition-all shadow-sm"
+                        placeholder={String(DEFAULT_DELIVERY_CHARGE_PKR)}
+                      />
+                    </label>
                   </div>
                 )}
               </div>
@@ -1125,13 +1307,26 @@ export default function Dashboard() {
         <div className="p-4 lg:p-5 border-t border-black/10 bg-white/70 backdrop-blur-2xl shrink-0 shadow-[0_-4px_24px_-12px_rgba(0,0,0,0.1)]">
           {orderType === 'dine_in' && !editingOpenSaleId ? (
             <div className="grid grid-cols-1 gap-2.5">
-              <button onClick={handleGenerateKot} disabled={cart.length === 0 || checkoutSubmitting} className="w-full bg-white border-2 border-brand-600 text-brand-800 hover:bg-brand-50 disabled:bg-neutral-200 disabled:text-neutral-400 disabled:border-neutral-200 disabled:cursor-not-allowed py-4 rounded-xl font-bold text-[15px] transition-all active:scale-[0.98] flex items-center justify-center gap-2 shadow-sm">
+              <button type="button" onClick={handleGenerateKot} disabled={cart.length === 0 || checkoutSubmitting} className="w-full bg-white border-2 border-brand-600 text-brand-800 hover:bg-brand-50 disabled:bg-neutral-200 disabled:text-neutral-400 disabled:border-neutral-200 disabled:cursor-not-allowed py-4 rounded-xl font-bold text-[15px] transition-all active:scale-[0.98] flex items-center justify-center gap-2 shadow-sm">
                 <ClipboardList className="w-5 h-5" /> {checkoutSubmitting ? 'Working…' : 'Generate KOT'}
               </button>
-              <button onClick={handleCheckout} disabled={cart.length === 0 || checkoutSubmitting} className="w-full bg-brand-600 hover:bg-brand-700 disabled:bg-neutral-200 disabled:text-neutral-400 disabled:cursor-not-allowed text-white py-4 rounded-xl font-bold text-[15px] shadow-lg shadow-brand-900/20 transition-all active:scale-[0.98] flex items-center justify-center gap-2">
+              <button type="button" onClick={handleCheckout} disabled={cart.length === 0 || checkoutSubmitting} className="w-full bg-brand-600 hover:bg-brand-700 disabled:bg-neutral-200 disabled:text-neutral-400 disabled:cursor-not-allowed text-white py-4 rounded-xl font-bold text-[15px] shadow-lg shadow-brand-900/20 transition-all active:scale-[0.98] flex items-center justify-center gap-2">
                 <ShoppingBag className="w-5 h-5" /> {checkoutSubmitting ? 'Processing…' : 'Proceed payment'}
               </button>
             </div>
+          ) : (orderType === 'takeaway' || orderType === 'delivery') && !editingOpenSaleId ? (
+            <button
+              type="button"
+              onClick={() => void submitTakeawayDeliveryKotAndPay()}
+              disabled={cart.length === 0 || checkoutSubmitting}
+              className="w-full bg-brand-600 hover:bg-brand-700 disabled:bg-neutral-200 disabled:text-neutral-400 disabled:cursor-not-allowed text-white py-4 rounded-2xl font-black text-lg shadow-lg shadow-brand-900/20 transition-all active:scale-[0.98] flex items-center justify-center gap-2.5 tracking-wide"
+            >
+              <span className="flex items-center gap-1.5">
+                <ClipboardList className="w-5 h-5" />
+                <ShoppingBag className="w-5 h-5" />
+              </span>
+              {checkoutSubmitting ? 'Processing…' : 'Pay & send to kitchen'}
+            </button>
           ) : editingOpenSaleId ? (
             <div className="grid grid-cols-1 gap-2.5">
               <button type="button" onClick={submitUpdateOrder} disabled={cart.length === 0 || checkoutSubmitting} className="w-full bg-white border-2 border-amber-500 text-amber-800 hover:bg-amber-50 disabled:bg-neutral-200 disabled:text-neutral-400 disabled:border-neutral-200 disabled:cursor-not-allowed py-4 rounded-xl font-bold text-[15px] transition-all active:scale-[0.98] flex items-center justify-center gap-2 shadow-sm">

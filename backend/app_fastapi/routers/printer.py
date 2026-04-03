@@ -18,8 +18,8 @@ def printer_status(_: User = Depends(get_current_user)):
         printer_service = PrinterService()
         connected = printer_service.connect()
         if connected:
-            return {"status": "connected", "message": "USB printer is connected and ready"}
-        return {"status": "disconnected", "message": "USB printer not found or not configured"}
+            return {"status": "connected", "message": "Printer is connected and ready"}
+        return {"status": "disconnected", "message": "Printer not found or not configured"}
     except Exception as exc:
         return {"status": "error", "message": str(exc)}
 
@@ -41,7 +41,29 @@ def test_print(current_user: User = Depends(get_current_user)):
         ok = printer_service.print_receipt(test_receipt)
         if ok:
             return {"success": True, "message": "Test print completed"}
-        return JSONResponse(status_code=503, content={"success": False, "message": "Failed to print. Check USB connection."})
+        return JSONResponse(status_code=503, content={"success": False, "message": "Failed to print. Check printer connection and settings."})
+    except Exception as exc:
+        return JSONResponse(status_code=500, content={"success": False, "message": str(exc)})
+
+
+@printer_router.post("/test-kot-print")
+def test_kot_print(current_user: User = Depends(get_current_user)):
+    try:
+        printer_service = PrinterService()
+        test_kot = {
+            "sale_id": "TEST-KOT",
+            "branch": "Test Branch",
+            "operator": current_user.username,
+            "table_name": "T-01",
+            "items": [
+                {"title": "Chicken Burger", "quantity": 2, "variant_sku_suffix": "Large", "modifiers": ["Extra Cheese"]},
+                {"title": "Fries", "quantity": 1, "modifiers": []},
+            ],
+        }
+        ok = printer_service.print_kot(test_kot)
+        if ok:
+            return {"success": True, "message": "Test KOT print completed"}
+        return JSONResponse(status_code=503, content={"success": False, "message": "Failed to print KOT. Check printer connection and settings."})
     except Exception as exc:
         return JSONResponse(status_code=500, content={"success": False, "message": str(exc)})
 

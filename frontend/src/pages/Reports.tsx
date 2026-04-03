@@ -3,15 +3,19 @@ import { Calendar, Loader2, RefreshCw, Package } from 'lucide-react';
 import TransactionDetailsModal from '../components/TransactionDetailsModal';
 import { formatCurrency } from '../utils/formatCurrency';
 import { get, getUserMessage } from '../api';
+import { getTerminalBranchIdString, parseUserFromStorage } from '../utils/branchContext';
 import { showToast } from '../components/Toast';
 
 type StockTransactionInfo = {
   id: number;
-  product_id: number;
-  product_title: string | null;
-  variant_sku_suffix: string;
+  ingredient_id?: number | null;
+  ingredient_name?: string | null;
+  product_id?: number | null;
+  product_title?: string | null;
+  variant_sku_suffix?: string;
   delta: number;
   reason: string;
+  movement_type?: string | null;
   reference_type: string | null;
   reference_id: number | null;
   created_at: string;
@@ -41,14 +45,12 @@ export default function Reports() {
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedSaleId, setSelectedSaleId] = useState<number | null>(null);
-  const [branches, setBranches] = useState<{id: number, name: string}[]>([]);
-  const [branchFilter, setBranchFilter] = useState<string>(localStorage.getItem('active_branch_id') ?? 'all');
   const [includeArchived, setIncludeArchived] = useState(false);
   const [stockTransactions, setStockTransactions] = useState<StockTransactionInfo[]>([]);
   const [stockLoading, setStockLoading] = useState(false);
-  const userStr = localStorage.getItem('user');
-  const user = userStr ? JSON.parse(userStr) : null;
+  const user = parseUserFromStorage();
   const isOwner = user?.role === 'owner';
+  const terminalBranchId = getTerminalBranchIdString(user);
 
   useEffect(() => {
     // If custom is selected, we only fetch if both dates are present
@@ -57,22 +59,7 @@ export default function Reports() {
     }
     fetchData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [timeFilter, customStart, customEnd, branchFilter, includeArchived]);
-
-  useEffect(() => {
-      if (isOwner) {
-          fetchBranches();
-      }
-  }, [isOwner]);
-
-  const fetchBranches = async () => {
-    try {
-      const data = await get<{ branches?: { id: number; name: string }[] }>('/auth/branches');
-      setBranches(data?.branches ?? []);
-    } catch {
-      setBranches([]);
-    }
-  };
+  }, [timeFilter, customStart, customEnd, includeArchived, terminalBranchId]);
 
   const fetchData = async () => {
     setLoading(true);
@@ -80,8 +67,8 @@ export default function Reports() {
     if (timeFilter === 'custom') {
       queryParams += `&start_date=${customStart}&end_date=${customEnd}`;
     }
-    if (branchFilter !== 'all') {
-      queryParams += `&branch_id=${branchFilter}`;
+    if (terminalBranchId) {
+      queryParams += `&branch_id=${terminalBranchId}`;
     }
     if (includeArchived) {
       queryParams += '&include_archived=1';
@@ -110,7 +97,7 @@ export default function Reports() {
     setStockLoading(true);
     let q = `?time_filter=${timeFilter}`;
     if (timeFilter === 'custom') q += `&start_date=${customStart}&end_date=${customEnd}`;
-    if (branchFilter !== 'all') q += `&branch_id=${branchFilter}`;
+    if (terminalBranchId) q += `&branch_id=${terminalBranchId}`;
     try {
       const data = await get<{ transactions?: StockTransactionInfo[] }>(`/stock/transactions${q}`);
       setStockTransactions(data?.transactions ?? []);
@@ -124,7 +111,7 @@ export default function Reports() {
   useEffect(() => {
     if (timeFilter === 'custom' && (!customStart || !customEnd)) return;
     fetchStockTransactions();
-  }, [timeFilter, customStart, customEnd, branchFilter]);
+  }, [timeFilter, customStart, customEnd, terminalBranchId]);
 
   const getFormatDate = (iso: string) => {
     const d = new Date(iso);
@@ -137,8 +124,8 @@ export default function Reports() {
         
         {/* Header & Filters — tablet-first stack; xl+ aligns toolbar in one row */}
         <div className="page-padding border-b border-soot-200/60 flex flex-col lg:flex-row lg:justify-between lg:items-start xl:items-center bg-white/25 gap-4 shrink-0">
-          <h2 className="text-xl font-bold text-soot-900 flex items-center gap-2">
-            <Calendar className="w-5 h-5 text-soot-500" /> Orders & reporting
+          <h2 className="text-xl font-bold text-[#171717] flex items-center gap-2">
+            <Calendar className="w-5 h-5 text-[#57534e]" /> Orders & reporting
           </h2>
           
           <div className="flex items-center gap-2 flex-wrap w-full lg:w-auto lg:justify-end">
@@ -157,19 +144,6 @@ export default function Reports() {
               <option value="year">This Year</option>
               <option value="custom">Custom Range</option>
             </select>
-
-            {isOwner && (
-              <select
-                value={branchFilter}
-                onChange={(e) => setBranchFilter(e.target.value)}
-                className="glass-card text-sm font-medium text-soot-700 rounded-lg px-3 py-2.5 min-h-[44px] flex-1 min-w-[140px] lg:flex-initial lg:min-w-[160px] focus:ring-2 focus:ring-brand-500 focus:outline-none"
-              >
-                <option value="all">All Branches</option>
-                {branches.map(b => (
-                  <option key={b.id} value={b.id}>{b.name}</option>
-                ))}
-              </select>
-            )}
 
             {timeFilter === 'custom' && (
               <div className="flex items-center gap-2 flex-wrap">
@@ -195,35 +169,40 @@ export default function Reports() {
           </div>
         </div>
 
-        {/* Analytics + tables — lg three-up; xl tighter table density */}
-        <div className="page-padding flex-1 min-h-0 overflow-auto grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6 xl:gap-8">
-          <div className="glass-card p-5 lg:p-6 relative overflow-hidden">
-            <div className="text-soot-500 font-semibold mb-1 uppercase tracking-widest text-xs">Total Sales</div>
-            <div className="text-3xl font-bold text-soot-900">
-              {loading ? '...' : formatCurrency(analytics?.total_sales || 0)}
-            </div>
-          </div>
-          <div className="glass-card p-5 lg:p-6 relative overflow-hidden">
-            <div className="text-soot-500 font-semibold mb-1 uppercase tracking-widest text-xs">Transactions</div>
-            <div className="text-3xl font-bold text-soot-900">
-              {loading ? '...' : analytics?.total_transactions || 0}
-            </div>
-          </div>
-          <div className="glass-card p-5 lg:p-6 relative overflow-hidden flex flex-col justify-center">
-            <div className="text-soot-500 font-semibold mb-1 uppercase tracking-widest text-xs">Top selling item</div>
-            <div className="text-xl font-bold text-brand-700 truncate" title={analytics?.most_selling_product?.title}>
-              {loading ? '...' : (analytics?.most_selling_product ? analytics.most_selling_product.title : 'None')}
-            </div>
-            {analytics?.most_selling_product && (
-              <div className="text-sm font-medium text-soot-500 mt-1">
-                {analytics.most_selling_product.total_sold} units sold
+        {/* Analytics + tables — stats row first; then sections (avoids grid overlap with col-span) */}
+        <div className="page-padding flex-1 min-h-0 overflow-auto flex flex-col gap-8 lg:gap-10">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 lg:gap-5 shrink-0">
+            <div className="glass-card p-5 lg:p-6 min-h-[112px] border border-white/60 bg-white/70 shadow-sm">
+              <div className="text-[13px] font-semibold mb-2 uppercase tracking-wide text-[#57534e]">Total sales</div>
+              <div className="text-3xl font-bold tabular-nums leading-tight text-[#171717]">
+                {loading ? '…' : formatCurrency(analytics?.total_sales ?? 0)}
               </div>
-            )}
+            </div>
+            <div className="glass-card p-5 lg:p-6 min-h-[112px] border border-white/60 bg-white/70 shadow-sm">
+              <div className="text-[13px] font-semibold mb-2 uppercase tracking-wide text-[#57534e]">Transactions</div>
+              <div className="text-3xl font-bold tabular-nums leading-tight text-[#171717]">
+                {loading ? '…' : analytics?.total_transactions ?? 0}
+              </div>
+            </div>
+            <div className="glass-card p-5 lg:p-6 min-h-[112px] border border-white/60 bg-white/70 shadow-sm flex flex-col justify-center">
+              <div className="text-[13px] font-semibold mb-2 uppercase tracking-wide text-[#57534e]">Top selling item</div>
+              <div
+                className="text-lg sm:text-xl font-bold text-[#7a2e20] leading-snug line-clamp-2"
+                title={analytics?.most_selling_product?.title || undefined}
+              >
+                {loading ? '…' : analytics?.most_selling_product?.title?.trim() ? analytics.most_selling_product.title : '—'}
+              </div>
+              {analytics?.most_selling_product && (
+                <div className="text-sm font-medium text-[#525252] mt-1.5">
+                  {analytics.most_selling_product.total_sold} units sold
+                </div>
+              )}
+            </div>
           </div>
-          
+
           {/* Recent Transactions */}
-          <div className="col-span-full mt-2">
-            <h3 className="text-lg font-bold text-soot-900 mb-4">Transactions</h3>
+          <section className="min-h-0">
+            <h3 className="text-lg font-bold text-[#171717] mb-4">Transactions</h3>
             {loading && sales.length === 0 ? (
                <div className="py-12 flex justify-center text-soot-400">
                  <Loader2 className="w-6 h-6 animate-spin" />
@@ -233,10 +212,11 @@ export default function Reports() {
                 <p className="font-medium">No transactions found for this period.</p>
               </div>
             ) : (
-              <div className="glass-card overflow-hidden">
-                <table className="w-full text-left border-collapse">
+              <div className="glass-card overflow-hidden border border-white/60 bg-white/70 shadow-sm">
+                <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse min-w-[640px]">
                   <thead>
-                    <tr className="bg-white/25 border-b border-soot-200 text-xs uppercase text-soot-500 font-semibold tracking-wider">
+                    <tr className="bg-white/40 border-b border-soot-200/80 text-xs uppercase text-[#57534e] font-semibold tracking-wider">
                       <th className="py-3 px-3 lg:px-4 xl:py-2 xl:px-3 xl:text-[11px]">Transaction ID</th>
                       <th className="py-3 px-3 lg:px-4 xl:py-2 xl:px-3 xl:text-[11px]">Date & Time</th>
                       <th className="py-3 px-3 lg:px-4 xl:py-2 xl:px-3 xl:text-[11px]">Method</th>
@@ -251,9 +231,9 @@ export default function Reports() {
                         onClick={() => setSelectedSaleId(sale.id)}
                         className={`border-b border-soot-100 hover:bg-white/30 cursor-pointer transition-colors min-h-[48px] xl:min-h-0 ${sale.status === 'refunded' ? 'opacity-60' : ''} ${sale.archived_at ? 'bg-white/20' : ''}`}
                       >
-                        <td className="py-3 px-3 lg:px-4 xl:py-2 xl:px-3 text-sm font-medium text-soot-900">#ORD-{sale.id}</td>
-                        <td className="py-3 px-3 lg:px-4 xl:py-2 xl:px-3 text-sm text-soot-600">{getFormatDate(sale.created_at)}</td>
-                        <td className="py-3 px-3 lg:px-4 xl:py-2 xl:px-3 text-sm text-soot-600 font-medium">{sale.payment_method}</td>
+                        <td className="py-3 px-3 lg:px-4 xl:py-2 xl:px-3 text-sm font-medium text-[#171717]">#ORD-{sale.id}</td>
+                        <td className="py-3 px-3 lg:px-4 xl:py-2 xl:px-3 text-sm text-[#525252]">{getFormatDate(sale.created_at)}</td>
+                        <td className="py-3 px-3 lg:px-4 xl:py-2 xl:px-3 text-sm text-[#525252] font-medium">{sale.payment_method}</td>
                         <td className="py-3 px-3 lg:px-4 xl:py-2 xl:px-3 text-sm text-center">
                           {sale.status === 'refunded' ? (
                             <span className="bg-red-50 text-red-600 border border-red-200 px-2 py-0.5 rounded text-xs font-bold">REFUNDED</span>
@@ -261,21 +241,22 @@ export default function Reports() {
                             <span className="bg-brand-50 text-brand-600 border border-brand-200 px-2 py-0.5 rounded text-xs font-bold">COMPLETED</span>
                           )}
                         </td>
-                        <td className={`py-3 px-3 lg:px-4 xl:py-2 xl:px-3 text-right font-medium text-soot-900 ${sale.status === 'refunded' ? 'line-through' : ''}`}>
+                        <td className={`py-3 px-3 lg:px-4 xl:py-2 xl:px-3 text-right font-medium tabular-nums text-[#171717] ${sale.status === 'refunded' ? 'line-through' : ''}`}>
                           {formatCurrency(sale.total_amount)}
                         </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
+                </div>
               </div>
             )}
-          </div>
+          </section>
 
           {/* Stock transactions */}
-          <div className="col-span-full mt-8">
-            <h3 className="text-lg font-bold text-soot-900 mb-4 flex items-center gap-2">
-              <Package className="w-5 h-5 text-soot-500" /> Stock movements
+          <section className="min-h-0">
+            <h3 className="text-lg font-bold text-[#171717] mb-4 flex items-center gap-2">
+              <Package className="w-5 h-5 text-[#57534e]" /> Ingredient stock movements
             </h3>
             {stockLoading && stockTransactions.length === 0 ? (
               <div className="py-12 flex justify-center text-soot-400">
@@ -286,34 +267,38 @@ export default function Reports() {
                 <p className="font-medium">No stock movements for this period.</p>
               </div>
             ) : (
-              <div className="glass-card overflow-hidden">
-                <table className="w-full text-left border-collapse">
+              <div className="glass-card overflow-hidden border border-white/60 bg-white/70 shadow-sm">
+                <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse min-w-[520px]">
                   <thead>
-                    <tr className="bg-white/25 border-b border-soot-200 text-xs uppercase text-soot-500 font-semibold tracking-wider">
+                    <tr className="bg-white/40 border-b border-soot-200/80 text-xs uppercase text-[#57534e] font-semibold tracking-wider">
                       <th className="py-3 px-3 lg:px-4 xl:py-2 xl:px-3 xl:text-[11px]">Date & time</th>
-                      <th className="py-3 px-3 lg:px-4 xl:py-2 xl:px-3 xl:text-[11px]">Item</th>
-                      <th className="py-3 px-3 lg:px-4 xl:py-2 xl:px-3 xl:text-[11px]">Option</th>
+                      <th className="py-3 px-3 lg:px-4 xl:py-2 xl:px-3 xl:text-[11px]">Ingredient</th>
                       <th className="py-3 px-3 lg:px-4 xl:py-2 xl:px-3 xl:text-[11px] text-right">Change</th>
-                      <th className="py-3 px-3 lg:px-4 xl:py-2 xl:px-3 xl:text-[11px]">Reason</th>
+                      <th className="py-3 px-3 lg:px-4 xl:py-2 xl:px-3 xl:text-[11px]">Type</th>
                     </tr>
                   </thead>
                   <tbody>
                     {stockTransactions.map((tx) => (
                       <tr key={tx.id} className="border-b border-soot-100 hover:bg-white/30 min-h-[48px] xl:min-h-0">
-                        <td className="py-3 px-3 lg:px-4 xl:py-2 xl:px-3 text-sm text-soot-600">{getFormatDate(tx.created_at)}</td>
-                        <td className="py-3 px-3 lg:px-4 xl:py-2 xl:px-3 text-sm font-medium text-soot-900">{tx.product_title ?? `#${tx.product_id}`}</td>
-                        <td className="py-3 px-3 lg:px-4 xl:py-2 xl:px-3 text-sm text-soot-600">{tx.variant_sku_suffix || '—'}</td>
-                        <td className={`py-3 px-3 lg:px-4 xl:py-2 xl:px-3 text-right text-sm font-medium ${tx.delta >= 0 ? 'text-brand-600' : 'text-red-600'}`}>
+                        <td className="py-3 px-3 lg:px-4 xl:py-2 xl:px-3 text-sm text-[#525252]">{getFormatDate(tx.created_at)}</td>
+                        <td className="py-3 px-3 lg:px-4 xl:py-2 xl:px-3 text-sm font-medium text-[#171717]">
+                          {tx.ingredient_name ?? (tx.product_title ? tx.product_title : tx.ingredient_id != null ? `#${tx.ingredient_id}` : '—')}
+                        </td>
+                        <td className={`py-3 px-3 lg:px-4 xl:py-2 xl:px-3 text-right text-sm font-medium tabular-nums ${tx.delta >= 0 ? 'text-brand-600' : 'text-red-600'}`}>
                           {tx.delta >= 0 ? '+' : ''}{tx.delta}
                         </td>
-                        <td className="py-3 px-3 lg:px-4 xl:py-2 xl:px-3 text-sm text-soot-600 capitalize">{tx.reason}</td>
+                        <td className="py-3 px-3 lg:px-4 xl:py-2 xl:px-3 text-sm text-[#525252] capitalize">
+                          {(tx.movement_type || tx.reason || '').replace(/_/g, ' ')}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
+                </div>
               </div>
             )}
-          </div>
+          </section>
         </div>
       </div>
 

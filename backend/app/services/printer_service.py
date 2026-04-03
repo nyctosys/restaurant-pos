@@ -1,7 +1,7 @@
 import base64
 import io
 import re
-from escpos.printer import Usb
+from escpos.printer import Network, Usb
 from app.models import Setting
 
 class PrinterService:
@@ -11,28 +11,92 @@ class PrinterService:
         if cls._instance is None:
             cls._instance = super(PrinterService, cls).__new__(cls)
             cls._instance.printer = None
+            cls._instance.printer_kind = "receipt"
         return cls._instance
 
-    def _get_printer_config(self):
+    def _get_printer_config(self, printer_kind="receipt"):
         # Fetch global hardware settings
         setting = Setting.query.filter_by(branch_id=None).first()
-        if setting and 'hardware' in setting.config:
-            return setting.config['hardware']
+        if setting and "hardware" in setting.config:
+            hardware = setting.config["hardware"] or {}
+            return self._resolve_printer_config(hardware, printer_kind)
         return None
 
-    def connect(self):
-        config = self._get_printer_config()
+    def _resolve_printer_config(self, hardware, printer_kind):
+        kind = "kot" if str(printer_kind).lower() == "kot" else "receipt"
+        prefix = "kot_printer" if kind == "kot" else "receipt_printer"
+
+        mode = str(hardware.get(f"{prefix}_mode") or "").strip().lower()
+        if mode not in ("usb", "lan"):
+            if kind == "receipt":
+                mode = str(hardware.get("printer_connection_type") or "").strip().lower()
+            if mode not in ("usb", "lan"):
+                has_lan = bool(str(hardware.get(f"{prefix}_ip") or "").strip())
+                mode = "lan" if has_lan else "usb"
+
+        # KOT falls back to receipt printer if KOT-specific values are empty.
+        ip = (
+            str(hardware.get(f"{prefix}_ip") or "").strip()
+            or str(hardware.get("receipt_printer_ip") or "").strip()
+        )
+        port_raw = (
+            hardware.get(f"{prefix}_port")
+            if hardware.get(f"{prefix}_port") not in (None, "")
+            else hardware.get("receipt_printer_port")
+        )
+        try:
+            port = int(port_raw or 9100)
+        except (TypeError, ValueError):
+            port = 9100
+        if port <= 0:
+            port = 9100
+
+        vendor_id = (
+            str(hardware.get(f"{prefix}_vendor_id") or "").strip()
+            or str(hardware.get("receipt_printer_vendor_id") or "").strip()
+            or str(hardware.get("printer_vendor_id") or "").strip()
+        )
+        product_id = (
+            str(hardware.get(f"{prefix}_product_id") or "").strip()
+            or str(hardware.get("receipt_printer_product_id") or "").strip()
+            or str(hardware.get("printer_product_id") or "").strip()
+        )
+
+        return {
+            "mode": mode,
+            "ip": ip,
+            "port": port,
+            "vendor_id": vendor_id,
+            "product_id": product_id,
+        }
+
+    def connect(self, printer_kind="receipt"):
+        config = self._get_printer_config(printer_kind)
         if not config:
             print("Printer hardware not configured in settings.")
             return False
 
         try:
+            self.printer_kind = "kot" if str(printer_kind).lower() == "kot" else "receipt"
+            mode = config.get("mode", "usb")
+
+            if mode == "lan":
+                host = str(config.get("ip") or "").strip()
+                port = int(config.get("port") or 9100)
+                if not host:
+                    print(f"{self.printer_kind.upper()} LAN printer IP is not configured.")
+                    return False
+                print(f"Connecting to LAN Printer ({self.printer_kind}: {host}:{port})...")
+                self.printer = Network(host=host, port=port)
+                self.printer.open()
+                return True
+
             # USB Vendor ID and Product ID (hex strings from settings, e.g. "0x04b8")
-            vendor_id = config.get('printer_vendor_id', '').strip()
-            product_id = config.get('printer_product_id', '').strip()
+            vendor_id = str(config.get("vendor_id") or "").strip()
+            product_id = str(config.get("product_id") or "").strip()
 
             if not vendor_id or not product_id:
-                print("Printer USB Vendor ID or Product ID not configured.")
+                print(f"{self.printer_kind.upper()} USB Vendor ID or Product ID not configured.")
                 return False
 
             # Convert hex string to int (supports "0x04b8" or "04b8" formats)
@@ -44,7 +108,7 @@ class PrinterService:
             self.printer.open()
             return True
         except Exception as e:
-            print(f"Failed to connect to USB printer: {e}")
+            print(f"Failed to connect to {self.printer_kind} printer: {e}")
             self.printer = None
             return False
 
@@ -67,7 +131,7 @@ class PrinterService:
 
     def print_text(self, text):
         if not self.printer:
-            if not self.connect():
+            if not self.connect("receipt"):
                 return False
         
         try:
@@ -167,8 +231,10 @@ class PrinterService:
         return binary
 
     def print_receipt(self, sale_data):
+        if self.printer and self.printer_kind != "receipt":
+            self._disconnect()
         if not self.printer:
-            if not self.connect():
+            if not self.connect("receipt"):
                 return False
 
         settings = self._get_receipt_settings(sale_data.get('branch_id'))
@@ -228,6 +294,11 @@ class PrinterService:
             delivery_charge = float(delivery_charge)
         except (TypeError, ValueError):
             delivery_charge = 0.0
+        service_charge = sale_data.get('service_charge') or 0
+        try:
+            service_charge = float(service_charge)
+        except (TypeError, ValueError):
+            service_charge = 0.0
         discount_name = (sale_data.get('discount_name') or 'Discount').strip()
 
         try:
@@ -342,6 +413,8 @@ class PrinterService:
                 # Use " - Rs.X" instead of "Rs.-X" to avoid printer firmware issues with minus in amount
                 discount_str = f" - Rs.{discount_amount:,.0f}"
                 self.printer.text(label.ljust(self.ITEM_COL_WIDTH) + discount_str.rjust(self.AMOUNT_COL_WIDTH) + "\n")
+            if service_charge > 0:
+                self.printer.text("Service charge".ljust(self.ITEM_COL_WIDTH) + f"Rs.{service_charge:,.0f}".rjust(self.AMOUNT_COL_WIDTH) + "\n")
             if delivery_charge > 0:
                 self.printer.text("Delivery charge".ljust(self.ITEM_COL_WIDTH) + f"Rs.{delivery_charge:,.0f}".rjust(self.AMOUNT_COL_WIDTH) + "\n")
             if tax_rate and tax_amount is not None:
@@ -408,8 +481,10 @@ class PrinterService:
 
     def print_kot(self, kot_data: dict) -> bool:
         """Kitchen order ticket for KDS / prep station (no prices, no tax)."""
+        if self.printer and self.printer_kind != "kot":
+            self._disconnect()
         if not self.printer:
-            if not self.connect():
+            if not self.connect("kot"):
                 return False
         if not self.printer:
             return False
@@ -422,6 +497,7 @@ class PrinterService:
         thin = "-" * self.RECEIPT_WIDTH
         sale_id = kot_data.get("sale_id", "")
         table = (kot_data.get("table_name") or "").strip()
+        order_type = (kot_data.get("order_type") or "").strip().lower()
         branch = (kot_data.get("branch") or "").strip()
         operator = (kot_data.get("operator") or "").strip()
         items = kot_data.get("items") or []
@@ -474,6 +550,12 @@ class PrinterService:
             self.printer.text(sep + "\n")
             self.printer.set(align="left")
             self.printer.text(f"Order #{sale_id}\n")
+            if order_type == "takeaway":
+                self.printer.text("Type: Takeaway\n")
+            elif order_type == "delivery":
+                self.printer.text("Type: Delivery\n")
+            elif order_type == "dine_in":
+                self.printer.text("Type: Dine-in\n")
             if table:
                 self.printer.text(f"Table: {table}\n")
             if branch:
@@ -500,10 +582,10 @@ class PrinterService:
             return False
 
     def print_barcode_label(self, sku: str, title: str = '') -> bool:
-        """Print a barcode label (product name + CODE128) on the USB thermal printer."""
+        """Print a barcode label (product name + CODE128) on the configured receipt printer."""
         if not sku or not sku.strip():
             return False
-        if not self.printer and not self.connect():
+        if not self.printer and not self.connect("receipt"):
             return False
         sku = sku.strip()
         try:

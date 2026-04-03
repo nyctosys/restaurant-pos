@@ -9,14 +9,14 @@ from fastapi.testclient import TestClient
 # Override DB to in-memory SQLite before app is imported
 os.environ["DATABASE_URL"] = "sqlite:///:memory:"
 
-from app_fastapi import app as fastapi_app, legacy_flask_app
-from app.models import db, User, Branch, Product, Inventory, Sale, SaleItem, Setting
+from app_fastapi import app as fastapi_app, flask_sqlalchemy_app
+from app.models import db
 
 
 @pytest.fixture
 def app():
-    legacy_flask_app.config["TESTING"] = True
-    return legacy_flask_app
+    flask_sqlalchemy_app.config["TESTING"] = True
+    return flask_sqlalchemy_app
 
 
 @pytest.fixture

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Loader2, RefreshCw, UtensilsCrossed, Pencil, CreditCard, Ban } from 'lucide-react';
 import { get, post, getUserMessage } from '../api';
+import { getTerminalBranchIdString, parseUserFromStorage } from '../utils/branchContext';
 import { formatCurrency } from '../utils/formatCurrency';
 import { showConfirm } from '../components/ConfirmDialog';
 
@@ -53,18 +54,15 @@ export default function ActiveDineIn() {
   const [paymentMethod, setPaymentMethod] = useState<'Card' | 'Cash' | 'Online Transfer'>('Card');
   const [paySubmitting, setPaySubmitting] = useState(false);
 
-  const userStr = localStorage.getItem('user');
-  const user = userStr ? JSON.parse(userStr) : null;
+  const terminalBranchId = getTerminalBranchIdString(parseUserFromStorage());
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const activeBranchId = localStorage.getItem('active_branch_id') ?? user?.branch_id ?? '1';
-      const q =
-        user?.role === 'owner'
-          ? `?branch_id=${activeBranchId}&include_items=1`
-          : '?include_items=1';
+      const q = terminalBranchId
+        ? `?branch_id=${terminalBranchId}&include_items=1`
+        : '?include_items=1';
       const data = await get<{ sales?: ActiveSale[] }>(`/orders/active${q}`);
       setSales(data.sales ?? []);
     } catch (e) {
@@ -72,14 +70,28 @@ export default function ActiveDineIn() {
     } finally {
       setLoading(false);
     }
-  }, [user?.branch_id, user?.role]);
+  }, [terminalBranchId]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  const tableLabel = (s: ActiveSale) =>
-    s.table_name || s.order_snapshot?.table_name || '—';
+  const orderLabel = (s: ActiveSale) => {
+    const ot = s.order_type || '';
+    if (ot === 'takeaway') return 'Takeaway';
+    if (ot === 'delivery') {
+      const name = (s.order_snapshot as { customer_name?: string } | null | undefined)?.customer_name?.trim();
+      return name ? `Delivery · ${name}` : 'Delivery';
+    }
+    return s.table_name || s.order_snapshot?.table_name || '—';
+  };
+
+  const orderKindLabel = (s: ActiveSale) => {
+    const ot = s.order_type || '';
+    if (ot === 'takeaway') return 'Takeaway';
+    if (ot === 'delivery') return 'Delivery';
+    return 'Table';
+  };
 
   const openPay = (s: ActiveSale) => {
     setPayModalSale(s);
@@ -113,7 +125,7 @@ export default function ActiveDineIn() {
   const handleVoid = async (s: ActiveSale) => {
     const ok = await showConfirm({
       title: 'Void open order?',
-      message: `Cancel order #${s.id} for table ${tableLabel(s)} and restore stock?`,
+      message: `Cancel order #${s.id} (${orderLabel(s)}) and restore stock?`,
       confirmLabel: 'Void order',
       cancelLabel: 'Keep',
       variant: 'danger',
@@ -139,8 +151,8 @@ export default function ActiveDineIn() {
             <UtensilsCrossed className="w-6 h-6 text-brand-800" />
           </div>
           <div className="min-w-0">
-            <h1 className="text-2xl font-bold text-neutral-900 truncate">Active dine-in orders</h1>
-            <p className="text-sm text-neutral-500">Open tabs after KOT — take payment or change items on the Order screen.</p>
+            <h1 className="text-2xl font-bold text-neutral-900 truncate">Open orders</h1>
+            <p className="text-sm text-neutral-500">Unpaid KOT tabs (dine-in, takeaway, delivery) — pay or edit on Order.</p>
           </div>
         </div>
         <button
@@ -169,21 +181,21 @@ export default function ActiveDineIn() {
       ) : sales.length === 0 ? (
         <div className="flex-1 flex flex-col items-center justify-center text-neutral-400 gap-2 py-16">
           <UtensilsCrossed className="w-14 h-14 opacity-40" />
-          <p className="text-lg font-medium text-neutral-500">No active dine-in orders</p>
-          <p className="text-sm text-neutral-400">Send a KOT from Order → Dine in to open a table tab.</p>
+          <p className="text-lg font-medium text-neutral-500">No open orders</p>
+          <p className="text-sm text-neutral-400">Send a KOT from Order (any order type) to open a tab.</p>
         </div>
       ) : (
         <div className="flex-1 min-h-0 overflow-auto">
-          <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 items-stretch">
             {sales.map(s => (
               <li
                 key={s.id}
-                className="glass-card rounded-2xl p-4 flex flex-col gap-3 border border-white/40"
+                className="glass-card rounded-2xl p-4 flex flex-col gap-3 border border-white/40 h-full min-h-0"
               >
                 <div className="flex items-start justify-between gap-2">
                   <div>
-                    <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wide">Table</p>
-                    <p className="text-xl font-bold text-neutral-900">{tableLabel(s)}</p>
+                    <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wide">{orderKindLabel(s)}</p>
+                    <p className="text-xl font-bold text-neutral-900">{orderLabel(s)}</p>
                   </div>
                   <span className="text-xs font-mono text-neutral-400">#{s.id}</span>
                 </div>
@@ -199,7 +211,7 @@ export default function ActiveDineIn() {
                     <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-neutral-500">
                       Items to prepare
                     </p>
-                    <div className="space-y-2">
+                    <div className="space-y-2 max-h-[min(40vh,320px)] overflow-y-auto pr-0.5">
                       {s.items.map((line, idx) => (
                         <div
                           key={`${s.id}-${line.id}-${idx}`}
@@ -250,7 +262,7 @@ export default function ActiveDineIn() {
                     </div>
                   </div>
                 )}
-                <div className="flex flex-wrap gap-2 pt-1">
+                <div className="flex flex-wrap gap-2 pt-2 mt-auto border-t border-white/25 shrink-0">
                   <button
                     type="button"
                     onClick={() => openPay(s)}
@@ -290,7 +302,7 @@ export default function ActiveDineIn() {
             aria-labelledby="pay-modal-title"
           >
             <h2 id="pay-modal-title" className="text-lg font-bold text-neutral-900">
-              Take payment — Table {tableLabel(payModalSale)}
+              Take payment — {orderLabel(payModalSale)}
             </h2>
             <p className="text-sm text-neutral-600">
               Order #{payModalSale.id} · {formatCurrency(payModalSale.total_amount)} subtotal (tax applied on confirm)

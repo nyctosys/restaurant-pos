@@ -18,6 +18,8 @@ def _modifier_dict(m: Modifier) -> dict[str, Any]:
         "id": m.id,
         "name": m.name,
         "price": float(m.price) if m.price is not None else None,
+        "ingredient_id": m.ingredient_id,
+        "depletion_quantity": float(m.depletion_quantity) if m.depletion_quantity is not None else None,
     }
 
 
@@ -43,8 +45,24 @@ def create_modifier(payload: dict[str, Any] | None = None, _: User = Depends(req
             return error_response("Bad Request", "price must be a number", 400)
         if price < 0:
             return error_response("Bad Request", "price must be >= 0", 400)
+    ing_id = data.get("ingredient_id")
+    dep_q = data.get("depletion_quantity")
+    dep_val = None
+    if dep_q is not None and dep_q != "":
+        try:
+            dep_val = float(dep_q)
+        except (TypeError, ValueError):
+            return error_response("Bad Request", "depletion_quantity must be a number", 400)
+        if dep_val < 0:
+            return error_response("Bad Request", "depletion_quantity must be >= 0", 400)
+    ing_fk = None
+    if ing_id is not None and ing_id != "":
+        try:
+            ing_fk = int(ing_id)
+        except (TypeError, ValueError):
+            return error_response("Bad Request", "ingredient_id must be an integer", 400)
     try:
-        m = Modifier(name=name, price=price)
+        m = Modifier(name=name, price=price, ingredient_id=ing_fk, depletion_quantity=dep_val)
         db.session.add(m)
         db.session.commit()
         return JSONResponse(status_code=201, content={"modifier": _modifier_dict(m)})
@@ -77,6 +95,26 @@ def update_modifier(modifier_id: int, payload: dict[str, Any] | None = None, _: 
             if price < 0:
                 return error_response("Bad Request", "price must be >= 0", 400)
             m.price = price
+    if "ingredient_id" in data:
+        raw_ing = data.get("ingredient_id")
+        if raw_ing is None or raw_ing == "":
+            m.ingredient_id = None
+        else:
+            try:
+                m.ingredient_id = int(raw_ing)
+            except (TypeError, ValueError):
+                return error_response("Bad Request", "ingredient_id must be an integer", 400)
+    if "depletion_quantity" in data:
+        dq = data.get("depletion_quantity")
+        if dq is None or dq == "":
+            m.depletion_quantity = None
+        else:
+            try:
+                m.depletion_quantity = float(dq)
+            except (TypeError, ValueError):
+                return error_response("Bad Request", "depletion_quantity must be a number", 400)
+            if m.depletion_quantity is not None and m.depletion_quantity < 0:
+                return error_response("Bad Request", "depletion_quantity must be >= 0", 400)
     try:
         db.session.commit()
         return {"modifier": _modifier_dict(m)}

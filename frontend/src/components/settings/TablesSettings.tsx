@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Plus, Trash2, Loader2 } from 'lucide-react';
 import { get, put, getUserMessage } from '../../api';
+import { getTerminalBranchIdString, parseUserFromStorage } from '../../utils/branchContext';
 
 type SettingsResponse = { config?: Record<string, unknown> };
 
@@ -16,7 +17,7 @@ export default function TablesSettings() {
   const fetchTables = async () => {
     setLoading(true);
     try {
-      const activeBranchId = localStorage.getItem('active_branch_id') || '';
+      const activeBranchId = getTerminalBranchIdString(parseUserFromStorage());
       const query = activeBranchId ? `?branch_id=${activeBranchId}` : '';
       const data = await get<SettingsResponse>(`/settings/${query}`);
       const list = data.config?.tables;
@@ -37,7 +38,7 @@ export default function TablesSettings() {
     setSaving(true);
     setFeedback('');
     try {
-      const activeBranchId = localStorage.getItem('active_branch_id') ?? '';
+      const activeBranchId = getTerminalBranchIdString(parseUserFromStorage());
       const query = activeBranchId ? `?branch_id=${activeBranchId}` : '';
       const existing = await get<SettingsResponse>(`/settings/${query}`);
       const currentConfig = (existing?.config ?? {}) as Record<string, unknown>;

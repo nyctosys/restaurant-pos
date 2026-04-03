@@ -6,6 +6,7 @@ import Setup from './pages/Setup';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Inventory from './pages/Inventory';
+import MenuManagement from './pages/MenuManagement';
 import Reports from './pages/Reports';
 import Settings from './pages/Settings';
 import ActiveDineIn from './pages/ActiveDineIn';
@@ -57,6 +58,7 @@ export default function App() {
               <Route path="/" element={<AppHomeRedirect />} />
               <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/dine-in" element={<ActiveDineIn />} />
+              <Route path="/menu" element={<MenuManagement />} />
               <Route path="/inventory" element={<Inventory />} />
               <Route path="/reports" element={<Reports />} />
               <Route path="/settings" element={<Settings />} />

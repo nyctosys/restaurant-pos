@@ -8,9 +8,115 @@ function getToken(): string | null {
   return localStorage.getItem('auth_token');
 }
 
+function newClientRequestId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `req_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
+}
+
 export interface RequestOptions extends Omit<RequestInit, 'body'> {
   body?: object | string | null;
   skipAuth?: boolean;
+  /** Override default GET cache TTL. `0` disables caching for this request. */
+  cacheTtlMs?: number;
+  /** Force bypassing cache and network-dedup for this request. */
+  forceRefresh?: boolean;
+  /** Optional stable key override when query params are not deterministic. */
+  cacheKey?: string;
+}
+
+type CacheEntry = {
+  expiresAt: number;
+  value: unknown;
+};
+
+const responseCache = new Map<string, CacheEntry>();
+const inflightRequests = new Map<string, Promise<unknown>>();
+
+const DEFAULT_CACHE_TTL_MS = 20_000;
+const CACHEABLE_GET_PREFIXES = [
+  '/settings/',
+  '/menu-items/',
+  '/modifiers/',
+  '/menu/deals',
+  '/stock/',
+  '/inventory-advanced/',
+  '/branches/',
+];
+const NON_CACHEABLE_GET_PREFIXES = [
+  '/orders/kitchen',
+  '/orders/active',
+  '/orders/',
+  '/printer/status',
+];
+
+function cloneValue<T>(value: T): T {
+  if (typeof structuredClone === 'function') {
+    try {
+      return structuredClone(value);
+    } catch {
+      // Fall through to JSON clone for plain objects.
+    }
+  }
+  if (value == null || typeof value !== 'object') {
+    return value;
+  }
+  try {
+    return JSON.parse(JSON.stringify(value)) as T;
+  } catch {
+    return value;
+  }
+}
+
+function normalizePath(path: string): string {
+  try {
+    const asUrl = path.startsWith('http') ? new URL(path) : new URL(path, API_BASE);
+    return `${asUrl.pathname}${asUrl.search}`;
+  } catch {
+    return path;
+  }
+}
+
+function shouldCacheGet(path: string): boolean {
+  const normalized = normalizePath(path);
+  if (NON_CACHEABLE_GET_PREFIXES.some(prefix => normalized.startsWith(prefix))) {
+    return false;
+  }
+  return CACHEABLE_GET_PREFIXES.some(prefix => normalized.startsWith(prefix));
+}
+
+function getDefaultCacheTtlMs(path: string): number {
+  return shouldCacheGet(path) ? DEFAULT_CACHE_TTL_MS : 0;
+}
+
+function buildCacheKey(method: string, path: string, token: string | null, cacheKeyOverride?: string): string {
+  const stablePath = cacheKeyOverride?.trim() || normalizePath(path);
+  // Token segment keeps cache isolated per authenticated user/session.
+  const tokenSegment = token ? token.slice(-16) : 'anon';
+  return `${method}:${stablePath}:u=${tokenSegment}`;
+}
+
+function getCachedResponse<T>(key: string): T | null {
+  const entry = responseCache.get(key);
+  if (!entry) return null;
+  if (Date.now() >= entry.expiresAt) {
+    responseCache.delete(key);
+    return null;
+  }
+  return cloneValue(entry.value as T);
+}
+
+function setCachedResponse<T>(key: string, value: T, ttlMs: number): void {
+  if (ttlMs <= 0) return;
+  responseCache.set(key, {
+    expiresAt: Date.now() + ttlMs,
+    value: cloneValue(value),
+  });
+}
+
+function clearApiCache(): void {
+  responseCache.clear();
 }
 
 /**
@@ -25,15 +131,36 @@ export async function request<T = unknown>(
   const method = options.method ?? 'GET';
   const token = options.skipAuth ? null : getToken();
   const start = performance.now();
+  const defaultTtl = method === 'GET' ? getDefaultCacheTtlMs(path) : 0;
+  const ttlMs = options.cacheTtlMs ?? defaultTtl;
+  const shouldUseCache = method === 'GET' && ttlMs > 0 && !options.forceRefresh;
 
+  const clientRequestId = newClientRequestId();
   const headers: HeadersInit = {
     ...(options.headers as Record<string, string>),
   };
   if (token && !headers['Authorization']) {
     headers['Authorization'] = `Bearer ${token}`;
   }
+  if (!(headers as Record<string, string>)['X-Request-ID'] && !(headers as Record<string, string>)['x-request-id']) {
+    (headers as Record<string, string>)['X-Request-ID'] = clientRequestId;
+  }
   if (options.body != null && typeof options.body === 'object' && !(options.body instanceof FormData)) {
     if (!headers['Content-Type']) headers['Content-Type'] = 'application/json';
+  }
+
+  const cacheKey = shouldUseCache ? buildCacheKey(method, path, token, options.cacheKey) : null;
+  if (cacheKey) {
+    const cached = getCachedResponse<T>(cacheKey);
+    if (cached !== null) {
+      log.info('API', `CACHE HIT ${path}`, { cacheKey });
+      return cached;
+    }
+    const inflight = inflightRequests.get(cacheKey) as Promise<T> | undefined;
+    if (inflight) {
+      log.info('API', `INFLIGHT DEDUP ${path}`, { cacheKey });
+      return inflight;
+    }
   }
 
   let body: BodyInit | undefined;
@@ -41,56 +168,84 @@ export async function request<T = unknown>(
     body = typeof options.body === 'string' ? options.body : JSON.stringify(options.body);
   }
 
-  log.info('API', `${method} ${path}`, { url });
-  let res: Response;
-  try {
-    res = await fetch(url, { ...options, method, headers, body });
-  } catch (e) {
-    const duration = Math.round(performance.now() - start);
-    log.error('API', 'Network error', { path, duration, err: String(e) });
-    throw new ApiError(0, { error: 'Network Error', message: 'Network request failed' }, (e as Error).message);
-  }
-
-  const duration = Math.round(performance.now() - start);
-  const requestId = res.headers.get('X-Request-ID') ?? undefined;
-  if (res.ok) {
-    log.info('API', `${res.status} ${path}`, { duration, requestId });
-  } else {
-    log.error('API', `${res.status} ${path}`, { duration, requestId });
-  }
-
-  let bodyJson: ApiErrorBody & T;
-  const text = await res.text();
-  try {
-    bodyJson = (text ? JSON.parse(text) : {}) as ApiErrorBody & T;
-  } catch {
-    bodyJson = { error: 'Invalid Response', message: text || `Request failed (${res.status})` } as ApiErrorBody & T;
-  }
-
-  if (!res.ok) {
-    const errBody: ApiErrorBody = {
-      error: bodyJson.error ?? `Error ${res.status}`,
-      message: bodyJson.message ?? bodyJson.error ?? `Request failed (${res.status})`,
-      details: (bodyJson as ApiErrorBody).details,
-    };
-    const apiError = new ApiError(res.status, errBody);
-
-    // Session expired or invalid: clear auth and redirect to login so user can re-authenticate without restarting.
-    if (res.status === 401 && token && !options.skipAuth) {
-      const pathLower = path.toLowerCase();
-      const isAuthRoute = pathLower.includes('/auth/login') || pathLower.includes('/auth/setup');
-      if (!isAuthRoute) {
-        localStorage.removeItem('auth_token');
-        localStorage.removeItem('user');
-        log.info('API', 'Session expired or invalid → cleared auth, redirecting to login');
-        window.location.href = '/login';
-      }
+  log.info('API', `${method} ${path}`, { url, clientRequestId });
+  const execute = async (): Promise<T> => {
+    let res: Response;
+    try {
+      res = await fetch(url, { ...options, method, headers, body });
+    } catch (e) {
+      const duration = Math.round(performance.now() - start);
+      log.error('API', 'Network error', { path, duration, clientRequestId, err: String(e) });
+      throw new ApiError(
+        0,
+        { error: 'Network Error', message: 'Network request failed', requestId: clientRequestId },
+        (e as Error).message
+      );
     }
 
-    throw apiError;
+    const duration = Math.round(performance.now() - start);
+    const requestId = res.headers.get('X-Request-ID') ?? clientRequestId;
+    if (res.ok) {
+      log.info('API', `${res.status} ${path}`, { duration, requestId });
+    } else {
+      log.error('API', `${res.status} ${path}`, { duration, requestId });
+    }
+
+    let bodyJson: ApiErrorBody & T;
+    const text = await res.text();
+    try {
+      bodyJson = (text ? JSON.parse(text) : {}) as ApiErrorBody & T;
+    } catch {
+      bodyJson = { error: 'Invalid Response', message: text || `Request failed (${res.status})` } as ApiErrorBody & T;
+    }
+
+    if (!res.ok) {
+      const errBody: ApiErrorBody = {
+        error: bodyJson.error ?? `Error ${res.status}`,
+        message: bodyJson.message ?? bodyJson.error ?? `Request failed (${res.status})`,
+        details: (bodyJson as ApiErrorBody).details,
+        code: (bodyJson as ApiErrorBody).code,
+        requestId: (bodyJson as ApiErrorBody).requestId ?? requestId,
+        debug: (bodyJson as ApiErrorBody).debug,
+      };
+      const apiError = new ApiError(res.status, errBody);
+
+      // Session expired or invalid: clear auth and redirect to login so user can re-authenticate without restarting.
+      if (res.status === 401 && token && !options.skipAuth) {
+        const pathLower = path.toLowerCase();
+        const isAuthRoute = pathLower.includes('/auth/login') || pathLower.includes('/auth/setup');
+        if (!isAuthRoute) {
+          localStorage.removeItem('auth_token');
+          localStorage.removeItem('user');
+          log.info('API', 'Session expired or invalid → cleared auth, redirecting to login');
+          window.location.href = '/login';
+        }
+      }
+
+      throw apiError;
+    }
+
+    if (cacheKey && shouldUseCache) {
+      setCachedResponse(cacheKey, bodyJson as T, ttlMs);
+    } else if (method !== 'GET') {
+      // Keep read-after-write behavior predictable after mutations.
+      clearApiCache();
+    }
+
+    return bodyJson as T;
+  };
+
+  if (!cacheKey) {
+    return execute();
   }
 
-  return bodyJson as T;
+  const promise = execute();
+  inflightRequests.set(cacheKey, promise);
+  try {
+    return await promise;
+  } finally {
+    inflightRequests.delete(cacheKey);
+  }
 }
 
 /** GET helper */
@@ -119,4 +274,4 @@ export function del<T = unknown>(path: string, options?: RequestOptions): Promis
 }
 
 export { getToken };
-export { ApiError, getUserMessage, isApiError } from './errors';
+export { ApiError, getUserMessage, getUserMessageWithRef, isApiError } from './errors';

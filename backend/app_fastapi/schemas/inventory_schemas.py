@@ -59,6 +59,7 @@ class RecipeItemBase(BaseModel):
     quantity: float
     unit: str
     notes: str | None = None
+    variant_key: str = ""
 
 class RecipeItemCreate(RecipeItemBase):
     product_id: int

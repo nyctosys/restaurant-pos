@@ -13,6 +13,20 @@ from app_fastapi.routers.common import yes
 menu_router = APIRouter(prefix="/api/menu-items", tags=["menu-items"])
 
 
+def _normalize_variants_list(raw: Any) -> list[str]:
+    if not isinstance(raw, list):
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for x in raw:
+        if isinstance(x, str):
+            v = x.strip()
+            if v and v not in seen:
+                seen.add(v)
+                out.append(v)
+    return out
+
+
 def _product_to_dict(product: Product) -> dict[str, Any]:
     return {
         "id": product.id,
@@ -20,7 +34,7 @@ def _product_to_dict(product: Product) -> dict[str, Any]:
         "title": product.title,
         "base_price": float(product.base_price),
         "section": product.section or "",
-        "variants": product.variants or [],
+        "variants": _normalize_variants_list(getattr(product, "variants", None)),
         "image_url": product.image_url or "",
         "is_deal": getattr(product, "is_deal", False) or False,
         "archived_at": product.archived_at.isoformat() if getattr(product, "archived_at", None) else None,
@@ -59,7 +73,7 @@ def create_product(payload: dict[str, Any] | None = None, _: User = Depends(requ
             title=title,
             base_price=base_price,
             section=(data.get("section") or "").strip(),
-            variants=data.get("variants") if isinstance(data.get("variants"), list) else [],
+            variants=_normalize_variants_list(data.get("variants")),
             image_url=(data.get("image_url") or "").strip() or "",
         )
         db.session.add(new_product)
@@ -93,7 +107,7 @@ def update_product(product_id: int, payload: dict[str, Any] | None = None, _: Us
     if "section" in data:
         product.section = data["section"]
     if "variants" in data:
-        product.variants = data["variants"]
+        product.variants = _normalize_variants_list(data.get("variants"))
     if "image_url" in data:
         product.image_url = data["image_url"] or ""
     try:

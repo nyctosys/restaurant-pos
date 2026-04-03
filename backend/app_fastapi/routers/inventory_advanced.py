@@ -1,12 +1,28 @@
 from __future__ import annotations
+from datetime import datetime
 from typing import Any
+
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
+from sqlalchemy import func
 
 from app.models import (
-    db, User, Supplier, Ingredient, RecipeItem, PurchaseOrder, 
-    PurchaseOrderItem, StockMovement, Product
+    Ingredient,
+    IngredientBranchStock,
+    Product,
+    PurchaseOrder,
+    PurchaseOrderItem,
+    RecipeItem,
+    Supplier,
+    User,
+    db,
 )
+from app.services.branch_ingredient_stock import (
+    adjust_branch_ingredient_stock,
+    get_branch_stock,
+    seed_branch_stocks_for_new_ingredient,
+)
+from app.services.branch_scope import resolve_terminal_branch_id
 from app_fastapi.deps import get_current_user
 from app_fastapi.schemas.inventory_schemas import (
     SupplierCreate, SupplierUpdate, IngredientCreate, IngredientUpdate,
@@ -14,6 +30,23 @@ from app_fastapi.schemas.inventory_schemas import (
 )
 
 inventory_advanced_router = APIRouter(prefix="/api/inventory-advanced", tags=["inventory-advanced"])
+
+
+def _resolve_inventory_branch(branch_id: int | None, current_user: User) -> int:
+    _ = branch_id
+    return resolve_terminal_branch_id(current_user)
+
+
+def _sync_ingredient_master_total(ingredient_id: int) -> None:
+    total = (
+        db.session.query(func.coalesce(func.sum(IngredientBranchStock.current_stock), 0.0))
+        .filter(IngredientBranchStock.ingredient_id == ingredient_id)
+        .scalar()
+    )
+    ing = Ingredient.query.get(ingredient_id)
+    if ing is not None:
+        ing.current_stock = float(total or 0.0)
+
 
 # --- Suppliers ---
 
@@ -37,29 +70,53 @@ def create_supplier(payload: SupplierCreate, current_user: User = Depends(get_cu
 # --- Ingredients ---
 
 @inventory_advanced_router.get("/ingredients")
-def list_ingredients(current_user: User = Depends(get_current_user)):
+def list_ingredients(
+    branch_id: int | None = None,
+    current_user: User = Depends(get_current_user),
+):
+    bid = _resolve_inventory_branch(branch_id, current_user)
     ingredients = Ingredient.query.filter_by(is_active=True).all()
-    return {"ingredients": [{
-        "id": i.id, "name": i.name, "sku": i.sku, "unit": i.unit.value if hasattr(i.unit, 'value') else i.unit,
-        "current_stock": i.current_stock, "minimum_stock": i.minimum_stock,
-        "reorder_quantity": i.reorder_quantity, "last_purchase_price": i.last_purchase_price,
-        "average_cost": i.average_cost, "preferred_supplier_id": i.preferred_supplier_id,
-        "category": i.category
-    } for i in ingredients]}
+    return {
+        "ingredients": [
+            {
+                "id": i.id,
+                "name": i.name,
+                "sku": i.sku,
+                "unit": i.unit.value if hasattr(i.unit, "value") else i.unit,
+                "current_stock": get_branch_stock(i.id, bid),
+                "minimum_stock": i.minimum_stock,
+                "reorder_quantity": i.reorder_quantity,
+                "last_purchase_price": i.last_purchase_price,
+                "average_cost": i.average_cost,
+                "preferred_supplier_id": i.preferred_supplier_id,
+                "category": i.category,
+                "branch_id": bid,
+            }
+            for i in ingredients
+        ]
+    }
+
 
 @inventory_advanced_router.post("/ingredients")
 def create_ingredient(payload: IngredientCreate, current_user: User = Depends(get_current_user)):
-    i = Ingredient(**payload.model_dump())
+    data = payload.model_dump()
+    i = Ingredient(**data)
     db.session.add(i)
+    db.session.flush()
+    seed_branch_stocks_for_new_ingredient(i.id, float(data.get("current_stock") or 0.0))
+    _sync_ingredient_master_total(i.id)
     db.session.commit()
     return {"id": i.id, "message": "Ingredient created"}
+
 
 @inventory_advanced_router.put("/ingredients/{ingredient_id}")
 def update_ingredient(ingredient_id: int, payload: IngredientUpdate, current_user: User = Depends(get_current_user)):
     i = Ingredient.query.get(ingredient_id)
     if not i:
         return JSONResponse(status_code=404, content={"message": "Not found"})
-    for k, v in payload.model_dump(exclude_unset=True).items():
+    data = payload.model_dump(exclude_unset=True)
+    data.pop("current_stock", None)
+    for k, v in data.items():
         setattr(i, k, v)
     db.session.commit()
     return {"message": "Ingredient updated"}
@@ -72,12 +129,18 @@ def get_recipe(product_id: int, current_user: User = Depends(get_current_user)):
     items = RecipeItem.query.filter_by(product_id=product_id).all()
     return {"recipe_items": [{
         "id": r.id, "ingredient_id": r.ingredient_id,
-        "quantity": r.quantity, "unit": r.unit.value if hasattr(r.unit, 'value') else r.unit, "notes": r.notes
+        "quantity": r.quantity, "unit": r.unit.value if hasattr(r.unit, 'value') else r.unit, "notes": r.notes,
+        "variant_key": getattr(r, "variant_key", None) or "",
     } for r in items]}
 
 @inventory_advanced_router.post("/recipes")
 def add_recipe_item(payload: RecipeItemCreate, current_user: User = Depends(get_current_user)):
-    r = RecipeItem(**payload.model_dump())
+    data = payload.model_dump()
+    if "variant_key" not in data or data.get("variant_key") is None:
+        data["variant_key"] = ""
+    else:
+        data["variant_key"] = str(data["variant_key"]).strip()[:100]
+    r = RecipeItem(**data)
     db.session.add(r)
     db.session.commit()
     return {"id": r.id, "message": "Recipe item mapped"}
@@ -133,40 +196,39 @@ def receive_purchase_order(po_id: int, payload: PurchaseOrderReceive, current_us
     po = PurchaseOrder.query.get(po_id)
     if not po or po.status == "received":
         return JSONResponse(status_code=400, content={"message": "Invalid PO or already received"})
-    
+
     po.status = "received"
     po.received_date = payload.received_date or datetime.utcnow()
 
-    # Update ingredients stock
+    branch_id = int(po.branch_id or current_user.branch_id or 1)
+
     for item in po.items:
         ing = item.ingredient
-        
-        # log movement
-        sm = StockMovement(
-            ingredient_id=ing.id,
+        if ing is None:
+            continue
+        qty_add = float(item.quantity_ordered)
+        qty_before = get_branch_stock(ing.id, branch_id)
+        total_value_before = qty_before * float(ing.average_cost or 0.0)
+        new_value = qty_add * float(item.unit_price)
+        new_total_qty = qty_before + qty_add
+        if new_total_qty > 0:
+            ing.average_cost = (total_value_before + new_value) / new_total_qty
+        ing.last_purchase_price = float(item.unit_price)
+        item.quantity_received = item.quantity_ordered
+
+        adjust_branch_ingredient_stock(
+            ing.id,
+            branch_id,
+            qty_add,
             movement_type="purchase",
-            quantity_change=item.quantity_ordered,
-            quantity_before=ing.current_stock,
-            quantity_after=ing.current_stock + item.quantity_ordered,
-            unit_cost=item.unit_price,
+            user_id=current_user.id,
             reference_id=po.id,
             reference_type="purchase_order",
             reason="PO Received",
-            created_by=current_user.id,
-            branch_id=po.branch_id
+            unit_cost=float(item.unit_price),
+            allow_negative=False,
         )
-        db.session.add(sm)
-
-        # Update average cost
-        total_value_before = ing.current_stock * ing.average_cost
-        new_value = item.quantity_ordered * item.unit_price
-        new_total_qty = ing.current_stock + item.quantity_ordered
-        if new_total_qty > 0:
-            ing.average_cost = (total_value_before + new_value) / new_total_qty
-        
-        ing.current_stock = new_total_qty
-        ing.last_purchase_price = item.unit_price
-        item.quantity_received = item.quantity_ordered
+        _sync_ingredient_master_total(ing.id)
 
     db.session.commit()
     return {"message": "PO fully received, stock and costs updated"}
@@ -190,26 +252,24 @@ def manual_stock_movement(payload: StockMovementCreate, current_user: User = Dep
     ing = Ingredient.query.get(payload.ingredient_id)
     if not ing:
         return JSONResponse(status_code=404, content={"message": "Ingredient not found"})
-    
-    qty_before = ing.current_stock
-    qty_after = qty_before + payload.quantity_change
-    
-    sm = StockMovement(
-        ingredient_id=ing.id,
-        movement_type=payload.movement_type,
-        quantity_change=payload.quantity_change,
-        quantity_before=qty_before,
-        quantity_after=qty_after,
-        unit_cost=payload.unit_cost,
-        reference_id=payload.reference_id,
-        reference_type=payload.reference_type,
-        reason=payload.reason,
-        created_by=current_user.id,
-        branch_id=payload.branch_id
-    )
-    db.session.add(sm)
-    
-    ing.current_stock = qty_after
-    db.session.commit()
-    
-    return {"message": "Stock adjusted successfully", "new_stock": qty_after}
+
+    branch_id = _resolve_inventory_branch(payload.branch_id, current_user)
+    try:
+        _, qty_after = adjust_branch_ingredient_stock(
+            ing.id,
+            branch_id,
+            float(payload.quantity_change),
+            movement_type=payload.movement_type,
+            user_id=current_user.id,
+            reference_id=payload.reference_id,
+            reference_type=payload.reference_type,
+            reason=payload.reason,
+            unit_cost=float(payload.unit_cost or 0),
+            allow_negative=False,
+        )
+        _sync_ingredient_master_total(ing.id)
+        db.session.commit()
+        return {"message": "Stock adjusted successfully", "new_stock": qty_after}
+    except Exception as exc:
+        db.session.rollback()
+        return JSONResponse(status_code=400, content={"message": str(exc)})
