@@ -4,11 +4,9 @@ from typing import Any
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
-from sqlalchemy import func
 
 from app.models import (
     Ingredient,
-    IngredientBranchStock,
     Product,
     PurchaseOrder,
     PurchaseOrderItem,
@@ -22,6 +20,7 @@ from app.services.branch_ingredient_stock import (
     get_branch_stock,
     seed_branch_stocks_for_new_ingredient,
 )
+from app.services.ingredient_master_stock import sync_ingredient_master_total
 from app.services.branch_scope import resolve_terminal_branch_id
 from app.deps import get_current_user
 from app.schemas.inventory_schemas import (
@@ -35,17 +34,6 @@ inventory_advanced_router = APIRouter(prefix="/api/inventory-advanced", tags=["i
 def _resolve_inventory_branch(branch_id: int | None, current_user: User) -> int:
     _ = branch_id
     return resolve_terminal_branch_id(current_user)
-
-
-def _sync_ingredient_master_total(ingredient_id: int) -> None:
-    total = (
-        db.session.query(func.coalesce(func.sum(IngredientBranchStock.current_stock), 0.0))
-        .filter(IngredientBranchStock.ingredient_id == ingredient_id)
-        .scalar()
-    )
-    ing = db.session.get(Ingredient, ingredient_id)
-    if ing is not None:
-        ing.current_stock = float(total or 0.0)
 
 
 # --- Suppliers ---
@@ -104,7 +92,7 @@ def create_ingredient(payload: IngredientCreate, current_user: User = Depends(ge
     db.session.add(i)
     db.session.flush()
     seed_branch_stocks_for_new_ingredient(i.id, float(data.get("current_stock") or 0.0))
-    _sync_ingredient_master_total(i.id)
+    sync_ingredient_master_total(i.id)
     db.session.commit()
     return {"id": i.id, "message": "Ingredient created"}
 
@@ -228,7 +216,7 @@ def receive_purchase_order(po_id: int, payload: PurchaseOrderReceive, current_us
             unit_cost=float(item.unit_price),
             allow_negative=False,
         )
-        _sync_ingredient_master_total(ing.id)
+        sync_ingredient_master_total(ing.id)
 
     db.session.commit()
     return {"message": "PO fully received, stock and costs updated"}
@@ -267,7 +255,7 @@ def manual_stock_movement(payload: StockMovementCreate, current_user: User = Dep
             unit_cost=float(payload.unit_cost or 0),
             allow_negative=False,
         )
-        _sync_ingredient_master_total(ing.id)
+        sync_ingredient_master_total(ing.id)
         db.session.commit()
         return {"message": "Stock adjusted successfully", "new_stock": qty_after}
     except Exception as exc:

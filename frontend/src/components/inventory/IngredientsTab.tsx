@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, X, Loader2, Pencil, Package } from 'lucide-react';
+import { Plus, X, Loader2, Pencil, Package, Layers } from 'lucide-react';
 import { get, post, put, getUserMessage } from '../../api';
 import { getTerminalBranchIdString, parseUserFromStorage } from '../../utils/branchContext';
 import { showToast } from '../Toast';
@@ -25,6 +25,13 @@ type Supplier = {
   name: string;
 };
 
+type RestockRow = {
+  key: string;
+  ingredientId: string;
+  quantity: string;
+  unitCost: string;
+};
+
 const UNITS = ['kg', 'g', 'l', 'ml', 'piece', 'dozen', 'pack', 'can', 'bottle'];
 
 export default function IngredientsTab() {
@@ -46,6 +53,18 @@ export default function IngredientsTab() {
   const [formCategory, setFormCategory] = useState('');
   const [formError, setFormError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [showRestockModal, setShowRestockModal] = useState(false);
+  const [restockRows, setRestockRows] = useState<RestockRow[]>([]);
+  const [restockReason, setRestockReason] = useState('');
+  const [restockError, setRestockError] = useState('');
+  const [restockSubmitting, setRestockSubmitting] = useState(false);
+
+  const createRestockRow = (): RestockRow => ({
+    key: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    ingredientId: '',
+    quantity: '',
+    unitCost: '',
+  });
 
   useEffect(() => {
     fetchData();
@@ -88,6 +107,82 @@ export default function IngredientsTab() {
   const handleOpenAdd = () => {
     resetForm();
     setShowModal(true);
+  };
+
+  const handleOpenBulkRestock = () => {
+    setRestockRows([createRestockRow()]);
+    setRestockReason('');
+    setRestockError('');
+    setShowRestockModal(true);
+  };
+
+  const handleCloseBulkRestock = () => {
+    setShowRestockModal(false);
+    setRestockRows([]);
+    setRestockReason('');
+    setRestockError('');
+  };
+
+  const updateRestockRow = (key: string, patch: Partial<RestockRow>) => {
+    setRestockRows((prev) => prev.map((row) => (row.key === key ? { ...row, ...patch } : row)));
+  };
+
+  const addRestockRow = () => setRestockRows((prev) => [...prev, createRestockRow()]);
+
+  const removeRestockRow = (key: string) => {
+    setRestockRows((prev) => {
+      if (prev.length <= 1) return prev;
+      return prev.filter((row) => row.key !== key);
+    });
+  };
+
+  const handleSubmitBulkRestock = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmedReason = restockReason.trim();
+    const items: { ingredient_id: number; quantity: number; unit_cost?: number }[] = [];
+
+    for (let i = 0; i < restockRows.length; i += 1) {
+      const row = restockRows[i];
+      const ingredientId = Number.parseInt(row.ingredientId, 10);
+      const quantity = Number.parseFloat(row.quantity);
+      const unitCostText = row.unitCost.trim();
+      const unitCost = unitCostText === '' ? undefined : Number.parseFloat(unitCostText);
+
+      if (!Number.isFinite(ingredientId)) {
+        setRestockError(`Row ${i + 1}: select a material.`);
+        return;
+      }
+      if (!Number.isFinite(quantity) || quantity <= 0) {
+        setRestockError(`Row ${i + 1}: quantity must be greater than 0.`);
+        return;
+      }
+      if (unitCostText !== '' && (!Number.isFinite(unitCost) || (unitCost ?? 0) < 0)) {
+        setRestockError(`Row ${i + 1}: unit cost must be 0 or greater.`);
+        return;
+      }
+
+      items.push({
+        ingredient_id: ingredientId,
+        quantity,
+        ...(unitCost !== undefined ? { unit_cost: unitCost } : {}),
+      });
+    }
+
+    setRestockSubmitting(true);
+    setRestockError('');
+    try {
+      await post('/stock/bulk-restock', {
+        reason: trimmedReason || undefined,
+        items,
+      });
+      showToast('Bulk restock completed', 'success');
+      handleCloseBulkRestock();
+      fetchData();
+    } catch (error) {
+      setRestockError(getUserMessage(error));
+    } finally {
+      setRestockSubmitting(false);
+    }
   };
 
   const handleOpenEdit = (ing: Ingredient) => {
@@ -160,13 +255,22 @@ export default function IngredientsTab() {
     <div className="flex flex-col h-full min-h-0 bg-transparent py-4">
       <div className="page-padding flex justify-between items-center bg-transparent shrink-0 pb-4">
         <h3 className="text-xl font-bold text-soot-900 hidden sm:block">Raw Materials</h3>
-        <button
-          onClick={handleOpenAdd}
-          className="flex items-center gap-2 bg-brand-700 text-white px-4 py-2 rounded-lg font-medium hover:bg-brand-600 touch-target transition-colors ml-auto"
-        >
-          <Plus className="w-4 h-4" />
-          Add material
-        </button>
+        <div className="ml-auto flex items-center gap-2">
+          <button
+            onClick={handleOpenBulkRestock}
+            className="flex items-center gap-2 bg-white/70 border border-white/70 text-soot-700 px-4 py-2 rounded-lg font-medium hover:bg-white/90 touch-target transition-colors"
+          >
+            <Layers className="w-4 h-4" />
+            Bulk restock
+          </button>
+          <button
+            onClick={handleOpenAdd}
+            className="flex items-center gap-2 bg-brand-700 text-white px-4 py-2 rounded-lg font-medium hover:bg-brand-600 touch-target transition-colors"
+          >
+            <Plus className="w-4 h-4" />
+            Add material
+          </button>
+        </div>
       </div>
 
       <div className="page-padding flex-1 overflow-auto">
@@ -324,6 +428,120 @@ export default function IngredientsTab() {
              </form>
            </div>
          </div>
+      )}
+
+      {showRestockModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 glass-overlay overflow-y-auto">
+          <div className="glass-floating w-full max-w-3xl my-auto flex flex-col max-h-[90vh] overflow-hidden">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-neutral-200/60 bg-white/25 shrink-0">
+              <h3 className="text-lg font-bold text-neutral-900">Bulk restock materials</h3>
+              <button onClick={handleCloseBulkRestock} className="p-1.5 rounded-lg hover:bg-neutral-200 transition-colors">
+                <X className="w-5 h-5 text-neutral-500" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmitBulkRestock} className="p-6 space-y-4 overflow-y-auto min-h-0 flex-1">
+              {restockError && (
+                <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-2 text-sm font-medium">
+                  {restockError}
+                </div>
+              )}
+
+              <div>
+                <label className="block text-sm font-medium text-neutral-700 mb-1">Note / Reason (optional)</label>
+                <input
+                  type="text"
+                  value={restockReason}
+                  onChange={(e) => setRestockReason(e.target.value)}
+                  className="w-full px-4 py-2.5 glass-card text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none"
+                  placeholder="e.g. Weekly supplier delivery"
+                />
+              </div>
+
+              <div className="space-y-3">
+                {restockRows.map((row, idx) => (
+                  <div key={row.key} className="grid grid-cols-12 gap-2 items-end glass-card p-3 rounded-lg">
+                    <div className="col-span-12 md:col-span-6">
+                      <label className="block text-xs font-semibold text-neutral-600 mb-1">Material</label>
+                      <select
+                        value={row.ingredientId}
+                        onChange={(e) => updateRestockRow(row.key, { ingredientId: e.target.value })}
+                        className="w-full px-3 py-2.5 glass-card text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none"
+                      >
+                        <option value="">Select material</option>
+                        {ingredients.map((ing) => (
+                          <option key={ing.id} value={ing.id}>
+                            {ing.name} ({ing.unit})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="col-span-6 md:col-span-2">
+                      <label className="block text-xs font-semibold text-neutral-600 mb-1">Quantity</label>
+                      <input
+                        type="number"
+                        step="any"
+                        min="0"
+                        value={row.quantity}
+                        onChange={(e) => updateRestockRow(row.key, { quantity: e.target.value })}
+                        className="w-full px-3 py-2.5 glass-card text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none"
+                        placeholder="0"
+                      />
+                    </div>
+                    <div className="col-span-6 md:col-span-3">
+                      <label className="block text-xs font-semibold text-neutral-600 mb-1">Unit cost (PKR)</label>
+                      <input
+                        type="number"
+                        step="any"
+                        min="0"
+                        value={row.unitCost}
+                        onChange={(e) => updateRestockRow(row.key, { unitCost: e.target.value })}
+                        className="w-full px-3 py-2.5 glass-card text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none"
+                        placeholder="Optional"
+                      />
+                    </div>
+                    <div className="col-span-12 md:col-span-1 flex justify-end">
+                      <button
+                        type="button"
+                        onClick={() => removeRestockRow(row.key)}
+                        className="p-2 rounded-lg text-neutral-500 hover:text-red-600 hover:bg-red-50 transition-colors"
+                        title={`Remove row ${idx + 1}`}
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <button
+                type="button"
+                onClick={addRestockRow}
+                className="px-4 py-2 text-sm font-medium rounded-lg border border-white/80 bg-white/70 hover:bg-white/90 transition-colors"
+              >
+                Add row
+              </button>
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={handleCloseBulkRestock}
+                  className="flex-1 px-4 py-2.5 border border-neutral-200 rounded-lg text-sm font-medium text-neutral-600 hover:bg-neutral-50 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={restockSubmitting}
+                  className="flex-1 px-4 py-2.5 bg-brand-700 text-white rounded-lg text-sm font-medium hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 touch-target"
+                >
+                  {restockSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
+                  Submit restock
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
     </div>
   );

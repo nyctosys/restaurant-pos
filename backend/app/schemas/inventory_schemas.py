@@ -100,3 +100,16 @@ class StockMovementCreate(BaseModel):
     reference_type: str | None = None
     reason: str | None = None
     branch_id: int | None = None
+
+
+class BulkRestockLine(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    ingredient_id: int
+    quantity: float = Field(gt=0)
+    unit_cost: float | None = Field(default=None, ge=0)
+
+
+class BulkRestockRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    items: list[BulkRestockLine] = Field(min_length=1, max_length=200)
+    reason: str | None = None

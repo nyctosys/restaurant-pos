@@ -7,6 +7,9 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
 from app.models import Ingredient, IngredientBranchStock, StockMovement, User, db
+from app.schemas.inventory_schemas import BulkRestockRequest
+from app.services.branch_ingredient_stock import adjust_branch_ingredient_stock, get_branch_stock
+from app.services.ingredient_master_stock import sync_ingredient_master_total
 from app.services.branch_scope import resolve_terminal_branch_id
 from app.services.sync_outbox import enqueue_sync_event
 from app.deps import get_current_user
@@ -62,8 +65,6 @@ def get_ingredient_stock_map(branch_id: int | None = None, current_user: User = 
 @stock_router.post("/update")
 def update_ingredient_stock(payload: dict[str, Any] | None = None, current_user: User = Depends(get_current_user)):
     """Adjust ingredient quantity at a branch (creates a StockMovement)."""
-    from app.services.branch_ingredient_stock import adjust_branch_ingredient_stock
-
     data = payload or {}
     branch_id = _terminal_branch_id(current_user)
     ingredient_id = data.get("ingredient_id")
@@ -109,6 +110,97 @@ def update_ingredient_stock(payload: dict[str, Any] | None = None, current_user:
         )
         db.session.commit()
         return {"message": "Stock updated", "stock_level": qty_after}
+    except Exception as exc:
+        db.session.rollback()
+        return JSONResponse(status_code=400, content={"message": str(exc)})
+
+
+@stock_router.post("/bulk-restock")
+def bulk_restock_ingredients(payload: BulkRestockRequest, current_user: User = Depends(get_current_user)):
+    """Bulk restock ingredients for the current terminal branch in one transaction."""
+    branch_id = _terminal_branch_id(current_user)
+    ingredient_ids = {int(item.ingredient_id) for item in payload.items}
+    ingredient_rows = (
+        Ingredient.query.filter(Ingredient.id.in_(ingredient_ids)).all()
+        if ingredient_ids
+        else []
+    )
+    ingredients_by_id = {int(ing.id): ing for ing in ingredient_rows}
+    missing_ids = sorted(iid for iid in ingredient_ids if iid not in ingredients_by_id)
+    if missing_ids:
+        return JSONResponse(
+            status_code=404,
+            content={"message": f"Ingredient not found: {missing_ids[0]}"},
+        )
+
+    touched_ingredient_ids: set[int] = set()
+    results: list[dict[str, Any]] = []
+    reason_text = (payload.reason or "").strip() or "Bulk restock"
+
+    try:
+        for line in payload.items:
+            ingredient_id = int(line.ingredient_id)
+            qty_add = float(line.quantity)
+            ing = ingredients_by_id[ingredient_id]
+
+            incoming_unit_cost = None if line.unit_cost is None else float(line.unit_cost)
+            movement_type = "adjustment"
+            reference_type = "manual_adjustment"
+            applied_unit_cost = float(ing.average_cost or 0.0)
+
+            if incoming_unit_cost is not None and incoming_unit_cost > 0:
+                qty_before = get_branch_stock(ingredient_id, branch_id)
+                total_value_before = qty_before * float(ing.average_cost or 0.0)
+                new_total_qty = qty_before + qty_add
+                if new_total_qty > 0:
+                    ing.average_cost = (total_value_before + (qty_add * incoming_unit_cost)) / new_total_qty
+                ing.last_purchase_price = incoming_unit_cost
+                movement_type = "purchase"
+                reference_type = "bulk_restock"
+                applied_unit_cost = incoming_unit_cost
+
+            _, qty_after = adjust_branch_ingredient_stock(
+                ingredient_id,
+                branch_id,
+                qty_add,
+                movement_type=movement_type,
+                user_id=current_user.id,
+                reference_id=None,
+                reference_type=reference_type,
+                reason=reason_text,
+                unit_cost=applied_unit_cost,
+                allow_negative=False,
+            )
+            db.session.flush()
+            mv = (
+                StockMovement.query.filter_by(branch_id=branch_id, ingredient_id=ingredient_id)
+                .order_by(StockMovement.id.desc())
+                .first()
+            )
+            enqueue_sync_event(
+                branch_id=branch_id,
+                entity_type="stock_movement",
+                entity_id=mv.id if mv else None,
+                event_type="ingredient_stock_adjustment",
+                payload={
+                    "ingredient_id": ingredient_id,
+                    "delta": qty_add,
+                    "quantity_after": qty_after,
+                },
+            )
+            touched_ingredient_ids.add(ingredient_id)
+            results.append(
+                {
+                    "ingredient_id": ingredient_id,
+                    "quantity_added": qty_add,
+                    "quantity_after": qty_after,
+                }
+            )
+
+        for ingredient_id in touched_ingredient_ids:
+            sync_ingredient_master_total(ingredient_id)
+        db.session.commit()
+        return {"message": "Bulk restock completed", "results": results}
     except Exception as exc:
         db.session.rollback()
         return JSONResponse(status_code=400, content={"message": str(exc)})
