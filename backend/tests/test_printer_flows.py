@@ -1,0 +1,129 @@
+from __future__ import annotations
+
+import pytest
+from werkzeug.security import generate_password_hash
+
+from app.models import Branch, Ingredient, IngredientBranchStock, Product, RecipeItem, User, db
+from app.services.branch_ingredient_stock import seed_branch_stocks_for_new_ingredient
+
+
+def _setup_owner_and_menu_item(app):
+    with app.app_context():
+        branch = Branch(name="Main")
+        db.session.add(branch)
+        db.session.flush()
+
+        user = User(
+            username="owner-printer",
+            password_hash=generate_password_hash("pass"),
+            role="owner",
+            branch_id=branch.id,
+        )
+        db.session.add(user)
+        db.session.flush()
+
+        ingredient = Ingredient(name="ing-printer", unit="piece", current_stock=0.0)
+        db.session.add(ingredient)
+        db.session.flush()
+        seed_branch_stocks_for_new_ingredient(ingredient.id, 0.0)
+        row = IngredientBranchStock.query.filter_by(ingredient_id=ingredient.id, branch_id=branch.id).first()
+        if row is not None:
+            row.current_stock = 100.0
+        ingredient.current_stock = 100.0
+
+        product = Product(sku="SKU-PRINTER", title="Printer Item", base_price=10.0)
+        db.session.add(product)
+        db.session.flush()
+
+        db.session.add(RecipeItem(product_id=product.id, ingredient_id=ingredient.id, quantity=1.0, unit="piece"))
+        db.session.commit()
+        return branch.id, product.id
+
+
+def _login_token(client):
+    r = client.post("/api/auth/login", json={"username": "owner-printer", "password": "pass"})
+    assert r.status_code == 200
+    return r.get_json()["token"]
+
+
+@pytest.mark.parametrize(
+    ("order_type", "order_snapshot"),
+    [
+        ("dine_in", {"table_name": "T1"}),
+        ("takeaway", None),
+        (
+            "delivery",
+            {
+                "customer_name": "Ali",
+                "phone": "03001234567",
+                "address": "Street 1",
+            },
+        ),
+    ],
+)
+def test_finalize_open_order_always_triggers_receipt_print(client, app, monkeypatch, order_type, order_snapshot):
+    branch_id, product_id = _setup_owner_and_menu_item(app)
+    token = _login_token(client)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    receipt_calls: list[dict] = []
+
+    def _fake_print_kot(self, kot_data):
+        return True
+
+    def _fake_print_receipt(self, receipt_data):
+        receipt_calls.append(receipt_data)
+        return True
+
+    monkeypatch.setattr("app.services.printer_service.PrinterService.print_kot", _fake_print_kot)
+    monkeypatch.setattr("app.services.printer_service.PrinterService.print_receipt", _fake_print_receipt)
+
+    kot_payload = {
+        "order_type": order_type,
+        "items": [{"product_id": product_id, "quantity": 1}],
+    }
+    if order_snapshot is not None:
+        kot_payload["order_snapshot"] = order_snapshot
+
+    create = client.post("/api/orders/kot", headers=headers, json=kot_payload)
+    assert create.status_code == 201
+    sale_id = create.get_json()["sale_id"]
+
+    finalize_payload = {"payment_method": "Cash", "discount": None}
+    if order_type == "delivery":
+        finalize_payload["delivery_charge"] = 300
+    if order_type == "dine_in":
+        finalize_payload["service_charge"] = 0
+
+    paid = client.post(f"/api/orders/{sale_id}/finalize", headers=headers, json=finalize_payload)
+    assert paid.status_code == 200
+    assert paid.get_json().get("print_success") is True
+    assert len(receipt_calls) == 1
+    assert receipt_calls[0].get("order_type") == order_type
+
+
+def test_printer_status_probe_releases_connection(client, app, monkeypatch):
+    branch_id, _ = _setup_owner_and_menu_item(app)
+    _ = branch_id
+    token = _login_token(client)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    calls = {"connect": 0, "disconnect": 0}
+
+    def _fake_connect(self, printer_kind="receipt"):
+        calls["connect"] += 1
+        return True
+
+    def _fake_disconnect(self):
+        calls["disconnect"] += 1
+        return None
+
+    monkeypatch.setattr("app.services.printer_service.PrinterService.connect", _fake_connect)
+    monkeypatch.setattr("app.services.printer_service.PrinterService._disconnect", _fake_disconnect)
+
+    res = client.get("/api/printer/status", headers=headers)
+    assert res.status_code == 200
+    body = res.get_json()
+    assert body.get("status") == "connected"
+    assert calls["connect"] == 1
+    assert calls["disconnect"] == 1

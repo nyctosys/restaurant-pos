@@ -14,14 +14,17 @@ printer_router = APIRouter(prefix="/api/printer", tags=["printer"])
 
 @printer_router.get("/status")
 def printer_status(_: User = Depends(get_current_user)):
+    printer_service = PrinterService()
     try:
-        printer_service = PrinterService()
         connected = printer_service.connect()
         if connected:
             return {"status": "connected", "message": "Printer is connected and ready"}
         return {"status": "disconnected", "message": "Printer not found or not configured"}
     except Exception as exc:
         return {"status": "error", "message": str(exc)}
+    finally:
+        # Status checks should never keep handles open; fresh handles are safer per print job.
+        printer_service._disconnect()
 
 
 @printer_router.post("/test-print")

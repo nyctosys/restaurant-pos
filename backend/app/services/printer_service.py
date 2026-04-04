@@ -139,10 +139,24 @@ class PrinterService:
         except Exception:
             pass
 
+    def _ensure_connected(self, printer_kind: str, *, fresh: bool = False) -> bool:
+        """
+        Ensure printer is connected for the requested kind.
+        `fresh=True` forces a reconnect to avoid stale OS/device handles between jobs.
+        """
+        desired_kind = "kot" if str(printer_kind).lower() == "kot" else "receipt"
+        if fresh and self.printer:
+            self._disconnect()
+        elif self.printer and self.printer_kind != desired_kind:
+            self._disconnect()
+
+        if self.printer:
+            return True
+        return self.connect(desired_kind)
+
     def print_text(self, text):
-        if not self.printer:
-            if not self.connect("receipt"):
-                return False
+        if not self._ensure_connected("receipt", fresh=True):
+            return False
         
         try:
             self.printer.text(text)
@@ -241,11 +255,8 @@ class PrinterService:
         return binary
 
     def print_receipt(self, sale_data):
-        if self.printer and self.printer_kind != "receipt":
-            self._disconnect()
-        if not self.printer:
-            if not self.connect("receipt"):
-                return False
+        if not self._ensure_connected("receipt", fresh=True):
+            return False
 
         settings = self._get_receipt_settings(sale_data.get('branch_id'))
         # Test print: use normal font size so it doesn't print super large
@@ -491,12 +502,7 @@ class PrinterService:
 
     def print_kot(self, kot_data: dict) -> bool:
         """Kitchen order ticket for KDS / prep station (no prices, no tax)."""
-        if self.printer and self.printer_kind != "kot":
-            self._disconnect()
-        if not self.printer:
-            if not self.connect("kot"):
-                return False
-        if not self.printer:
+        if not self._ensure_connected("kot", fresh=True):
             return False
         settings = self._get_receipt_settings(kot_data.get("branch_id"))
         from datetime import datetime, timezone
@@ -596,7 +602,7 @@ class PrinterService:
         """Print a barcode label (product name + CODE128) on the configured receipt printer."""
         if not sku or not sku.strip():
             return False
-        if not self.printer and not self.connect("receipt"):
+        if not self._ensure_connected("receipt", fresh=True):
             return False
         sku = sku.strip()
         try:
