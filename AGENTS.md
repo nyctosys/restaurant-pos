@@ -1,6 +1,5 @@
 ## Learned User Preferences
-- Prefer modular architecture and clear separation of responsibilities when implementing features.
-- When altering a function, trace complete data flow (callers, callees, boundaries, and shared contracts) to avoid regressions.
+- Prefer modular architecture with clear separation of concerns, and trace full data flow (callers, callees, boundaries, shared contracts) when altering functions to avoid regressions.
 - Keep unrelated features untouched during scoped feature work; avoid broad collateral refactors.
 - Use restaurant-oriented terminology across product UI and API naming instead of clothing-store language.
 - Prefer iPad landscape and tablet-first layouts as the primary baseline; treat desktop as a deliberate density variant, not a stretched tablet UI.
@@ -11,16 +10,18 @@
 - Default the Dashboard menu layout toggle to list view on a fresh load (not grid).
 - Label monetary amounts as PKR where shown (e.g. bundled deal pricing); formatting uses Rs. / `en-PK` conventions in the frontend.
 - Kitchen KDS should use consistent KOT card sizes and performance-friendly rendering so the line stays easy to scan under load.
+- Prefer structured logging and consistent error handling; Settings App Logs should support root-cause diagnosis with sanitized, non-secret detail.
 
 ## Learned Workspace Facts
 - The app is being evolved into a restaurant stall POS with variant/modifier-based items and recipe/BOM-driven ingredient depletion as inventory truth (not retail finished-goods SKU stock), while preserving existing auth/settings/printer and role flows; recipe rows can be scoped per menu variant via `RecipeItem.variant_key` (empty key = base BOM), falling back to the base BOM when no rows exist for a chosen variant.
 - Each POS terminal is scoped to one branch (no in-app branch switching); Branch Management shows only the current branch and its details are editable in Settings by owner and manager; syncing to a central admin panel is a planned direction but building that admin UI is out of current scope.
 - Backend and frontend API paths use restaurant naming (`/api/menu-items`, `/api/stock`, `/api/orders`, etc.); deals/combos use canonical `GET/POST/DELETE /api/menu/deals` (legacy `/api/inventory-advanced/deals` kept for compatibility). Menu Management covers menu items and deals/combos; the Inventory area focuses on ingredients, recipes (BOM), suppliers, and purchase orders. Removing a deal archives the underlying product (`Product.archived_at`, owner-only), keeps combo rows for history, and blocks new sales of archived products while preserving past sale lines.
 - Stock movement reporting is part of the core requirements, including day/week/month/year/custom time filters.
-- Local development expects Dockerized PostgreSQL for the backend startup path.
-- Printed receipts include order type (takeaway, dine-in, or delivery) on the ticket; deployments may use two LAN printers—one for customer receipts and one for KOTs.
+- Local development expects Dockerized PostgreSQL for the backend startup path; use Python 3.10–3.12 (or another version with working wheels) so pinned native deps such as `psycopg2-binary` install cleanly—especially on Windows with newest CPython releases.
+- Printed receipts include order type (takeaway, dine-in, or delivery) on the ticket; **service charge** (dine-in) and **delivery charge** (delivery) appear on the receipt when applicable; deployments may use two LAN printers—one for customer receipts and one for KOTs.
 - Dine-in flows use registered tables in settings, KOT generation for the kitchen, an active dine-in orders view, optional KDS kitchen display on a kitchen-only full-screen `/kitchen` route (kitchen role, not part of the POS nav), and open-tab handling before payment.
-- Kitchen KDS uses `GET /api/orders/kitchen` and `PATCH /api/orders/{sale_id}/kitchen-status`; open dine-in sales include `kitchen_status` (`placed` | `preparing` | `ready`), with new KOTs setting `placed` and NULL/legacy rows treated as `placed` in responses.
-- The HTTP API is FastAPI-only—do not use Flask or Flask-SQLAlchemy for runtime; SQLAlchemy uses per-request sessions (e.g. ContextVar), not Flask globals. Local backend dev server listens on port 5001 by default.
+- Kitchen KDS uses `GET /api/orders/kitchen` and `PATCH /api/orders/{sale_id}/kitchen-status`; open dine-in sales include `kitchen_status` (`placed` | `preparing` | `ready`), with new KOTs setting `placed` and NULL/legacy rows treated as `placed` in responses. The kitchen UI listens for Socket.IO events (`ORDER_CREATED`, `ORDER_UPDATED`, `ORDER_STATUS_CHANGED`); the backend must schedule emits after kitchen-relevant mutations or the board only updates on manual refetch/refresh.
+- The HTTP API is FastAPI-only—do not use Flask or Flask-SQLAlchemy for runtime; `app_fastapi/` is the live FastAPI app and routers, while `app/` holds models, `db`, services, and DB init (`create_app`); legacy `app/routes/` is unused. SQLAlchemy uses a per-request scope with lazy per-thread sessions for sync routes on the thread pool, pure ASGI middleware for bind/teardown (avoid `BaseHTTPMiddleware` for request DB context), and SQLite `:memory:` tests use `StaticPool` with `check_same_thread=False`. Local backend dev server listens on port 5001 by default.
 - With an empty database, auth reports uninitialized; use `/setup` for first registration and clear stale `localStorage` auth tokens if the setup/register screen does not appear.
+- The frontend API client may cache GET responses for mostly static routes (e.g. settings, menu, stock, deals) with TTL and invalidates cache after mutating requests; volatile routes such as orders/kitchen stay uncached.
 - Agents may use Axon MCP for codebase exploration and Google Stitch MCP for UI or design-system inspiration when the user requests those tools.

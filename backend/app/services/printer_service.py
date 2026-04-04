@@ -129,6 +129,16 @@ class PrinterService:
             pass
         self.printer = None
 
+    def _kot_printer_buzz(self) -> None:
+        """Sound the KOT printer buzzer on ESC/POS models that support it; no-op on failure."""
+        if not self.printer:
+            return
+        try:
+            # python-escpos: ESC B n t (beeps × duration); ignored by printers without a buzzer.
+            self.printer.buzzer(times=3, duration=5)
+        except Exception:
+            pass
+
     def print_text(self, text):
         if not self.printer:
             if not self.connect("receipt"):
@@ -573,6 +583,7 @@ class PrinterService:
             self.printer.text(thin + "\n")
             self.printer.set(align="center")
             self.printer.text("— KDS / Prep —\n\n")
+            self._kot_printer_buzz()
             self.printer.cut()
             self._disconnect()
             return True
