@@ -132,7 +132,7 @@ def list_deals(current_user: User = Depends(get_current_user)):
 
 
 @deals_router.post("/")
-def create_deal(payload: DealCreate, current_user: User = Depends(get_current_user)):
+def create_deal(payload: DealCreate, current_user: User = Depends(require_owner)):
     return _create_deal_impl(payload, current_user)
 
 
@@ -148,7 +148,7 @@ def list_menu_deals(current_user: User = Depends(get_current_user)):
 
 
 @menu_deals_router.post("/")
-def create_menu_deal(payload: DealCreate, current_user: User = Depends(get_current_user)):
+def create_menu_deal(payload: DealCreate, current_user: User = Depends(require_owner)):
     return _create_deal_impl(payload, current_user)
 
 

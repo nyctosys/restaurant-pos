@@ -32,6 +32,28 @@ def _auth_headers(client, app):
     return {"Authorization": f"Bearer {token}"}
 
 
+def _cashier_headers(client, app):
+    with app.app_context():
+        user = User.query.filter_by(username="cashier_deals").first()
+        if not user:
+            b = Branch.query.filter_by(name="DealsBranch").first()
+            if not b:
+                b = Branch(name="DealsBranch")
+                db.session.add(b)
+                db.session.flush()
+            u = User(
+                username="cashier_deals",
+                password_hash=generate_password_hash("pass"),
+                role="cashier",
+                branch_id=b.id,
+            )
+            db.session.add(u)
+            db.session.commit()
+    r = client.post("/api/auth/login", json={"username": "cashier_deals", "password": "pass"})
+    token = r.get_json()["token"]
+    return {"Authorization": f"Bearer {token}"}
+
+
 def _set_branch_stock(ingredient_id: int, branch_id: int, level: float) -> None:
     row = IngredientBranchStock.query.filter_by(ingredient_id=ingredient_id, branch_id=branch_id).first()
     if row:
@@ -232,3 +254,37 @@ def test_deal_soft_delete_hides_from_list_blocks_new_sales(client, app):
         },
     )
     assert r_checkout.status_code == 400
+
+
+@pytest.mark.parametrize("path", ["/api/menu/deals/", "/api/inventory-advanced/deals/"])
+def test_deal_create_requires_owner(client, app, path):
+    owner_headers = _auth_headers(client, app)
+    cashier_headers = _cashier_headers(client, app)
+
+    r_b = client.post(
+        "/api/menu-items/",
+        headers=owner_headers,
+        json={"sku": "AUTH-B", "title": "Auth Burger", "base_price": 5.0, "section": "Mains"},
+    )
+    burger_id = r_b.get_json()["id"]
+    r_f = client.post(
+        "/api/menu-items/",
+        headers=owner_headers,
+        json={"sku": "AUTH-F", "title": "Auth Fries", "base_price": 3.0, "section": "Sides"},
+    )
+    fries_id = r_f.get_json()["id"]
+
+    r = client.post(
+        path,
+        headers=cashier_headers,
+        json={
+            "title": "Unauthorized Combo",
+            "sku": f"AUTH-C-{path.split('/')[2]}",
+            "base_price": 7.0,
+            "combo_items": [
+                {"product_id": burger_id, "quantity": 1},
+                {"product_id": fries_id, "quantity": 1},
+            ],
+        },
+    )
+    assert r.status_code == 403
