@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, time, timedelta
+from datetime import datetime, time, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends
@@ -9,13 +9,13 @@ from fastapi.responses import JSONResponse
 from app.models import Ingredient, IngredientBranchStock, StockMovement, User, db
 from app.services.branch_scope import resolve_terminal_branch_id
 from app.services.sync_outbox import enqueue_sync_event
-from app_fastapi.deps import get_current_user
+from app.deps import get_current_user
 
 stock_router = APIRouter(prefix="/api/stock", tags=["stock"])
 
 
 def _stock_transactions_time_range(time_filter: str, start_date_str: str | None, end_date_str: str | None):
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     tz_offset = timedelta(hours=5)
     local_now = now + tz_offset
     start_dt = end_dt = None
@@ -74,7 +74,7 @@ def update_ingredient_stock(payload: dict[str, Any] | None = None, current_user:
         return JSONResponse(status_code=400, content={"message": "stock_delta must be a number"})
     if not ingredient_id:
         return JSONResponse(status_code=400, content={"message": "ingredient_id required"})
-    ing = Ingredient.query.get(int(ingredient_id))
+    ing = db.session.get(Ingredient, int(ingredient_id))
     if not ing:
         return JSONResponse(status_code=404, content={"message": "Ingredient not found"})
     try:

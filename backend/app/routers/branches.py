@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 
 from app.models import Branch, Ingredient, IngredientBranchStock, Inventory, Sale, Setting, User, db
-from app_fastapi.deps import get_current_user, require_owner, require_owner_or_manager
-from app_fastapi.routers.common import yes
+from app.deps import get_current_user, require_owner, require_owner_or_manager
+from app.routers.common import yes
 
 branches_router = APIRouter(prefix="/api/branches", tags=["branches"])
 
@@ -80,7 +80,7 @@ def create_branch(payload: dict[str, Any] | None = None, _: User = Depends(requi
 @branches_router.put("/{branch_id}")
 def update_branch(branch_id: int, payload: dict[str, Any] | None = None, current_user: User = Depends(require_owner_or_manager)):
     _assert_branch_access(branch_id, current_user)
-    branch = Branch.query.get(branch_id)
+    branch = db.session.get(Branch, branch_id)
     if not branch:
         return JSONResponse(status_code=404, content={"message": "Branch not found"})
     data = payload or {}
@@ -111,13 +111,13 @@ def update_branch(branch_id: int, payload: dict[str, Any] | None = None, current
 
 @branches_router.patch("/{branch_id}/archive")
 def archive_branch(branch_id: int, _: User = Depends(require_owner)):
-    branch = Branch.query.get(branch_id)
+    branch = db.session.get(Branch, branch_id)
     if not branch:
         raise HTTPException(status_code=404, detail="Not Found")
     if not hasattr(branch, "archived_at"):
         return JSONResponse(status_code=400, content={"message": "Archive not supported"})
     try:
-        branch.archived_at = datetime.utcnow()
+        branch.archived_at = datetime.now(timezone.utc)
         db.session.commit()
         return {"message": "Branch archived", "archived_at": branch.archived_at.isoformat()}
     except Exception as exc:
@@ -127,7 +127,7 @@ def archive_branch(branch_id: int, _: User = Depends(require_owner)):
 
 @branches_router.patch("/{branch_id}/unarchive")
 def unarchive_branch(branch_id: int, _: User = Depends(require_owner)):
-    branch = Branch.query.get(branch_id)
+    branch = db.session.get(Branch, branch_id)
     if not branch:
         raise HTTPException(status_code=404, detail="Not Found")
     if not hasattr(branch, "archived_at"):
@@ -143,7 +143,7 @@ def unarchive_branch(branch_id: int, _: User = Depends(require_owner)):
 
 @branches_router.delete("/{branch_id}")
 def delete_branch(branch_id: int, cascade: str | None = None, _: User = Depends(require_owner)):
-    branch = Branch.query.get(branch_id)
+    branch = db.session.get(Branch, branch_id)
     if not branch:
         return JSONResponse(status_code=404, content={"message": "Branch not found"})
     if yes(cascade):
@@ -207,7 +207,7 @@ def delete_branch(branch_id: int, cascade: str | None = None, _: User = Depends(
 @branches_router.get("/{branch_id}/users")
 def get_branch_users(branch_id: int, current_user: User = Depends(require_owner_or_manager)):
     _assert_branch_access(branch_id, current_user)
-    branch = Branch.query.get(branch_id)
+    branch = db.session.get(Branch, branch_id)
     if not branch:
         return JSONResponse(status_code=404, content={"message": "Branch not found"})
     users = User.query.filter_by(branch_id=branch_id).order_by(User.created_at.asc()).all()

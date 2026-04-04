@@ -13,8 +13,8 @@ from app.services.branch_scope import resolve_terminal_branch_id
 from app.services.printer_service import PrinterService
 from app.services.recipe_variants import combo_items_for_variant, normalize_variant_key, recipe_rows_for_variant
 from app.services.sync_outbox import enqueue_sync_event
-from app_fastapi.deps import get_current_user, require_owner
-from app_fastapi.routers.common import yes
+from app.deps import get_current_user, require_owner
+from app.routers.common import yes
 
 orders_router = APIRouter(prefix="/api/orders", tags=["orders"])
 DELIVERY_CHARGE = 300.0
@@ -98,7 +98,7 @@ def _order_charges(order_type: str | None, payload: dict[str, Any]) -> tuple[flo
 
 
 def get_time_filter_ranges(time_filter: str, start_date_str: str | None, end_date_str: str | None):
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     tz_offset = timedelta(hours=5)
     local_now = now + tz_offset
     start_dt = end_dt = None
@@ -156,7 +156,7 @@ def _modifiers_payload_for_api(value: Any) -> list[dict[str, Any]]:
     for raw in value:
         if isinstance(raw, dict) and raw.get("modifier_id") is not None:
             mid = int(raw["modifier_id"])
-            m = Modifier.query.get(mid)
+            m = db.session.get(Modifier, mid)
             price = float(m.price) if m and m.price is not None else None
             out.append(
                 {
@@ -179,7 +179,7 @@ def _resolve_modifier_snapshots(
         if mid in seen_ids:
             continue
         seen_ids.add(mid)
-        m = Modifier.query.get(mid)
+        m = db.session.get(Modifier, mid)
         if m is None or m.archived_at is not None:
             return False, f"Unknown or archived modifier (id {mid})", []
         snapshots.append({"modifier_id": m.id, "name": m.name})
@@ -196,7 +196,7 @@ def _process_modifier_depletions(
     from app.services.branch_ingredient_stock import InsufficientIngredientStock, adjust_branch_ingredient_stock
 
     for mid in modifier_ids:
-        mod = Modifier.query.get(mid)
+        mod = db.session.get(Modifier, mid)
         if mod is None or mod.ingredient_id is None:
             continue
         dep = float(mod.depletion_quantity) if mod.depletion_quantity is not None else 1.0
@@ -321,7 +321,7 @@ def _restore_modifier_depletions_from_sale_item(
     sale_id = int(sale_item.sale_id)
     for entry in raw:
         if isinstance(entry, dict) and entry.get("modifier_id") is not None:
-            mod = Modifier.query.get(int(entry["modifier_id"]))
+            mod = db.session.get(Modifier, int(entry["modifier_id"]))
             if mod is None or mod.ingredient_id is None:
                 continue
             dep = float(mod.depletion_quantity) if mod.depletion_quantity is not None else 1.0
@@ -518,7 +518,7 @@ def checkout(payload: dict[str, Any] | None = None, current_user: User = Depends
         db.session.add(new_sale)
         db.session.flush()
         for item in items:
-            product = Product.query.get(item["product_id"])
+            product = db.session.get(Product, item["product_id"])
             if product is None:
                 db.session.rollback()
                 return _json_error("Bad Request", f"Product ID {item['product_id']} not found", 400)
@@ -573,12 +573,12 @@ def checkout(payload: dict[str, Any] | None = None, current_user: User = Depends
         db.session.commit()
         printer_service = PrinterService()
         branch_name = "Main Branch"
-        branch_obj = Branch.query.get(branch_id) if branch_id else None
+        branch_obj = db.session.get(Branch, branch_id) if branch_id else None
         if branch_obj:
             branch_name = branch_obj.name
         receipt_items = []
         for i in items:
-            product = Product.query.get(i.get("product_id"))
+            product = db.session.get(Product, i.get("product_id"))
             receipt_items.append(
                 {
                     "title": str(product.title if product else "Item"),
@@ -731,7 +731,7 @@ def get_analytics(
                 .first()
             )
             if top_row:
-                product = Product.query.get(top_row.product_id)
+                product = db.session.get(Product, top_row.product_id)
                 if product:
                     most_selling = {"id": product.id, "title": product.title, "total_sold": int(top_row.total_qty)}
         return {"total_sales": float(total_sales), "total_transactions": total_transactions, "most_selling_product": most_selling}
@@ -767,7 +767,7 @@ def _validate_cart_items(items: list) -> tuple[Optional[list[dict]], Optional[JS
                 return None, _json_error("Bad Request", f"Item at index {idx} has invalid modifier_ids", 400)
 
         pid = int(item["product_id"])
-        product = Product.query.get(pid)
+        product = db.session.get(Product, pid)
         if product is None:
             return None, _json_error("Bad Request", f"Item at index {idx}: product_id {pid} not found", 400)
         if getattr(product, "archived_at", None) is not None:
@@ -1139,7 +1139,7 @@ def update_kitchen_status(
     status_new = data.get("kitchen_status")
     if status_new not in ("placed", "preparing", "ready"):
         return _json_error("Bad Request", "kitchen_status must be placed, preparing, or ready", 400)
-    sale = Sale.query.get(sale_id)
+    sale = db.session.get(Sale, sale_id)
     if not sale:
         return _json_error("Not Found", "Order not found", 404)
     fb = _forbidden_unless_sale_branch(sale, current_user)
@@ -1203,7 +1203,7 @@ def _create_open_kot_response(
         db.session.flush()
         total_amount = 0.0
         for item in items:
-            product = Product.query.get(item["product_id"])
+            product = db.session.get(Product, item["product_id"])
             if product is None:
                 db.session.rollback()
                 return _json_error("Bad Request", f"Product ID {item['product_id']} not found", 400)
@@ -1237,7 +1237,7 @@ def _create_open_kot_response(
         db.session.commit()
 
         branch_name = "Main Branch"
-        branch_obj = Branch.query.get(bid) if bid else None
+        branch_obj = db.session.get(Branch, bid) if bid else None
         if branch_obj:
             branch_name = branch_obj.name
         table_name = (order_snapshot_norm or {}).get("table_name", "") if isinstance(order_snapshot_norm, dict) else ""
@@ -1300,7 +1300,7 @@ def _create_open_kot_response(
 @orders_router.patch("/{sale_id}/items")
 def update_open_sale_items(sale_id: int, payload: dict[str, Any] | None = None, current_user: User = Depends(get_current_user)):
     """Replace line items on an unpaid dine-in sale; adjusts inventory."""
-    sale = Sale.query.get(sale_id)
+    sale = db.session.get(Sale, sale_id)
     if not sale:
         raise HTTPException(status_code=404, detail="Not Found")
     fb = _forbidden_unless_sale_branch(sale, current_user)
@@ -1330,7 +1330,7 @@ def update_open_sale_items(sale_id: int, payload: dict[str, Any] | None = None, 
 
         total_amount = 0.0
         for item in items:
-            product = Product.query.get(item["product_id"])
+            product = db.session.get(Product, item["product_id"])
             if product is None:
                 db.session.rollback()
                 return _json_error("Bad Request", f"Product ID {item['product_id']} not found", 400)
@@ -1362,7 +1362,7 @@ def update_open_sale_items(sale_id: int, payload: dict[str, Any] | None = None, 
 @orders_router.post("/{sale_id}/finalize")
 def finalize_open_sale(sale_id: int, payload: dict[str, Any] | None = None, current_user: User = Depends(get_current_user)):
     """Take payment on an open dine-in sale; prints customer receipt."""
-    sale = Sale.query.get(sale_id)
+    sale = db.session.get(Sale, sale_id)
     if not sale:
         raise HTTPException(status_code=404, detail="Not Found")
     fb = _forbidden_unless_sale_branch(sale, current_user)
@@ -1473,7 +1473,7 @@ def finalize_open_sale(sale_id: int, payload: dict[str, Any] | None = None, curr
 @orders_router.post("/{sale_id}/cancel-open")
 def cancel_open_sale(sale_id: int, current_user: User = Depends(get_current_user)):
     """Cancel an unpaid dine-in tab and restore stock."""
-    sale = Sale.query.get(sale_id)
+    sale = db.session.get(Sale, sale_id)
     if not sale:
         raise HTTPException(status_code=404, detail="Not Found")
     fb = _forbidden_unless_sale_branch(sale, current_user)
@@ -1500,7 +1500,7 @@ def cancel_open_sale(sale_id: int, current_user: User = Depends(get_current_user
 
 @orders_router.get("/{sale_id}")
 def get_sale_details(sale_id: int, current_user: User = Depends(get_current_user)):
-    sale = Sale.query.get(sale_id)
+    sale = db.session.get(Sale, sale_id)
     if not sale:
         raise HTTPException(status_code=404, detail="Not Found")
     fb = _forbidden_unless_sale_branch(sale, current_user)
@@ -1550,7 +1550,7 @@ def get_sale_details(sale_id: int, current_user: User = Depends(get_current_user
 
 @orders_router.post("/{sale_id}/rollback")
 def rollback_sale(sale_id: int, current_user: User = Depends(get_current_user)):
-    sale = Sale.query.get(sale_id)
+    sale = db.session.get(Sale, sale_id)
     if not sale:
         raise HTTPException(status_code=404, detail="Not Found")
     fb = _forbidden_unless_sale_branch(sale, current_user)
@@ -1587,7 +1587,7 @@ def rollback_sale(sale_id: int, current_user: User = Depends(get_current_user)):
 
 @orders_router.patch("/{sale_id}/archive")
 def archive_sale(sale_id: int, current_user: User = Depends(get_current_user)):
-    sale = Sale.query.get(sale_id)
+    sale = db.session.get(Sale, sale_id)
     if not sale:
         raise HTTPException(status_code=404, detail="Not Found")
     fb = _forbidden_unless_sale_branch(sale, current_user)
@@ -1596,7 +1596,7 @@ def archive_sale(sale_id: int, current_user: User = Depends(get_current_user)):
     if not hasattr(sale, "archived_at"):
         return _json_error("Bad Request", "Archive not supported", 400)
     try:
-        sale.archived_at = datetime.utcnow()
+        sale.archived_at = datetime.now(timezone.utc)
         db.session.commit()
         return {"message": "Transaction archived", "archived_at": sale.archived_at.isoformat()}
     except Exception as exc:
@@ -1606,7 +1606,7 @@ def archive_sale(sale_id: int, current_user: User = Depends(get_current_user)):
 
 @orders_router.patch("/{sale_id}/unarchive")
 def unarchive_sale(sale_id: int, current_user: User = Depends(get_current_user)):
-    sale = Sale.query.get(sale_id)
+    sale = db.session.get(Sale, sale_id)
     if not sale:
         raise HTTPException(status_code=404, detail="Not Found")
     fb = _forbidden_unless_sale_branch(sale, current_user)
@@ -1625,7 +1625,7 @@ def unarchive_sale(sale_id: int, current_user: User = Depends(get_current_user))
 
 @orders_router.delete("/{sale_id}")
 def delete_sale_permanent(sale_id: int, current_user: User = Depends(require_owner)):
-    sale = Sale.query.get(sale_id)
+    sale = db.session.get(Sale, sale_id)
     if not sale:
         raise HTTPException(status_code=404, detail="Not Found")
     fb = _forbidden_unless_sale_branch(sale, current_user)
@@ -1643,7 +1643,7 @@ def delete_sale_permanent(sale_id: int, current_user: User = Depends(require_own
 
 @orders_router.post("/{sale_id}/print")
 def print_sale(sale_id: int, current_user: User = Depends(get_current_user)):
-    sale = Sale.query.get(sale_id)
+    sale = db.session.get(Sale, sale_id)
     if not sale:
         raise HTTPException(status_code=404, detail="Not Found")
     fb = _forbidden_unless_sale_branch(sale, current_user)

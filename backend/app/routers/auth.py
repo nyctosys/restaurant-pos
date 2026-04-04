@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import jwt
@@ -45,7 +45,7 @@ def auth_setup(payload: dict[str, Any] | None = None):
                 "user_id": owner.id,
                 "role": owner.role,
                 "branch_id": branch.id,
-                "exp": datetime.utcnow() + timedelta(days=30),
+                "exp": datetime.now(timezone.utc) + timedelta(days=30),
             },
             SECRET_KEY,
             algorithm="HS256",
@@ -84,7 +84,7 @@ def auth_login(payload: dict[str, Any] | None = None):
             "user_id": user.id,
             "role": user.role,
             "branch_id": user.branch_id,
-            "exp": datetime.utcnow() + timedelta(days=30),
+            "exp": datetime.now(timezone.utc) + timedelta(days=30),
         },
         SECRET_KEY,
         algorithm="HS256",

@@ -1,5 +1,5 @@
 from __future__ import annotations
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends
@@ -23,8 +23,8 @@ from app.services.branch_ingredient_stock import (
     seed_branch_stocks_for_new_ingredient,
 )
 from app.services.branch_scope import resolve_terminal_branch_id
-from app_fastapi.deps import get_current_user
-from app_fastapi.schemas.inventory_schemas import (
+from app.deps import get_current_user
+from app.schemas.inventory_schemas import (
     SupplierCreate, SupplierUpdate, IngredientCreate, IngredientUpdate,
     RecipeItemCreate, PurchaseOrderCreate, PurchaseOrderReceive, StockMovementCreate
 )
@@ -43,7 +43,7 @@ def _sync_ingredient_master_total(ingredient_id: int) -> None:
         .filter(IngredientBranchStock.ingredient_id == ingredient_id)
         .scalar()
     )
-    ing = Ingredient.query.get(ingredient_id)
+    ing = db.session.get(Ingredient, ingredient_id)
     if ing is not None:
         ing.current_stock = float(total or 0.0)
 
@@ -111,7 +111,7 @@ def create_ingredient(payload: IngredientCreate, current_user: User = Depends(ge
 
 @inventory_advanced_router.put("/ingredients/{ingredient_id}")
 def update_ingredient(ingredient_id: int, payload: IngredientUpdate, current_user: User = Depends(get_current_user)):
-    i = Ingredient.query.get(ingredient_id)
+    i = db.session.get(Ingredient, ingredient_id)
     if not i:
         return JSONResponse(status_code=404, content={"message": "Not found"})
     data = payload.model_dump(exclude_unset=True)
@@ -147,7 +147,7 @@ def add_recipe_item(payload: RecipeItemCreate, current_user: User = Depends(get_
 
 @inventory_advanced_router.delete("/recipes/{recipe_item_id}")
 def delete_recipe_item(recipe_item_id: int, current_user: User = Depends(get_current_user)):
-    r = RecipeItem.query.get(recipe_item_id)
+    r = db.session.get(RecipeItem, recipe_item_id)
     if r:
         db.session.delete(r)
         db.session.commit()
@@ -193,12 +193,12 @@ def create_purchase_order(payload: PurchaseOrderCreate, current_user: User = Dep
 
 @inventory_advanced_router.post("/purchase-orders/{po_id}/receive")
 def receive_purchase_order(po_id: int, payload: PurchaseOrderReceive, current_user: User = Depends(get_current_user)):
-    po = PurchaseOrder.query.get(po_id)
+    po = db.session.get(PurchaseOrder, po_id)
     if not po or po.status == "received":
         return JSONResponse(status_code=400, content={"message": "Invalid PO or already received"})
 
     po.status = "received"
-    po.received_date = payload.received_date or datetime.utcnow()
+    po.received_date = payload.received_date or datetime.now(timezone.utc)
 
     branch_id = int(po.branch_id or current_user.branch_id or 1)
 
@@ -235,7 +235,7 @@ def receive_purchase_order(po_id: int, payload: PurchaseOrderReceive, current_us
 
 @inventory_advanced_router.post("/purchase-orders/{po_id}/cancel")
 def cancel_purchase_order(po_id: int, current_user: User = Depends(get_current_user)):
-    po = PurchaseOrder.query.get(po_id)
+    po = db.session.get(PurchaseOrder, po_id)
     if not po:
         return JSONResponse(status_code=404, content={"message": "PO not found"})
     if po.status == "received":
@@ -249,7 +249,7 @@ def cancel_purchase_order(po_id: int, current_user: User = Depends(get_current_u
 
 @inventory_advanced_router.post("/movements")
 def manual_stock_movement(payload: StockMovementCreate, current_user: User = Depends(get_current_user)):
-    ing = Ingredient.query.get(payload.ingredient_id)
+    ing = db.session.get(Ingredient, payload.ingredient_id)
     if not ing:
         return JSONResponse(status_code=404, content={"message": "Ingredient not found"})
 

@@ -210,7 +210,7 @@ def test_deal_soft_delete_hides_from_list_blocks_new_sales(client, app):
     assert "archived" in (del_body.get("message") or "").lower()
 
     with app.app_context():
-        deal = Product.query.get(id_deal)
+        deal = db.session.get(Product, id_deal)
         assert deal is not None
         assert deal.archived_at is not None
         assert len(deal.combo_items) == 2

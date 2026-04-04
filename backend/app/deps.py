@@ -5,7 +5,7 @@ import os
 import jwt
 from fastapi import Depends, Header, HTTPException, status
 
-from app.models import User
+from app.models import User, db
 
 SECRET_KEY = os.environ.get("SECRET_KEY", "dev_secret_key_change_in_production")
 
@@ -28,7 +28,7 @@ def get_current_user(authorization: str | None = Header(default=None)) -> User:
         )
     try:
         data = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
-        user = User.query.get(data["user_id"])
+        user = db.session.get(User, data["user_id"])
         if not user:
             raise HTTPException(
                 status_code=401,

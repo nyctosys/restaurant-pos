@@ -1,7 +1,11 @@
 from sqlalchemy import CheckConstraint
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.db import db
+
+
+def utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 
 class Branch(db.Model):
     __tablename__ = 'branches'
@@ -9,7 +13,7 @@ class Branch(db.Model):
     name = db.Column(db.String(255), nullable=False)
     address = db.Column(db.Text)
     phone = db.Column(db.String(50))
-    created_at = db.Column(db.DateTime(timezone=True), default=datetime.utcnow)
+    created_at = db.Column(db.DateTime(timezone=True), default=utc_now)
     archived_at = db.Column(db.DateTime(timezone=True), nullable=True)
 
     users = db.relationship('User', backref='branch', lazy=True)
@@ -25,7 +29,7 @@ class User(db.Model):
     password_hash = db.Column(db.String(255), nullable=False)
     pin_hash = db.Column(db.String(255))
     role = db.Column(db.String(50), default='cashier')  # owner, manager, cashier, inventory_manager, kitchen, ...
-    created_at = db.Column(db.DateTime(timezone=True), default=datetime.utcnow)
+    created_at = db.Column(db.DateTime(timezone=True), default=utc_now)
     archived_at = db.Column(db.DateTime(timezone=True), nullable=True)
 
     sales = db.relationship('Sale', backref='user', lazy=True)
@@ -46,7 +50,7 @@ class Product(db.Model):
     section = db.Column(db.String(100), nullable=True, default='')
     variants = db.Column(db.JSON, nullable=False, default=[])
     image_url = db.Column(db.Text, nullable=True, default='')  # URL or data URL for product image (base64 can be large)
-    created_at = db.Column(db.DateTime(timezone=True), default=datetime.utcnow)
+    created_at = db.Column(db.DateTime(timezone=True), default=utc_now)
     archived_at = db.Column(db.DateTime(timezone=True), nullable=True)
     is_deal = db.Column(db.Boolean, default=False)
 
@@ -64,7 +68,7 @@ class Modifier(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(255), unique=True, nullable=False)
     price = db.Column(db.Numeric(12, 2), nullable=True, default=0)
-    created_at = db.Column(db.DateTime(timezone=True), default=datetime.utcnow)
+    created_at = db.Column(db.DateTime(timezone=True), default=utc_now)
     archived_at = db.Column(db.DateTime(timezone=True), nullable=True)
     # Optional BOM link: when set, selling this modifier deducts ingredient at this branch.
     ingredient_id = db.Column(db.Integer, db.ForeignKey('ingredients.id'), nullable=True)
@@ -110,7 +114,7 @@ class InventoryTransaction(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
     reference_type = db.Column(db.String(32), nullable=True)  # 'sale', 'sale_refund', or None
     reference_id = db.Column(db.Integer, nullable=True)  # e.g. sale_id
-    created_at = db.Column(db.DateTime(timezone=True), default=datetime.utcnow)
+    created_at = db.Column(db.DateTime(timezone=True), default=utc_now)
 
 
 class Sale(db.Model):
@@ -126,7 +130,7 @@ class Sale(db.Model):
     total_amount = db.Column(db.Numeric(12, 2), nullable=False)
     tax_amount = db.Column(db.Numeric(12, 2), nullable=False)
     payment_method = db.Column(db.String(50)) # cash, card
-    created_at = db.Column(db.DateTime(timezone=True), default=datetime.utcnow)
+    created_at = db.Column(db.DateTime(timezone=True), default=utc_now)
     status = db.Column(db.String(20), default='completed') # completed, refunded
     discount_amount = db.Column(db.Numeric(12, 2), nullable=True, default=0)
     discount_id = db.Column(db.String(64), nullable=True)
@@ -213,8 +217,8 @@ class Supplier(db.Model):
     address = db.Column(db.Text)
     notes = db.Column(db.Text)
     is_active = db.Column(db.Boolean, default=True)
-    created_at = db.Column(db.DateTime(timezone=True), default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime(timezone=True), onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime(timezone=True), default=utc_now)
+    updated_at = db.Column(db.DateTime(timezone=True), onupdate=utc_now)
 
     ingredients = db.relationship("Ingredient", back_populates="preferred_supplier")
     purchase_orders = db.relationship("PurchaseOrder", back_populates="supplier")
@@ -238,8 +242,8 @@ class Ingredient(db.Model):
     category = db.Column(db.String(100))
     notes = db.Column(db.Text)
     is_active = db.Column(db.Boolean, default=True)
-    created_at = db.Column(db.DateTime(timezone=True), default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime(timezone=True), onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime(timezone=True), default=utc_now)
+    updated_at = db.Column(db.DateTime(timezone=True), onupdate=utc_now)
 
     preferred_supplier = db.relationship("Supplier", back_populates="ingredients")
     recipe_items = db.relationship("RecipeItem", back_populates="ingredient")
@@ -282,7 +286,7 @@ class RecipeItem(db.Model):
     notes = db.Column(db.String(500))
     # Empty = base BOM for the product; non-empty = BOM for that menu variant label (matches SaleItem.variant_sku_suffix)
     variant_key = db.Column(db.String(100), nullable=False, default="")
-    created_at = db.Column(db.DateTime(timezone=True), default=datetime.utcnow)
+    created_at = db.Column(db.DateTime(timezone=True), default=utc_now)
 
     product = db.relationship("Product", back_populates="recipe_items")
     ingredient = db.relationship("Ingredient", back_populates="recipe_items")
@@ -297,15 +301,15 @@ class PurchaseOrder(db.Model):
     po_number = db.Column(db.String(100), unique=True)
     supplier_id = db.Column(db.Integer, db.ForeignKey("suppliers.id"), nullable=False)
     status = db.Column(db.Enum(PurchaseOrderStatus), default=PurchaseOrderStatus.DRAFT)
-    order_date = db.Column(db.DateTime(timezone=True), default=datetime.utcnow)
+    order_date = db.Column(db.DateTime(timezone=True), default=utc_now)
     expected_delivery = db.Column(db.DateTime(timezone=True), nullable=True)
     received_date = db.Column(db.DateTime(timezone=True), nullable=True)
     notes = db.Column(db.Text)
     total_amount = db.Column(db.Float, default=0.0)
     created_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
     branch_id = db.Column(db.Integer, db.ForeignKey("branches.id"), nullable=True)
-    created_at = db.Column(db.DateTime(timezone=True), default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime(timezone=True), onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime(timezone=True), default=utc_now)
+    updated_at = db.Column(db.DateTime(timezone=True), onupdate=utc_now)
 
     supplier = db.relationship("Supplier", back_populates="purchase_orders")
     items = db.relationship("PurchaseOrderItem", back_populates="purchase_order", cascade="all, delete-orphan")
@@ -344,7 +348,7 @@ class StockMovement(db.Model):
     reason = db.Column(db.String(500))
     created_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
     branch_id = db.Column(db.Integer, db.ForeignKey("branches.id"), nullable=True)
-    created_at = db.Column(db.DateTime(timezone=True), default=datetime.utcnow)
+    created_at = db.Column(db.DateTime(timezone=True), default=utc_now)
 
     ingredient = db.relationship("Ingredient", back_populates="stock_movements")
 
@@ -361,7 +365,7 @@ class StockTake(db.Model):
     created_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
     branch_id = db.Column(db.Integer, db.ForeignKey("branches.id"), nullable=True)
     completed_at = db.Column(db.DateTime(timezone=True), nullable=True)
-    created_at = db.Column(db.DateTime(timezone=True), default=datetime.utcnow)
+    created_at = db.Column(db.DateTime(timezone=True), default=utc_now)
 
     items = db.relationship("StockTakeItem", back_populates="stock_take", cascade="all, delete-orphan")
 
@@ -392,7 +396,7 @@ class SyncOutbox(db.Model):
     entity_id = db.Column(db.Integer, nullable=True)
     event_type = db.Column(db.String(64), nullable=False)
     payload = db.Column(db.JSON, nullable=False, default=dict)
-    occurred_at = db.Column(db.DateTime(timezone=True), default=datetime.utcnow)
+    occurred_at = db.Column(db.DateTime(timezone=True), default=utc_now)
     sync_status = db.Column(db.String(32), nullable=False, default="pending")
     attempt_count = db.Column(db.Integer, nullable=False, default=0)
     last_error = db.Column(db.Text, nullable=True)
@@ -405,7 +409,7 @@ class AppEventLog(db.Model):
     __tablename__ = "app_event_logs"
 
     id = db.Column(db.Integer, primary_key=True)
-    created_at = db.Column(db.DateTime(timezone=True), default=datetime.utcnow, index=True)
+    created_at = db.Column(db.DateTime(timezone=True), default=utc_now, index=True)
     severity = db.Column(db.String(16), nullable=False, default="error")  # info | warn | error
     source = db.Column(db.String(32), nullable=False, default="backend")
     category = db.Column(db.String(128), nullable=True)

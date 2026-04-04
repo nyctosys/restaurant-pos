@@ -8,8 +8,8 @@ from fastapi.responses import JSONResponse
 from app.models import Setting, User, db
 from app.services.branch_scope import resolve_terminal_branch_id
 from app.services.sync_outbox import enqueue_sync_event
-from app_fastapi.deps import get_current_user
-from app_fastapi.routers.common import yes
+from app.deps import get_current_user
+from app.routers.common import yes
 
 settings_router = APIRouter(prefix="/api/settings", tags=["settings"])
 

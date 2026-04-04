@@ -20,7 +20,7 @@ def test_app_events_get_requires_auth(client):
 
 
 def test_app_events_get_returns_persisted_unhandled_exception(client):
-    from app_fastapi import flask_sqlalchemy_app
+    from app import flask_sqlalchemy_app
 
     with flask_sqlalchemy_app.app_context():
         b = Branch(name="Main2")
@@ -58,7 +58,7 @@ def test_app_events_get_returns_persisted_unhandled_exception(client):
 
 
 def test_app_events_filter_by_request_id(client):
-    from app_fastapi import flask_sqlalchemy_app
+    from app import flask_sqlalchemy_app
 
     with flask_sqlalchemy_app.app_context():
         b = Branch(name="Main3")

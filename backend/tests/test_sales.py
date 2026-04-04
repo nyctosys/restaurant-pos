@@ -548,7 +548,7 @@ def test_kitchen_lists_kot_and_legacy_null_order_type(client, app):
     assert orders[0]["kitchen_status"] == "placed"
 
     with app.app_context():
-        sale = Sale.query.get(sale_id)
+        sale = db.session.get(Sale, sale_id)
         assert sale is not None
         sale.order_type = None
         db.session.commit()
@@ -608,7 +608,7 @@ def test_kitchen_drops_ready_after_one_day(client, app):
     )
 
     with app.app_context():
-        sale = Sale.query.get(sale_id)
+        sale = db.session.get(Sale, sale_id)
         assert sale is not None
         assert sale.kitchen_ready_at is not None
         sale.kitchen_ready_at = datetime.now(timezone.utc) - timedelta(days=2)

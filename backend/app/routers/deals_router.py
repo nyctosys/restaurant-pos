@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List
 
 from pydantic import BaseModel, Field
@@ -7,8 +7,8 @@ from fastapi.responses import JSONResponse
 
 from app.models import db, User, Product, ComboItem
 from app.services.recipe_variants import normalize_variant_key
-from app_fastapi.deps import get_current_user, require_owner
-from app_fastapi.routers.menu import _normalize_variants_list
+from app.deps import get_current_user, require_owner
+from app.routers.menu import _normalize_variants_list
 
 deals_router = APIRouter(prefix="/api/inventory-advanced/deals", tags=["deals"])
 menu_deals_router = APIRouter(prefix="/api/menu/deals", tags=["menu-deals"])
@@ -112,13 +112,13 @@ def _create_deal_impl(payload: DealCreate, current_user: User) -> dict[str, obje
 
 def _delete_deal_impl(deal_id: int, current_user: User) -> dict[str, object]:
     """Soft-delete: archive the deal product so past sales keep valid product_id / combo rows."""
-    deal = Product.query.get(deal_id)
+    deal = db.session.get(Product, deal_id)
     if not deal or not deal.is_deal:
         return JSONResponse(status_code=404, content={"message": "Deal not found"})
     if deal.archived_at is not None:
         return JSONResponse(status_code=400, content={"message": "Deal is already removed from the menu"})
 
-    deal.archived_at = datetime.utcnow()
+    deal.archived_at = datetime.now(timezone.utc)
     db.session.commit()
     return {
         "message": "Deal removed from menu (archived). Past sales are unchanged.",

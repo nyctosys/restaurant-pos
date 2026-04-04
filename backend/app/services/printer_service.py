@@ -243,8 +243,8 @@ class PrinterService:
             settings['header_font_scale'] = 1
             settings['body_font_scale'] = 1
             settings['total_font_scale'] = 1
-        from datetime import datetime
-        now = datetime.utcnow()
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
         receipt_date = now.strftime('%m/%d/%Y')
         receipt_time = now.strftime('%I:%M %p').lstrip('0')
 
@@ -489,9 +489,9 @@ class PrinterService:
         if not self.printer:
             return False
         settings = self._get_receipt_settings(kot_data.get("branch_id"))
-        from datetime import datetime
+        from datetime import datetime, timezone
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         dt_line = f"{now.strftime('%m/%d/%Y')}  {now.strftime('%I:%M %p').lstrip('0')}"
         sep = "=" * self.RECEIPT_WIDTH
         thin = "-" * self.RECEIPT_WIDTH

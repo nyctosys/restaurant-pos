@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse
 
 from app.models import User
 from app.services.printer_service import PrinterService
-from app_fastapi.deps import get_current_user
+from app.deps import get_current_user
 
 printer_router = APIRouter(prefix="/api/printer", tags=["printer"])
 

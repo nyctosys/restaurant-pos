@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -8,8 +8,8 @@ from fastapi.responses import JSONResponse
 from werkzeug.security import generate_password_hash
 
 from app.models import Sale, User, db
-from app_fastapi.deps import get_current_user, require_owner
-from app_fastapi.routers.common import yes
+from app.deps import get_current_user, require_owner
+from app.routers.common import yes
 
 users_router = APIRouter(prefix="/api/users", tags=["users"])
 
@@ -69,7 +69,7 @@ def update_user(user_id: int, payload: dict[str, Any] | None = None, _: User = D
     data = payload or {}
     if not data:
         return JSONResponse(status_code=400, content={"message": "No data provided"})
-    user = User.query.get(user_id)
+    user = db.session.get(User, user_id)
     if not user:
         return JSONResponse(status_code=404, content={"message": "User not found"})
     try:
@@ -96,7 +96,7 @@ def update_user(user_id: int, payload: dict[str, Any] | None = None, _: User = D
 
 @users_router.patch("/{user_id}/archive")
 def archive_user(user_id: int, current_user: User = Depends(require_owner)):
-    user = User.query.get(user_id)
+    user = db.session.get(User, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="Not Found")
     if user.id == current_user.id:
@@ -104,7 +104,7 @@ def archive_user(user_id: int, current_user: User = Depends(require_owner)):
     if not hasattr(user, "archived_at"):
         return JSONResponse(status_code=400, content={"message": "Archive not supported"})
     try:
-        user.archived_at = datetime.utcnow()
+        user.archived_at = datetime.now(timezone.utc)
         db.session.commit()
         return {"message": "User archived", "archived_at": user.archived_at.isoformat()}
     except Exception as exc:
@@ -114,7 +114,7 @@ def archive_user(user_id: int, current_user: User = Depends(require_owner)):
 
 @users_router.patch("/{user_id}/unarchive")
 def unarchive_user(user_id: int, _: User = Depends(require_owner)):
-    user = User.query.get(user_id)
+    user = db.session.get(User, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="Not Found")
     if not hasattr(user, "archived_at"):
@@ -130,7 +130,7 @@ def unarchive_user(user_id: int, _: User = Depends(require_owner)):
 
 @users_router.delete("/{user_id}")
 def delete_user(user_id: int, current_user: User = Depends(require_owner)):
-    user = User.query.get(user_id)
+    user = db.session.get(User, user_id)
     if not user:
         return JSONResponse(status_code=404, content={"message": "User not found"})
     if user.id == current_user.id:

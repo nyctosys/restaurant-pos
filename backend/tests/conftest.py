@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 # Override DB to in-memory SQLite before app is imported
 os.environ["DATABASE_URL"] = "sqlite:///:memory:"
 
-from app_fastapi import app as fastapi_app, flask_sqlalchemy_app
+from app import app as fastapi_app, flask_sqlalchemy_app
 from app.models import db
 
 

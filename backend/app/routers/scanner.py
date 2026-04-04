@@ -6,7 +6,7 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
 from app.models import Product
-from app_fastapi.realtime import scanner_hub
+from app.realtime import scanner_hub
 
 scanner_router = APIRouter(prefix="/api/scanner", tags=["scanner"])
 

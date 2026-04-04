@@ -11,15 +11,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.datastructures import MutableHeaders
 
-from app import create_app as init_database_shell
+from app.database import create_app as init_database_shell
 from app.db import bind_request_session, unbind_request_session
 from app.services.app_event_log import record_unhandled_exception
-from app_fastapi.error_contract import internal_server_error_body, normalize_error_body, request_id_from_request
-from app_fastapi.logging_config import setup_logging
-from app_fastapi.realtime import scanner_hub
-from app_fastapi.request_context import set_request_id
-from app_fastapi.socketio_server import asgi_app as socketio_asgi_app
-from app_fastapi.routers import (
+from app.error_contract import internal_server_error_body, normalize_error_body, request_id_from_request
+from app.logging_config import setup_logging
+from app.realtime import scanner_hub
+from app.request_context import set_request_id
+from app.socketio_server import asgi_app as socketio_asgi_app
+from app.routers import (
     auth_router,
     branches_router,
     health_router,
@@ -32,10 +32,10 @@ from app_fastapi.routers import (
     stock_router,
     users_router,
 )
-from app_fastapi.routers.app_logs import app_logs_router
-from app_fastapi.routers.inventory_advanced import inventory_advanced_router
-from app_fastapi.routers.deals_router import deals_router, menu_deals_router
-from app_fastapi.routers.sync_outbox_admin import sync_outbox_admin_router
+from app.routers.app_logs import app_logs_router
+from app.routers.inventory_advanced import inventory_advanced_router
+from app.routers.deals_router import deals_router, menu_deals_router
+from app.routers.sync_outbox_admin import sync_outbox_admin_router
 
 setup_logging()
 

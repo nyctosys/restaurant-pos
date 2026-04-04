@@ -23,4 +23,4 @@ COPY . .
 EXPOSE 5000
 
 # ASGI: FastAPI is the only HTTP surface (Flask is used only for Flask-SQLAlchemy context).
-CMD ["uvicorn", "app_fastapi.main:app", "--host", "0.0.0.0", "--port", "5000"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "5000"]

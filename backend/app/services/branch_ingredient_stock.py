@@ -22,7 +22,7 @@ def get_branch_stock(ingredient_id: int, branch_id: int) -> float:
     ).first()
     if row is not None:
         return float(row.current_stock)
-    ing = Ingredient.query.get(ingredient_id)
+    ing = db.session.get(Ingredient, ingredient_id)
     return float(ing.current_stock) if ing else 0.0
 
 
@@ -32,7 +32,7 @@ def ensure_branch_stock_row(ingredient_id: int, branch_id: int) -> IngredientBra
     ).first()
     if row is not None:
         return row
-    ing = Ingredient.query.get(ingredient_id)
+    ing = db.session.get(Ingredient, ingredient_id)
     initial = float(ing.current_stock) if ing else 0.0
     row = IngredientBranchStock(
         ingredient_id=ingredient_id, branch_id=branch_id, current_stock=initial
@@ -78,7 +78,7 @@ def adjust_branch_ingredient_stock(
     if locked is None:
         raise RuntimeError("ingredient branch stock row missing after ensure")
 
-    ing = Ingredient.query.get(ingredient_id)
+    ing = db.session.get(Ingredient, ingredient_id)
     qty_before = float(locked.current_stock)
     qty_after = qty_before + quantity_change
     if not allow_negative and qty_after < -1e-9:

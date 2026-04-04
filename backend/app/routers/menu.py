@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 
 from app.models import Inventory, Product, SaleItem, User, db
-from app_fastapi.deps import get_current_user, require_owner
-from app_fastapi.routers.common import yes
+from app.deps import get_current_user, require_owner
+from app.routers.common import yes
 
 menu_router = APIRouter(prefix="/api/menu-items", tags=["menu-items"])
 
@@ -86,7 +86,7 @@ def create_product(payload: dict[str, Any] | None = None, _: User = Depends(requ
 
 @menu_router.put("/{product_id}")
 def update_product(product_id: int, payload: dict[str, Any] | None = None, _: User = Depends(require_owner)):
-    product = Product.query.get(product_id)
+    product = db.session.get(Product, product_id)
     if not product:
         raise HTTPException(status_code=404, detail="Not Found")
     data = payload or {}
@@ -120,11 +120,11 @@ def update_product(product_id: int, payload: dict[str, Any] | None = None, _: Us
 
 @menu_router.patch("/{product_id}/archive")
 def archive_product(product_id: int, _: User = Depends(require_owner)):
-    product = Product.query.get(product_id)
+    product = db.session.get(Product, product_id)
     if not product:
         raise HTTPException(status_code=404, detail="Not Found")
     try:
-        product.archived_at = datetime.utcnow()
+        product.archived_at = datetime.now(timezone.utc)
         db.session.commit()
         return {"message": "Product archived", "archived_at": product.archived_at.isoformat()}
     except Exception as exc:
@@ -134,7 +134,7 @@ def archive_product(product_id: int, _: User = Depends(require_owner)):
 
 @menu_router.patch("/{product_id}/unarchive")
 def unarchive_product(product_id: int, _: User = Depends(require_owner)):
-    product = Product.query.get(product_id)
+    product = db.session.get(Product, product_id)
     if not product:
         raise HTTPException(status_code=404, detail="Not Found")
     try:
@@ -148,7 +148,7 @@ def unarchive_product(product_id: int, _: User = Depends(require_owner)):
 
 @menu_router.delete("/{product_id}")
 def delete_product(product_id: int, _: User = Depends(require_owner)):
-    product = Product.query.get(product_id)
+    product = db.session.get(Product, product_id)
     if not product:
         raise HTTPException(status_code=404, detail="Not Found")
     inv_count = Inventory.query.filter_by(product_id=product_id).count()

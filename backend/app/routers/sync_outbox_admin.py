@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 
 from app.models import SyncOutbox, User, db
-from app_fastapi.deps import require_owner
+from app.deps import require_owner
 
 sync_outbox_admin_router = APIRouter(prefix="/api/sync-outbox", tags=["sync-outbox"])
 

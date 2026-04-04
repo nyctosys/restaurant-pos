@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse
 
 from app.errors import error_response
 from app.models import Modifier, User, db
-from app_fastapi.deps import get_current_user, require_owner
+from app.deps import get_current_user, require_owner
 
 
 modifiers_router = APIRouter(prefix="/api/modifiers", tags=["modifiers"])
@@ -74,7 +74,7 @@ def create_modifier(payload: dict[str, Any] | None = None, _: User = Depends(req
 
 @modifiers_router.patch("/{modifier_id}")
 def update_modifier(modifier_id: int, payload: dict[str, Any] | None = None, _: User = Depends(require_owner)):
-    m = Modifier.query.get(modifier_id)
+    m = db.session.get(Modifier, modifier_id)
     if not m or m.archived_at is not None:
         return error_response("Not Found", "Modifier not found", 404)
     data = payload or {}
@@ -125,13 +125,13 @@ def update_modifier(modifier_id: int, payload: dict[str, Any] | None = None, _: 
 
 @modifiers_router.delete("/{modifier_id}")
 def delete_modifier(modifier_id: int, _: User = Depends(require_owner)):
-    m = Modifier.query.get(modifier_id)
+    m = db.session.get(Modifier, modifier_id)
     if not m or m.archived_at is not None:
         return error_response("Not Found", "Modifier not found", 404)
-    from datetime import datetime
+    from datetime import datetime, timezone
 
     try:
-        m.archived_at = datetime.utcnow()
+        m.archived_at = datetime.now(timezone.utc)
         db.session.commit()
         return {"message": "Modifier deleted"}
     except Exception as exc:

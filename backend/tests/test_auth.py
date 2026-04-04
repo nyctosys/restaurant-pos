@@ -83,7 +83,7 @@ def test_token_valid_but_user_deleted_returns_401(client, app):
     """User deleted after token was issued -> 401 User not found."""
     import jwt
     import os
-    from datetime import datetime, timedelta
+    from datetime import datetime, timedelta, timezone
 
     with app.app_context():
         b = Branch(name="Main")
@@ -100,7 +100,7 @@ def test_token_valid_but_user_deleted_returns_401(client, app):
         user_id = u.id
         secret = os.environ.get("SECRET_KEY", "dev_secret_key_change_in_production")
         token = jwt.encode(
-            {"user_id": user_id, "exp": datetime.utcnow() + timedelta(hours=1)},
+            {"user_id": user_id, "exp": datetime.now(timezone.utc) + timedelta(hours=1)},
             secret,
             algorithm="HS256",
         )

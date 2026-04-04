@@ -1,4 +1,4 @@
-from app_fastapi.schemas.contracts import (
+from app.schemas.contracts import (
     CheckoutRequest,
     OrderSnapshotPayload,
     ErrorEnvelope,

@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.models import User
 from app.services.app_event_log import list_events, record_event
 from app.services.branch_scope import resolve_terminal_branch_id
-from app_fastapi.deps import get_current_user, require_owner_or_manager
+from app.deps import get_current_user, require_owner_or_manager
 
 app_logs_router = APIRouter(prefix="/api/settings", tags=["settings"])
 
