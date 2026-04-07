@@ -137,9 +137,16 @@ export default function Settings() {
     setSectionsSaving(true);
     setSectionsFeedback('');
     try {
-      const existing = await get<SettingsResponse>('/settings/');
+      const query = activeBranchId ? `?branch_id=${activeBranchId}` : '';
+      const existing = await get<SettingsResponse>(`/settings/${query}`);
       const currentConfig = (existing?.config ?? {}) as Record<string, unknown>;
-      await put('/settings/', { config: { ...currentConfig, sections: updatedSections }, branch_id: null });
+      const payload: { config: Record<string, unknown>; branch_id?: number } = {
+        config: { ...currentConfig, sections: updatedSections },
+      };
+      if (activeBranchId) {
+        payload.branch_id = parseInt(activeBranchId, 10);
+      }
+      await put('/settings/', payload);
       setSections(updatedSections);
       setSectionsFeedback('Categories saved!');
       setTimeout(() => setSectionsFeedback(''), 2000);
