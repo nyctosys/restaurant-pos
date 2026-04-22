@@ -30,7 +30,7 @@ def migrate() -> None:
             )
         )
         if cr.fetchone():
-            print("  – recipe_items.variant_key already exists")
+            print("  [-] recipe_items.variant_key already exists")
         else:
             conn.execute(
                 text(
@@ -40,7 +40,7 @@ def migrate() -> None:
                     """
                 )
             )
-            print("  ✓ Added recipe_items.variant_key")
+            print("  [OK] Added recipe_items.variant_key")
         db.session.commit()
         print("migrate_recipe_variant_key: done")
 

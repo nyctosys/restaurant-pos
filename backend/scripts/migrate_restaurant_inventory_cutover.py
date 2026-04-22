@@ -59,9 +59,9 @@ def migrate() -> None:
                     """
                 )
             )
-            print("  ✓ Created ingredient_branch_stocks")
+            print("  [OK] Created ingredient_branch_stocks")
         else:
-            print("  – ingredient_branch_stocks already exists")
+            print("  [-] ingredient_branch_stocks already exists")
 
         # --- modifiers columns ---
         for col, ddl in (
@@ -80,9 +80,9 @@ def migrate() -> None:
             )
             if cr.fetchone() is None:
                 conn.execute(text(ddl))
-                print(f"  ✓ Added modifiers.{col}")
+                print(f"  [OK] Added modifiers.{col}")
             else:
-                print(f"  – modifiers.{col} already exists")
+                print(f"  [-] modifiers.{col} already exists")
 
         # --- backfill branch rows from master ingredient.current_stock ---
         # Assign legacy master quantity to the lowest branch id only; other branches get 0.
@@ -95,13 +95,13 @@ def migrate() -> None:
                 FROM ingredients i
                 CROSS JOIN branches b
                 WHERE NOT EXISTS (
-                  SELECT 1 FROM ingredient_branch_stocks s
-                  WHERE s.ingredient_id = i.id AND s.branch_id = b.id
+                   SELECT 1 FROM ingredient_branch_stocks s
+                   WHERE s.ingredient_id = i.id AND s.branch_id = b.id
                 )
                 """
             )
         )
-        print("  ✓ Backfilled missing ingredient_branch_stocks rows (per-ingredient × per-branch)")
+        print("  [OK] Backfilled missing ingredient_branch_stocks rows (per-ingredient x per-branch)")
 
         db.session.commit()
         print("migrate_restaurant_inventory_cutover: complete.")

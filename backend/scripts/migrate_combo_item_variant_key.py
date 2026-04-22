@@ -24,7 +24,7 @@ def migrate() -> None:
         cols = [c["name"] for c in insp.get_columns("combo_items")]
         print("migrate_combo_item_variant_key: starting ...")
         if "variant_key" in cols:
-            print("  – combo_items.variant_key already exists")
+            print("  [-] combo_items.variant_key already exists")
         else:
             with eng.connect() as conn:
                 conn.execute(
@@ -33,7 +33,7 @@ def migrate() -> None:
                     )
                 )
                 conn.commit()
-            print("  ✓ Added combo_items.variant_key")
+            print("  [OK] Added combo_items.variant_key")
         print("migrate_combo_item_variant_key: done")
 
 

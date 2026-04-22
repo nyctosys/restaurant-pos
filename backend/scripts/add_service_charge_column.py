@@ -1,6 +1,9 @@
-"""Add service_charge column to sales (PostgreSQL)."""
-
+import os
+import sys
 from sqlalchemy import inspect, text
+
+# Allow running from backend/
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app import create_app
 from app.models import db
