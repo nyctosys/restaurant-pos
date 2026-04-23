@@ -1,9 +1,11 @@
-import React, { useState, useEffect } from 'react';
-import { Plus, X, Loader2, Pencil, Package, Layers } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Plus, X, Loader2, Pencil, Package, Layers, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 import { get, post, put, getUserMessage } from '../../api';
 import { getTerminalBranchIdString, parseUserFromStorage } from '../../utils/branchContext';
+import SearchableSelect from '../SearchableSelect';
 import { showToast } from '../Toast';
 import { formatCurrency } from '../../utils/formatCurrency';
+import { generateAutoSku } from '../../utils/sku';
 
 type Ingredient = {
   id: number;
@@ -32,6 +34,9 @@ type RestockRow = {
   unitCost: string;
 };
 
+type SortKey = 'name' | 'current_stock' | 'average_cost' | 'supplier' | 'id';
+type SortDirection = 'asc' | 'desc';
+
 const UNITS = ['kg', 'g', 'l', 'ml', 'piece', 'dozen', 'pack', 'can', 'bottle'];
 
 export default function IngredientsTab() {
@@ -44,6 +49,7 @@ export default function IngredientsTab() {
   // Form state
   const [formName, setFormName] = useState('');
   const [formSku, setFormSku] = useState('');
+  const [formSkuTouched, setFormSkuTouched] = useState(false);
   const [formUnit, setFormUnit] = useState('kg');
   const [formMinStock, setFormMinStock] = useState('0');
   const [formReorderQty, setFormReorderQty] = useState('0');
@@ -58,6 +64,8 @@ export default function IngredientsTab() {
   const [restockReason, setRestockReason] = useState('');
   const [restockError, setRestockError] = useState('');
   const [restockSubmitting, setRestockSubmitting] = useState(false);
+  const [sortKey, setSortKey] = useState<SortKey>('name');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
 
   const createRestockRow = (): RestockRow => ({
     key: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
@@ -93,6 +101,7 @@ export default function IngredientsTab() {
   const resetForm = () => {
     setFormName('');
     setFormSku('');
+    setFormSkuTouched(false);
     setFormUnit('kg');
     setFormMinStock('0');
     setFormReorderQty('0');
@@ -189,6 +198,7 @@ export default function IngredientsTab() {
     setEditingIngredient(ing);
     setFormName(ing.name);
     setFormSku(ing.sku || '');
+    setFormSkuTouched(true);
     setFormUnit(ing.unit || 'kg');
     setFormMinStock(ing.minimum_stock.toString());
     setFormReorderQty(ing.reorder_quantity.toString());
@@ -251,6 +261,65 @@ export default function IngredientsTab() {
     }
   };
 
+  useEffect(() => {
+    if (editingIngredient || formSkuTouched) {
+      return;
+    }
+    const nextSku = formName.trim() ? generateAutoSku('ING', formName, ingredients.map((ingredient) => ingredient.sku)) : '';
+    setFormSku(nextSku);
+  }, [editingIngredient, formName, formSkuTouched, ingredients]);
+
+  const handleSort = (key: SortKey) => {
+    if (sortKey === key) {
+      setSortDirection(prev => (prev === 'asc' ? 'desc' : 'asc'));
+      return;
+    }
+    setSortKey(key);
+    setSortDirection('asc');
+  };
+
+  const sortedIngredients = useMemo(() => {
+    const direction = sortDirection === 'asc' ? 1 : -1;
+    return ingredients
+      .map((ingredient, index) => ({ ingredient, index }))
+      .sort((a, b) => {
+        const left = a.ingredient;
+        const right = b.ingredient;
+        const leftSupplier = suppliers.find(s => s.id === left.preferred_supplier_id)?.name || '';
+        const rightSupplier = suppliers.find(s => s.id === right.preferred_supplier_id)?.name || '';
+
+        let result = 0;
+        switch (sortKey) {
+          case 'current_stock':
+            result = left.current_stock - right.current_stock;
+            break;
+          case 'average_cost':
+            result = left.average_cost - right.average_cost;
+            break;
+          case 'supplier':
+            result = leftSupplier.localeCompare(rightSupplier, undefined, { sensitivity: 'base' });
+            break;
+          case 'id':
+            result = left.id - right.id;
+            break;
+          case 'name':
+            result = left.name.localeCompare(right.name, undefined, { sensitivity: 'base' });
+            break;
+        }
+
+        if (result !== 0) return result * direction;
+        return a.index - b.index;
+      })
+      .map(entry => entry.ingredient);
+  }, [ingredients, sortDirection, sortKey, suppliers]);
+
+  const renderSortIcon = (key: SortKey) => {
+    if (sortKey !== key) return <ArrowUpDown className="w-3.5 h-3.5 text-soot-400" aria-hidden="true" />;
+    return sortDirection === 'asc'
+      ? <ArrowUp className="w-3.5 h-3.5 text-brand-700" aria-hidden="true" />
+      : <ArrowDown className="w-3.5 h-3.5 text-brand-700" aria-hidden="true" />;
+  };
+
   return (
     <div className="flex flex-col h-full min-h-0 bg-transparent py-4">
       <div className="page-padding flex justify-between items-center bg-transparent shrink-0 pb-4">
@@ -290,15 +359,40 @@ export default function IngredientsTab() {
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="border-b-2 border-soot-200 text-sm uppercase text-soot-500 font-semibold tracking-wider">
-                <th className="py-3 px-3">Item</th>
-                <th className="py-3 px-3 text-right">Stock</th>
-                <th className="py-3 px-3 text-right">Avg Cost</th>
-                <th className="py-3 px-3 hidden md:table-cell">Supplier</th>
-                <th className="py-3 px-3 text-right">Actions</th>
+                <th aria-sort={sortKey === 'name' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'} className="py-3 px-3">
+                  <button type="button" onClick={() => handleSort('name')} className="flex items-center gap-2 text-left transition-colors hover:text-soot-700 focus:outline-none focus-visible:text-soot-900">
+                    <span>Item</span>
+                    {renderSortIcon('name')}
+                  </button>
+                </th>
+                <th aria-sort={sortKey === 'current_stock' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'} className="py-3 px-3 text-right">
+                  <button type="button" onClick={() => handleSort('current_stock')} className="ml-auto flex items-center gap-2 text-right transition-colors hover:text-soot-700 focus:outline-none focus-visible:text-soot-900">
+                    <span>Stock</span>
+                    {renderSortIcon('current_stock')}
+                  </button>
+                </th>
+                <th aria-sort={sortKey === 'average_cost' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'} className="py-3 px-3 text-right">
+                  <button type="button" onClick={() => handleSort('average_cost')} className="ml-auto flex items-center gap-2 text-right transition-colors hover:text-soot-700 focus:outline-none focus-visible:text-soot-900">
+                    <span>Avg Cost</span>
+                    {renderSortIcon('average_cost')}
+                  </button>
+                </th>
+                <th aria-sort={sortKey === 'supplier' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'} className="py-3 px-3 hidden md:table-cell">
+                  <button type="button" onClick={() => handleSort('supplier')} className="flex items-center gap-2 text-left transition-colors hover:text-soot-700 focus:outline-none focus-visible:text-soot-900">
+                    <span>Supplier</span>
+                    {renderSortIcon('supplier')}
+                  </button>
+                </th>
+                <th aria-sort={sortKey === 'id' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'} className="py-3 px-3 text-right">
+                  <button type="button" onClick={() => handleSort('id')} className="ml-auto flex items-center gap-2 text-right transition-colors hover:text-soot-700 focus:outline-none focus-visible:text-soot-900">
+                    <span>Actions</span>
+                    {renderSortIcon('id')}
+                  </button>
+                </th>
               </tr>
             </thead>
             <tbody className="glass-card">
-              {ingredients.map(ing => {
+              {sortedIngredients.map(ing => {
                 const supplier = suppliers.find(s => s.id === ing.preferred_supplier_id);
                 const isLowStock = ing.current_stock <= ing.minimum_stock;
                 
@@ -363,14 +457,28 @@ export default function IngredientsTab() {
                  
                  <div>
                     <label className="block text-sm font-medium text-neutral-700 mb-1">SKU</label>
-                    <input type="text" value={formSku} onChange={e => setFormSku(e.target.value)} className="w-full px-4 py-2.5 glass-card text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none" placeholder="e.g. MAT-001" />
+                    <input
+                      type="text"
+                      value={formSku}
+                      onChange={e => {
+                        setFormSku(e.target.value);
+                        setFormSkuTouched(true);
+                      }}
+                      className="w-full px-4 py-2.5 glass-card text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none"
+                      placeholder="Auto-generated from material name"
+                    />
+                    <p className="text-xs text-neutral-500 mt-1">Auto-generated for new materials. You can still edit it.</p>
                  </div>
 
                  <div>
                     <label className="block text-sm font-medium text-neutral-700 mb-1">Unit of Measure <span className="text-red-400">*</span></label>
-                    <select value={formUnit} onChange={e => setFormUnit(e.target.value)} className="w-full px-4 py-2.5 glass-card text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none">
-                      {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
-                    </select>
+                    <SearchableSelect
+                      value={formUnit}
+                      onChange={setFormUnit}
+                      searchPlaceholder="Search units…"
+                      options={UNITS.map((unit) => ({ value: unit, label: unit }))}
+                      className="glass-card border-0"
+                    />
                  </div>
                  
                  <div>
@@ -411,10 +519,14 @@ export default function IngredientsTab() {
                  
                  <div className="col-span-2">
                     <label className="block text-sm font-medium text-neutral-700 mb-1">Preferred Supplier</label>
-                    <select value={formSupplierId} onChange={e => setFormSupplierId(e.target.value)} className="w-full px-4 py-2.5 glass-card text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none">
-                      <option value="">— None —</option>
-                      {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                    </select>
+                    <SearchableSelect
+                      value={formSupplierId}
+                      onChange={setFormSupplierId}
+                      placeholder="— None —"
+                      searchPlaceholder="Search suppliers…"
+                      options={suppliers.map((supplier) => ({ value: String(supplier.id), label: supplier.name }))}
+                      className="glass-card border-0"
+                    />
                  </div>
                </div>
 
@@ -463,18 +575,18 @@ export default function IngredientsTab() {
                   <div key={row.key} className="grid grid-cols-12 gap-2 items-end glass-card p-3 rounded-lg">
                     <div className="col-span-12 md:col-span-6">
                       <label className="block text-xs font-semibold text-neutral-600 mb-1">Material</label>
-                      <select
+                      <SearchableSelect
                         value={row.ingredientId}
-                        onChange={(e) => updateRestockRow(row.key, { ingredientId: e.target.value })}
-                        className="w-full px-3 py-2.5 glass-card text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none"
-                      >
-                        <option value="">Select material</option>
-                        {ingredients.map((ing) => (
-                          <option key={ing.id} value={ing.id}>
-                            {ing.name} ({ing.unit})
-                          </option>
-                        ))}
-                      </select>
+                        onChange={(value) => updateRestockRow(row.key, { ingredientId: value })}
+                        placeholder="Select material"
+                        searchPlaceholder="Search materials…"
+                        options={ingredients.map((ingredient) => ({
+                          value: String(ingredient.id),
+                          label: `${ingredient.name} (${ingredient.unit})`,
+                          searchText: `${ingredient.sku ?? ''} ${ingredient.category ?? ''}`.trim(),
+                        }))}
+                        className="glass-card border-0 px-3 py-2.5"
+                      />
                     </div>
                     <div className="col-span-6 md:col-span-2">
                       <label className="block text-xs font-semibold text-neutral-600 mb-1">Quantity</label>

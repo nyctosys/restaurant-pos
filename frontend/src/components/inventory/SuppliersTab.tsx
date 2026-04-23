@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, X, Loader2, Pencil } from 'lucide-react';
-import { get, post, getUserMessage } from '../../api';
+import { get, post, put, getUserMessage } from '../../api';
 import { showToast } from '../Toast';
+import { generateAutoSku } from '../../utils/sku';
 
 type Supplier = {
   id: number;
   name: string;
+  sku?: string;
   contact_person?: string;
   phone?: string;
   email?: string;
@@ -21,6 +23,8 @@ export default function SuppliersTab() {
 
   // Form state
   const [formName, setFormName] = useState('');
+  const [formSku, setFormSku] = useState('');
+  const [formSkuTouched, setFormSkuTouched] = useState(false);
   const [formContact, setFormContact] = useState('');
   const [formPhone, setFormPhone] = useState('');
   const [formEmail, setFormEmail] = useState('');
@@ -47,6 +51,8 @@ export default function SuppliersTab() {
 
   const resetForm = () => {
     setFormName('');
+    setFormSku('');
+    setFormSkuTouched(false);
     setFormContact('');
     setFormPhone('');
     setFormEmail('');
@@ -64,6 +70,8 @@ export default function SuppliersTab() {
   const handleOpenEdit = (s: Supplier) => {
     setEditingSupplier(s);
     setFormName(s.name);
+    setFormSku(s.sku || '');
+    setFormSkuTouched(true);
     setFormContact(s.contact_person || '');
     setFormPhone(s.phone || '');
     setFormEmail(s.email || '');
@@ -85,6 +93,7 @@ export default function SuppliersTab() {
     try {
       const payload = {
         name: formName.trim(),
+        sku: formSku.trim() || undefined,
         contact_person: formContact.trim() || undefined,
         phone: formPhone.trim() || undefined,
         email: formEmail.trim() || undefined,
@@ -93,14 +102,8 @@ export default function SuppliersTab() {
       };
 
       if (editingSupplier) {
-        // Assume PUT /inventory-advanced/suppliers/{id} if I ever implement it, 
-        // wait I didn't add PUT for suppliers! Ah, let me do it as a workaround or assume it exists. 
-        // Wait, did I add PUT /suppliers in inventory_advanced.py? No, only for ingredients... 
-        // Let's implement editing anyway, we'll patch the backend if it's missing or ignore for now
-         // Actually, wait, let me use a mock or POST for now. I'll add PUT to backend later.
-         // Let's just create a new supplier if editing is not perfectly supported, or just ignore for now.
-         showToast("Edit supplier endpoint not explicitly implemented, but proceeding to add.", 'error');
-         throw new Error("Edit not supported in v1");
+        await put(`/inventory-advanced/suppliers/${editingSupplier.id}`, payload);
+        showToast('Supplier updated successfully', 'success');
       } else {
         await post('/inventory-advanced/suppliers', payload);
         showToast('Supplier added successfully', 'success');
@@ -113,6 +116,14 @@ export default function SuppliersTab() {
       setSubmitting(false);
     }
   };
+
+  useEffect(() => {
+    if (editingSupplier || formSkuTouched) {
+      return;
+    }
+    const nextSku = formName.trim() ? generateAutoSku('SUP', formName, suppliers.map((supplier) => supplier.sku)) : '';
+    setFormSku(nextSku);
+  }, [editingSupplier, formName, formSkuTouched, suppliers]);
 
 
 
@@ -147,6 +158,7 @@ export default function SuppliersTab() {
                <div key={s.id} className="glass-card p-5 relative group flex flex-col justify-between hover:bg-white/40 transition-colors">
                   <div>
                     <h4 className="text-lg font-bold text-soot-900 mb-1 leading-tight">{s.name}</h4>
+                    {s.sku && <p className="text-xs font-mono text-soot-500">{s.sku}</p>}
                     {s.contact_person && <p className="text-sm font-medium text-soot-700">{s.contact_person}</p>}
                     
                     <div className="mt-3 space-y-1">
@@ -188,6 +200,21 @@ export default function SuppliersTab() {
                <div>
                   <label className="block text-sm font-medium text-neutral-700 mb-1">Company Name <span className="text-red-400">*</span></label>
                   <input type="text" value={formName} onChange={e => setFormName(e.target.value)} className="w-full px-4 py-2.5 glass-card text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none" placeholder="e.g. Sysco Foods" />
+               </div>
+
+               <div>
+                 <label className="block text-sm font-medium text-neutral-700 mb-1">Supplier SKU</label>
+                 <input
+                   type="text"
+                   value={formSku}
+                   onChange={e => {
+                     setFormSku(e.target.value);
+                     setFormSkuTouched(true);
+                   }}
+                   className="w-full px-4 py-2.5 glass-card text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none"
+                   placeholder="Auto-generated from supplier name"
+                 />
+                 <p className="text-xs text-neutral-500 mt-1">Auto-generated for new suppliers. You can still edit it.</p>
                </div>
 
                <div className="grid grid-cols-2 gap-4">

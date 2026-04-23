@@ -1,5 +1,5 @@
 import { useState, useEffect, useLayoutEffect, useSyncExternalStore, useRef } from 'react';
-import { Plus, Trash2, Loader2, Moon, Sun, ScrollText, Copy, Trash, Download, ChevronDown, ChevronUp, Archive, ArchiveRestore } from 'lucide-react';
+import { Plus, Trash2, Loader2, Moon, Sun, ScrollText, Copy, Trash, Download, ChevronDown, ChevronUp, Archive, ArchiveRestore, LayoutGrid, List } from 'lucide-react';
 import UsersSettings from '../components/settings/UsersSettings';
 import ReceiptSettings from '../components/settings/ReceiptSettings';
 import BranchesSettings from '../components/settings/BranchesSettings';
@@ -9,6 +9,7 @@ import appLogger, { type LogEntry } from '../utils/logger';
 import { get, put, post, getUserMessage, getUserMessageWithRef } from '../api';
 import { getTerminalBranchIdString, parseUserFromStorage } from '../utils/branchContext';
 import { showConfirm } from '../components/ConfirmDialog';
+import SearchableSelect from '../components/SearchableSelect';
 
 type SettingsResponse = { config?: Record<string, unknown> };
 
@@ -23,6 +24,12 @@ export default function Settings() {
   const [sectionsLoading, setSectionsLoading] = useState(false);
   const [sectionsSaving, setSectionsSaving] = useState(false);
   const [sectionsFeedback, setSectionsFeedback] = useState('');
+
+  // ── General settings state ──
+  const [generalLoading, setGeneralLoading] = useState(false);
+  const [generalSaving, setGeneralSaving] = useState(false);
+  const [generalFeedback, setGeneralFeedback] = useState('');
+  const [dashboardMenuLayout, setDashboardMenuLayout] = useState<'grid' | 'list'>('list');
 
   // ── Variants state ──
   const [variants, setVariants] = useState<string[]>([]);
@@ -106,7 +113,9 @@ export default function Settings() {
 
   // Fetch settings on mount
   useEffect(() => {
-    if (activeTab === 'categories') {
+    if (activeTab === 'general') {
+      void fetchGeneralSettings();
+    } else if (activeTab === 'categories') {
       fetchSections();
     } else if (activeTab === 'variants') {
       fetchVariants();
@@ -118,6 +127,46 @@ export default function Settings() {
       fetchDiscounts();
     }
   }, [activeTab]);
+
+  const fetchGeneralSettings = async () => {
+    setGeneralLoading(true);
+    try {
+      const query = activeBranchId ? `?branch_id=${activeBranchId}` : '';
+      const data = await get<SettingsResponse>(`/settings/${query}`);
+      const config = (data?.config ?? {}) as Record<string, unknown>;
+      setDashboardMenuLayout(config.dashboard_menu_layout === 'grid' ? 'grid' : 'list');
+    } catch {
+      setDashboardMenuLayout('list');
+    } finally {
+      setGeneralLoading(false);
+    }
+  };
+
+  const saveGeneralSettings = async () => {
+    setGeneralSaving(true);
+    setGeneralFeedback('');
+    try {
+      const query = activeBranchId ? `?branch_id=${activeBranchId}` : '';
+      const existing = await get<SettingsResponse>(`/settings/${query}`);
+      const currentConfig = (existing?.config ?? {}) as Record<string, unknown>;
+      const payload: { config: Record<string, unknown>; branch_id?: number } = {
+        config: {
+          ...currentConfig,
+          dashboard_menu_layout: dashboardMenuLayout,
+        },
+      };
+      if (activeBranchId) {
+        payload.branch_id = parseInt(activeBranchId, 10);
+      }
+      await put('/settings/', payload);
+      setGeneralFeedback('General settings saved!');
+      setTimeout(() => setGeneralFeedback(''), 2000);
+    } catch (e) {
+      setGeneralFeedback('error:' + getUserMessage(e));
+    } finally {
+      setGeneralSaving(false);
+    }
+  };
 
   const fetchSections = async () => {
     setSectionsLoading(true);
@@ -522,6 +571,60 @@ export default function Settings() {
                   {isDark ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
                 </button>
               </div>
+
+              <div className="glass-card p-6">
+                <div className="flex items-start justify-between gap-4 mb-4">
+                  <div>
+                    <h4 className="font-semibold text-soot-900 mb-1">Dashboard Menu Layout</h4>
+                    <p className="text-sm text-soot-500">Choose the default menu presentation for the Dashboard.</p>
+                  </div>
+                  {generalLoading && (
+                    <div className="flex items-center gap-2 text-sm text-soot-400">
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Loading…
+                    </div>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setDashboardMenuLayout('list')}
+                    className={`rounded-xl border px-4 py-4 text-left transition-all ${dashboardMenuLayout === 'list' ? 'border-brand-500 bg-brand-50 text-brand-800 shadow-sm' : 'border-soot-200 bg-white/70 text-soot-600 hover:border-brand-300'}`}
+                  >
+                    <div className="flex items-center gap-2 mb-1">
+                      <List className="w-4 h-4" />
+                      <span className="font-semibold">List view</span>
+                    </div>
+                    <p className="text-sm text-current/80">Best for faster scanning and denser menu browsing.</p>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDashboardMenuLayout('grid')}
+                    className={`rounded-xl border px-4 py-4 text-left transition-all ${dashboardMenuLayout === 'grid' ? 'border-brand-500 bg-brand-50 text-brand-800 shadow-sm' : 'border-soot-200 bg-white/70 text-soot-600 hover:border-brand-300'}`}
+                  >
+                    <div className="flex items-center gap-2 mb-1">
+                      <LayoutGrid className="w-4 h-4" />
+                      <span className="font-semibold">Card view</span>
+                    </div>
+                    <p className="text-sm text-current/80">Shows larger item cards and photos in a grid.</p>
+                  </button>
+                </div>
+
+                <div className="mt-4 flex items-center justify-between gap-3">
+                  <div className={`text-sm ${generalFeedback.startsWith('error:') ? 'text-red-600' : 'text-soot-500'}`}>
+                    {generalFeedback ? (generalFeedback.startsWith('error:') ? generalFeedback.replace(/^error:/, '') : generalFeedback) : 'Saved per branch terminal settings.'}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={saveGeneralSettings}
+                    disabled={generalSaving || generalLoading}
+                    className="px-4 py-2.5 rounded-lg bg-brand-600 text-white font-semibold hover:bg-brand-700 disabled:opacity-60 transition-colors"
+                  >
+                    {generalSaving ? 'Saving…' : 'Save layout'}
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         )}
@@ -554,14 +657,16 @@ export default function Settings() {
                       <h5 className="text-sm font-semibold text-soot-900">Order Receipt Printer</h5>
                       <div>
                         <label className="block text-sm font-medium text-soot-800 mb-1">Connection Type</label>
-                        <select
+                        <SearchableSelect
                           value={hardware.receipt_printer_mode}
-                          onChange={e => setHardware({ ...hardware, receipt_printer_mode: e.target.value })}
-                          className="w-full px-4 py-3 glass-card focus:ring-2 focus:ring-brand-500 focus:outline-none"
-                        >
-                          <option value="lan">LAN (IP + Port)</option>
-                          <option value="usb">USB (Vendor/Product ID)</option>
-                        </select>
+                          onChange={(value) => setHardware({ ...hardware, receipt_printer_mode: value })}
+                          searchPlaceholder="Search connection types…"
+                          options={[
+                            { value: 'lan', label: 'LAN (IP + Port)' },
+                            { value: 'usb', label: 'USB (Vendor/Product ID)' },
+                          ]}
+                          className="glass-card border-0 px-4 py-3"
+                        />
                       </div>
 
                       {hardware.receipt_printer_mode === 'lan' ? (
@@ -622,14 +727,16 @@ export default function Settings() {
                       <h5 className="text-sm font-semibold text-soot-900">KOT Printer</h5>
                       <div>
                         <label className="block text-sm font-medium text-soot-800 mb-1">Connection Type</label>
-                        <select
+                        <SearchableSelect
                           value={hardware.kot_printer_mode}
-                          onChange={e => setHardware({ ...hardware, kot_printer_mode: e.target.value })}
-                          className="w-full px-4 py-3 glass-card focus:ring-2 focus:ring-brand-500 focus:outline-none"
-                        >
-                          <option value="lan">LAN (IP + Port)</option>
-                          <option value="usb">USB (Vendor/Product ID)</option>
-                        </select>
+                          onChange={(value) => setHardware({ ...hardware, kot_printer_mode: value })}
+                          searchPlaceholder="Search connection types…"
+                          options={[
+                            { value: 'lan', label: 'LAN (IP + Port)' },
+                            { value: 'usb', label: 'USB (Vendor/Product ID)' },
+                          ]}
+                          className="glass-card border-0 px-4 py-3"
+                        />
                       </div>
 
                       {hardware.kot_printer_mode === 'lan' ? (
@@ -689,14 +796,16 @@ export default function Settings() {
                     <div className="mt-4">
                    <div>
                      <label className="block text-sm font-medium text-soot-800 mb-1">Paper Width</label>
-                     <select 
+                     <SearchableSelect
                        value={hardware.paper_width}
-                       onChange={e => setHardware({ ...hardware, paper_width: e.target.value })}
-                       className="w-full px-4 py-3 glass-card focus:ring-2 focus:ring-brand-500 focus:outline-none"
-                     >
-                       <option value="80mm">80mm</option>
-                       <option value="58mm">58mm</option>
-                     </select>
+                       onChange={(value) => setHardware({ ...hardware, paper_width: value })}
+                       searchPlaceholder="Search paper widths…"
+                       options={[
+                         { value: '58mm', label: '58mm' },
+                         { value: '80mm', label: '80mm' },
+                       ]}
+                       className="glass-card border-0 px-4 py-3"
+                     />
                    </div>
                 </div>
 
@@ -1045,14 +1154,18 @@ export default function Settings() {
                 placeholder="e.g. Happy Hour 10%"
                 className="flex-1 min-w-[140px] px-4 py-3 border border-soot-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:outline-none text-sm"
               />
-              <select
-                value={newDiscount.type}
-                onChange={e => setNewDiscount(prev => ({ ...prev, type: e.target.value as 'percent' | 'fixed' }))}
-                className="px-4 py-3 border border-soot-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:outline-none text-sm"
-              >
-                <option value="percent">Percent</option>
-                <option value="fixed">Fixed amount</option>
-              </select>
+              <div className="min-w-[12rem]">
+                <SearchableSelect
+                  value={newDiscount.type}
+                  onChange={value => setNewDiscount(prev => ({ ...prev, type: value as 'percent' | 'fixed' }))}
+                  searchPlaceholder="Search discount types…"
+                  options={[
+                    { value: 'fixed', label: 'Fixed amount' },
+                    { value: 'percent', label: 'Percent' },
+                  ]}
+                  className="border-soot-200 px-4 py-3 text-sm"
+                />
+              </div>
               <div className="flex items-center gap-1">
                 <input
                   type="number"
@@ -1114,14 +1227,18 @@ export default function Settings() {
                             onChange={e => setEditingDraft(prev => prev ? { ...prev, name: e.target.value } : null)}
                             className="px-3 py-1.5 border border-soot-200 rounded text-sm w-32"
                           />
-                          <select
-                            value={editingDraft.type}
-                            onChange={e => setEditingDraft(prev => prev ? { ...prev, type: e.target.value as 'percent' | 'fixed' } : null)}
-                            className="px-3 py-1.5 border border-soot-200 rounded text-sm"
-                          >
-                            <option value="percent">Percent</option>
-                            <option value="fixed">Fixed</option>
-                          </select>
+                          <div className="min-w-[10rem]">
+                            <SearchableSelect
+                              value={editingDraft.type}
+                              onChange={value => setEditingDraft(prev => prev ? { ...prev, type: value as 'percent' | 'fixed' } : null)}
+                              searchPlaceholder="Search discount types…"
+                              options={[
+                                { value: 'fixed', label: 'Fixed' },
+                                { value: 'percent', label: 'Percent' },
+                              ]}
+                              className="border-soot-200 px-3 py-1.5 text-sm"
+                            />
+                          </div>
                           <input
                             type="number"
                             inputMode="decimal"

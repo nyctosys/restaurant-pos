@@ -3,6 +3,7 @@ import { Loader2, Plus, Trash2 } from 'lucide-react';
 import { del, get, patch, post, getUserMessage } from '../../api';
 import { getTerminalBranchIdString, parseUserFromStorage } from '../../utils/branchContext';
 import { showConfirm } from '../ConfirmDialog';
+import SearchableSelect from '../SearchableSelect';
 
 type Modifier = {
   id: number;
@@ -198,18 +199,17 @@ export default function ModifiersSettings() {
         <div className="flex flex-wrap gap-2 items-end">
           <div className="flex-1 min-w-[200px]">
             <label className="block text-xs font-semibold text-neutral-500 mb-1">Deduct ingredient (optional)</label>
-            <select
+            <SearchableSelect
               value={newIngredientId}
-              onChange={e => setNewIngredientId(e.target.value)}
-              className="w-full px-4 py-3 border border-soot-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:outline-none text-sm bg-white"
-            >
-              <option value="">— None —</option>
-              {ingredients.map(i => (
-                <option key={i.id} value={i.id}>
-                  {i.name}
-                </option>
-              ))}
-            </select>
+              onChange={setNewIngredientId}
+              placeholder="— None —"
+              searchPlaceholder="Search ingredients…"
+              options={ingredients.map((ingredient) => ({
+                value: String(ingredient.id),
+                label: ingredient.name,
+              }))}
+              className="border-soot-200 bg-white px-4 py-3"
+            />
           </div>
           <div className="w-36">
             <label className="block text-xs font-semibold text-neutral-500 mb-1">Qty / unit</label>
@@ -288,18 +288,17 @@ export default function ModifiersSettings() {
                   <div className="flex flex-wrap gap-2 items-end">
                     <div className="flex-1 min-w-[200px]">
                       <label className="block text-[10px] font-bold text-neutral-500 uppercase mb-1">Ingredient</label>
-                      <select
+                      <SearchableSelect
                         value={editingIngredientId}
-                        onChange={e => setEditingIngredientId(e.target.value)}
-                        className="w-full px-3 py-2 border border-soot-200 rounded-lg text-sm bg-white"
-                      >
-                        <option value="">— None —</option>
-                        {ingredients.map(i => (
-                          <option key={i.id} value={i.id}>
-                            {i.name}
-                          </option>
-                        ))}
-                      </select>
+                        onChange={setEditingIngredientId}
+                        placeholder="— None —"
+                        searchPlaceholder="Search ingredients…"
+                        options={ingredients.map((ingredient) => ({
+                          value: String(ingredient.id),
+                          label: ingredient.name,
+                        }))}
+                        className="border-soot-200 bg-white px-3 py-2"
+                      />
                     </div>
                     <div className="w-36">
                       <label className="block text-[10px] font-bold text-neutral-500 uppercase mb-1">Qty / unit</label>

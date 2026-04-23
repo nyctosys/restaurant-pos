@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, X, Loader2, Trash2, ArrowRight, Utensils, PackageSearch } from 'lucide-react';
 import { get, post, del, getUserMessage } from '../../api';
+import SearchableSelect from '../SearchableSelect';
 import { showToast } from '../Toast';
 import { formatCurrency } from '../../utils/formatCurrency';
 
@@ -218,18 +219,20 @@ export default function RecipesTab() {
                     <label className="block text-xs font-semibold text-soot-600 uppercase tracking-wider mb-1">
                       Recipe scope
                     </label>
-                    <select
-                      value={recipeVariantScope}
-                      onChange={e => setRecipeVariantScope(e.target.value)}
-                      className="w-full sm:max-w-md px-3 py-2 rounded-lg glass-card text-sm border border-soot-200/80 focus:ring-2 focus:ring-brand-500"
-                    >
-                      <option value="">Base (default — used when no variant-specific BOM exists)</option>
-                      {selectedProduct.variants.map(v => (
-                        <option key={v} value={v}>
-                          Variant: {v}
-                        </option>
-                      ))}
-                    </select>
+                    <div className="w-full sm:max-w-md">
+                      <SearchableSelect
+                        value={recipeVariantScope}
+                        onChange={setRecipeVariantScope}
+                        placeholder="Base (default — used when no variant-specific BOM exists)"
+                        searchPlaceholder="Search recipe scopes…"
+                        options={selectedProduct.variants.map((variant) => ({
+                          value: variant,
+                          label: `Variant: ${variant}`,
+                          searchText: variant,
+                        }))}
+                        className="glass-card border-soot-200/80 px-3 py-2"
+                      />
+                    </div>
                     <p className="text-xs text-soot-500 mt-1">
                       Add ingredients for the base recipe, or pick a variant to override the BOM for that option only.
                     </p>
@@ -321,17 +324,18 @@ export default function RecipesTab() {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-xs font-semibold text-soot-600 uppercase tracking-wider mb-1">Ingredient</label>
-                      <select 
-                        required
-                        value={formIngredientId} 
-                        onChange={e => setFormIngredientId(e.target.value)} 
-                        className="w-full px-3 py-2 glass-card text-sm focus:ring-2 focus:ring-brand-500"
-                      >
-                        <option value="">— Select —</option>
-                        {ingredients.map(i => (
-                          <option key={i.id} value={i.id}>{i.name} ({i.unit})</option>
-                        ))}
-                      </select>
+                      <SearchableSelect
+                        value={formIngredientId}
+                        onChange={setFormIngredientId}
+                        placeholder="— Select —"
+                        searchPlaceholder="Search ingredients…"
+                        options={ingredients.map((ingredient) => ({
+                          value: String(ingredient.id),
+                          label: `${ingredient.name} (${ingredient.unit})`,
+                          searchText: ingredient.name,
+                        }))}
+                        className="glass-card border-0 px-3 py-2"
+                      />
                     </div>
                     <div>
                       <label className="block text-xs font-semibold text-soot-600 uppercase tracking-wider mb-1">

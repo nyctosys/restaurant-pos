@@ -55,30 +55,34 @@ def update_settings(payload: dict[str, Any] | None = None, current_user: User = 
     if "config" not in data:
         return JSONResponse(status_code=400, content={"message": "Missing config data"})
     branch_id = data.get("branch_id")
+    terminal_branch_id = resolve_terminal_branch_id(current_user)
+
+    # Branch switching is not supported. For branch-scoped saves, always persist to the
+    # authenticated terminal branch even if the client sends a stale branch_id.
+    effective_branch_id = None if branch_id is None else terminal_branch_id
+
     if current_user.role == "manager":
         if branch_id is None:
             return JSONResponse(status_code=403, content={"message": "Managers cannot update global settings"})
-        if int(branch_id) != int(current_user.branch_id or 0):
-            return JSONResponse(status_code=403, content={"message": "Not allowed for this branch"})
     else:
-        # Owner: global row (branch_id null) or this terminal's branch only
-        if branch_id is not None and int(branch_id) != resolve_terminal_branch_id(current_user):
-            return JSONResponse(status_code=403, content={"message": "Not allowed for this branch"})
-    setting = Setting.query.filter_by(branch_id=branch_id).first()
+        # Owner: global row (branch_id null) or this terminal's branch only.
+        # Payload branch_id is ignored for branch-scoped writes because clients cannot switch branches.
+        pass
+
+    setting = Setting.query.filter_by(branch_id=effective_branch_id).first()
     try:
         if not setting:
-            setting = Setting(branch_id=branch_id, config=data["config"])
+            setting = Setting(branch_id=effective_branch_id, config=data["config"])
             db.session.add(setting)
         else:
             setting.config = data["config"]
         db.session.flush()
-        terminal = resolve_terminal_branch_id(current_user)
         enqueue_sync_event(
-            branch_id=terminal,
+            branch_id=terminal_branch_id,
             entity_type="settings",
             entity_id=setting.id,
             event_type="settings_updated",
-            payload={"scope_branch_id": branch_id, "keys": list((data.get("config") or {}).keys())},
+            payload={"scope_branch_id": effective_branch_id, "keys": list((data.get("config") or {}).keys())},
         )
         db.session.commit()
         return {"message": "Settings updated", "config": setting.config}

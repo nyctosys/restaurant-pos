@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 class SupplierBase(BaseModel):
     model_config = ConfigDict(extra="ignore")
     name: str
+    sku: str | None = None
     contact_person: str | None = None
     phone: str | None = None
     email: str | None = None

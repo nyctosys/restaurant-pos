@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react';
-import { Calendar, Loader2, RefreshCw, Package } from 'lucide-react';
+import { useState, useEffect, useMemo } from 'react';
+import { Calendar, Loader2, RefreshCw, Package, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+import SearchableSelect from '../components/SearchableSelect';
 import TransactionDetailsModal from '../components/TransactionDetailsModal';
 import { formatCurrency } from '../utils/formatCurrency';
 import { get, getUserMessage } from '../api';
@@ -37,6 +38,10 @@ type Analytics = {
   most_selling_product: { id: number; title: string; total_sold: number } | null;
 };
 
+type SalesSortKey = 'id' | 'created_at' | 'payment_method' | 'status' | 'total_amount';
+type StockSortKey = 'created_at' | 'ingredient_name' | 'delta' | 'movement_type';
+type SortDirection = 'asc' | 'desc';
+
 export default function Reports() {
   const [timeFilter, setTimeFilter] = useState('today');
   const [customStart, setCustomStart] = useState('');
@@ -48,6 +53,10 @@ export default function Reports() {
   const [includeArchived, setIncludeArchived] = useState(false);
   const [stockTransactions, setStockTransactions] = useState<StockTransactionInfo[]>([]);
   const [stockLoading, setStockLoading] = useState(false);
+  const [salesSortKey, setSalesSortKey] = useState<SalesSortKey>('created_at');
+  const [salesSortDirection, setSalesSortDirection] = useState<SortDirection>('asc');
+  const [stockSortKey, setStockSortKey] = useState<StockSortKey>('created_at');
+  const [stockSortDirection, setStockSortDirection] = useState<SortDirection>('asc');
   const user = parseUserFromStorage();
   const isOwner = user?.role === 'owner';
   const terminalBranchId = getTerminalBranchIdString(user);
@@ -118,6 +127,96 @@ export default function Reports() {
     return `${d.toLocaleDateString()} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
   };
 
+  const handleSalesSort = (key: SalesSortKey) => {
+    if (salesSortKey === key) {
+      setSalesSortDirection(prev => (prev === 'asc' ? 'desc' : 'asc'));
+      return;
+    }
+    setSalesSortKey(key);
+    setSalesSortDirection('asc');
+  };
+
+  const handleStockSort = (key: StockSortKey) => {
+    if (stockSortKey === key) {
+      setStockSortDirection(prev => (prev === 'asc' ? 'desc' : 'asc'));
+      return;
+    }
+    setStockSortKey(key);
+    setStockSortDirection('asc');
+  };
+
+  const sortedSales = useMemo(() => {
+    const direction = salesSortDirection === 'asc' ? 1 : -1;
+    return sales
+      .map((sale, index) => ({ sale, index }))
+      .sort((a, b) => {
+        const left = a.sale;
+        const right = b.sale;
+
+        let result = 0;
+        switch (salesSortKey) {
+          case 'id':
+            result = left.id - right.id;
+            break;
+          case 'created_at':
+            result = new Date(left.created_at).getTime() - new Date(right.created_at).getTime();
+            break;
+          case 'total_amount':
+            result = left.total_amount - right.total_amount;
+            break;
+          case 'payment_method':
+          case 'status':
+            result = left[salesSortKey].localeCompare(right[salesSortKey], undefined, { sensitivity: 'base' });
+            break;
+        }
+
+        if (result !== 0) return result * direction;
+        return a.index - b.index;
+      })
+      .map(entry => entry.sale);
+  }, [sales, salesSortDirection, salesSortKey]);
+
+  const sortedStockTransactions = useMemo(() => {
+    const direction = stockSortDirection === 'asc' ? 1 : -1;
+    return stockTransactions
+      .map((tx, index) => ({ tx, index }))
+      .sort((a, b) => {
+        const left = a.tx;
+        const right = b.tx;
+        const leftName = left.ingredient_name ?? (left.product_title ? left.product_title : left.ingredient_id != null ? `#${left.ingredient_id}` : '—');
+        const rightName = right.ingredient_name ?? (right.product_title ? right.product_title : right.ingredient_id != null ? `#${right.ingredient_id}` : '—');
+        const leftType = (left.movement_type || left.reason || '').replace(/_/g, ' ');
+        const rightType = (right.movement_type || right.reason || '').replace(/_/g, ' ');
+
+        let result = 0;
+        switch (stockSortKey) {
+          case 'created_at':
+            result = new Date(left.created_at).getTime() - new Date(right.created_at).getTime();
+            break;
+          case 'delta':
+            result = left.delta - right.delta;
+            break;
+          case 'ingredient_name':
+            result = leftName.localeCompare(rightName, undefined, { sensitivity: 'base' });
+            break;
+          case 'movement_type':
+            result = leftType.localeCompare(rightType, undefined, { sensitivity: 'base' });
+            break;
+        }
+
+        if (result !== 0) return result * direction;
+        return a.index - b.index;
+      })
+      .map(entry => entry.tx);
+  }, [stockSortDirection, stockSortKey, stockTransactions]);
+
+  const renderSortIcon = (active: boolean, direction: SortDirection) => {
+    if (!active) return <ArrowUpDown className="w-3.5 h-3.5 text-soot-400" aria-hidden="true" />;
+    return direction === 'asc'
+      ? <ArrowUp className="w-3.5 h-3.5 text-brand-700" aria-hidden="true" />
+      : <ArrowDown className="w-3.5 h-3.5 text-brand-700" aria-hidden="true" />;
+  };
+
   return (
     <>
       <div className="flex flex-col h-full min-h-0 bg-transparent">
@@ -133,17 +232,21 @@ export default function Reports() {
               <input type="checkbox" checked={includeArchived} onChange={() => setIncludeArchived(v => !v)} className="rounded border-soot-300 text-brand-600 focus:ring-brand-500" />
               Include archived
             </label>
-            <select 
-              value={timeFilter}
-              onChange={(e) => setTimeFilter(e.target.value)}
-              className="glass-card text-sm font-medium text-soot-700 rounded-lg px-3 py-2.5 min-h-[44px] flex-1 min-w-[140px] lg:flex-initial lg:min-w-[160px] focus:ring-2 focus:ring-brand-500 focus:outline-none"
-            >
-              <option value="today">Today</option>
-              <option value="week">This Week</option>
-              <option value="month">This Month</option>
-              <option value="year">This Year</option>
-              <option value="custom">Custom Range</option>
-            </select>
+            <div className="flex-1 min-w-[140px] lg:flex-initial lg:min-w-[160px]">
+              <SearchableSelect
+                value={timeFilter}
+                onChange={setTimeFilter}
+                searchPlaceholder="Search time filters…"
+                options={[
+                  { value: 'custom', label: 'Custom Range' },
+                  { value: 'month', label: 'This Month' },
+                  { value: 'today', label: 'Today' },
+                  { value: 'week', label: 'This Week' },
+                  { value: 'year', label: 'This Year' },
+                ]}
+                className="glass-card border-0 min-h-[44px] rounded-lg px-3 py-2.5 text-sm font-medium text-soot-700"
+              />
+            </div>
 
             {timeFilter === 'custom' && (
               <div className="flex items-center gap-2 flex-wrap">
@@ -217,15 +320,40 @@ export default function Reports() {
                 <table className="w-full text-left border-collapse min-w-[640px]">
                   <thead>
                     <tr className="bg-white/40 border-b border-soot-200/80 text-xs uppercase text-[#57534e] font-semibold tracking-wider">
-                      <th className="py-3 px-3 lg:px-4 xl:py-2 xl:px-3 xl:text-[11px]">Transaction ID</th>
-                      <th className="py-3 px-3 lg:px-4 xl:py-2 xl:px-3 xl:text-[11px]">Date & Time</th>
-                      <th className="py-3 px-3 lg:px-4 xl:py-2 xl:px-3 xl:text-[11px]">Method</th>
-                      <th className="py-3 px-3 lg:px-4 xl:py-2 xl:px-3 xl:text-[11px] text-center">Status</th>
-                      <th className="py-3 px-3 lg:px-4 xl:py-2 xl:px-3 xl:text-[11px] text-right">Total</th>
+                      <th aria-sort={salesSortKey === 'id' ? (salesSortDirection === 'asc' ? 'ascending' : 'descending') : 'none'} className="py-3 px-3 lg:px-4 xl:py-2 xl:px-3 xl:text-[11px]">
+                        <button type="button" onClick={() => handleSalesSort('id')} className="flex items-center gap-2 text-left transition-colors hover:text-soot-700 focus:outline-none focus-visible:text-soot-900">
+                          <span>Transaction ID</span>
+                          {renderSortIcon(salesSortKey === 'id', salesSortDirection)}
+                        </button>
+                      </th>
+                      <th aria-sort={salesSortKey === 'created_at' ? (salesSortDirection === 'asc' ? 'ascending' : 'descending') : 'none'} className="py-3 px-3 lg:px-4 xl:py-2 xl:px-3 xl:text-[11px]">
+                        <button type="button" onClick={() => handleSalesSort('created_at')} className="flex items-center gap-2 text-left transition-colors hover:text-soot-700 focus:outline-none focus-visible:text-soot-900">
+                          <span>Date & Time</span>
+                          {renderSortIcon(salesSortKey === 'created_at', salesSortDirection)}
+                        </button>
+                      </th>
+                      <th aria-sort={salesSortKey === 'payment_method' ? (salesSortDirection === 'asc' ? 'ascending' : 'descending') : 'none'} className="py-3 px-3 lg:px-4 xl:py-2 xl:px-3 xl:text-[11px]">
+                        <button type="button" onClick={() => handleSalesSort('payment_method')} className="flex items-center gap-2 text-left transition-colors hover:text-soot-700 focus:outline-none focus-visible:text-soot-900">
+                          <span>Method</span>
+                          {renderSortIcon(salesSortKey === 'payment_method', salesSortDirection)}
+                        </button>
+                      </th>
+                      <th aria-sort={salesSortKey === 'status' ? (salesSortDirection === 'asc' ? 'ascending' : 'descending') : 'none'} className="py-3 px-3 lg:px-4 xl:py-2 xl:px-3 xl:text-[11px] text-center">
+                        <button type="button" onClick={() => handleSalesSort('status')} className="mx-auto flex items-center gap-2 text-center transition-colors hover:text-soot-700 focus:outline-none focus-visible:text-soot-900">
+                          <span>Status</span>
+                          {renderSortIcon(salesSortKey === 'status', salesSortDirection)}
+                        </button>
+                      </th>
+                      <th aria-sort={salesSortKey === 'total_amount' ? (salesSortDirection === 'asc' ? 'ascending' : 'descending') : 'none'} className="py-3 px-3 lg:px-4 xl:py-2 xl:px-3 xl:text-[11px] text-right">
+                        <button type="button" onClick={() => handleSalesSort('total_amount')} className="ml-auto flex items-center gap-2 text-right transition-colors hover:text-soot-700 focus:outline-none focus-visible:text-soot-900">
+                          <span>Total</span>
+                          {renderSortIcon(salesSortKey === 'total_amount', salesSortDirection)}
+                        </button>
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
-                    {sales.map((sale) => (
+                    {sortedSales.map((sale) => (
                       <tr 
                         key={sale.id} 
                         onClick={() => setSelectedSaleId(sale.id)}
@@ -272,14 +400,34 @@ export default function Reports() {
                 <table className="w-full text-left border-collapse min-w-[520px]">
                   <thead>
                     <tr className="bg-white/40 border-b border-soot-200/80 text-xs uppercase text-[#57534e] font-semibold tracking-wider">
-                      <th className="py-3 px-3 lg:px-4 xl:py-2 xl:px-3 xl:text-[11px]">Date & time</th>
-                      <th className="py-3 px-3 lg:px-4 xl:py-2 xl:px-3 xl:text-[11px]">Ingredient</th>
-                      <th className="py-3 px-3 lg:px-4 xl:py-2 xl:px-3 xl:text-[11px] text-right">Change</th>
-                      <th className="py-3 px-3 lg:px-4 xl:py-2 xl:px-3 xl:text-[11px]">Type</th>
+                      <th aria-sort={stockSortKey === 'created_at' ? (stockSortDirection === 'asc' ? 'ascending' : 'descending') : 'none'} className="py-3 px-3 lg:px-4 xl:py-2 xl:px-3 xl:text-[11px]">
+                        <button type="button" onClick={() => handleStockSort('created_at')} className="flex items-center gap-2 text-left transition-colors hover:text-soot-700 focus:outline-none focus-visible:text-soot-900">
+                          <span>Date & time</span>
+                          {renderSortIcon(stockSortKey === 'created_at', stockSortDirection)}
+                        </button>
+                      </th>
+                      <th aria-sort={stockSortKey === 'ingredient_name' ? (stockSortDirection === 'asc' ? 'ascending' : 'descending') : 'none'} className="py-3 px-3 lg:px-4 xl:py-2 xl:px-3 xl:text-[11px]">
+                        <button type="button" onClick={() => handleStockSort('ingredient_name')} className="flex items-center gap-2 text-left transition-colors hover:text-soot-700 focus:outline-none focus-visible:text-soot-900">
+                          <span>Ingredient</span>
+                          {renderSortIcon(stockSortKey === 'ingredient_name', stockSortDirection)}
+                        </button>
+                      </th>
+                      <th aria-sort={stockSortKey === 'delta' ? (stockSortDirection === 'asc' ? 'ascending' : 'descending') : 'none'} className="py-3 px-3 lg:px-4 xl:py-2 xl:px-3 xl:text-[11px] text-right">
+                        <button type="button" onClick={() => handleStockSort('delta')} className="ml-auto flex items-center gap-2 text-right transition-colors hover:text-soot-700 focus:outline-none focus-visible:text-soot-900">
+                          <span>Change</span>
+                          {renderSortIcon(stockSortKey === 'delta', stockSortDirection)}
+                        </button>
+                      </th>
+                      <th aria-sort={stockSortKey === 'movement_type' ? (stockSortDirection === 'asc' ? 'ascending' : 'descending') : 'none'} className="py-3 px-3 lg:px-4 xl:py-2 xl:px-3 xl:text-[11px]">
+                        <button type="button" onClick={() => handleStockSort('movement_type')} className="flex items-center gap-2 text-left transition-colors hover:text-soot-700 focus:outline-none focus-visible:text-soot-900">
+                          <span>Type</span>
+                          {renderSortIcon(stockSortKey === 'movement_type', stockSortDirection)}
+                        </button>
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
-                    {stockTransactions.map((tx) => (
+                    {sortedStockTransactions.map((tx) => (
                       <tr key={tx.id} className="border-b border-soot-100 hover:bg-white/30 min-h-[48px] xl:min-h-0">
                         <td className="py-3 px-3 lg:px-4 xl:py-2 xl:px-3 text-sm text-[#525252]">{getFormatDate(tx.created_at)}</td>
                         <td className="py-3 px-3 lg:px-4 xl:py-2 xl:px-3 text-sm font-medium text-[#171717]">

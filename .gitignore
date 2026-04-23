@@ -18,3 +18,5 @@ backend/logs
 .DS_Store
 .idea
 .vscode
+
+.caveman/

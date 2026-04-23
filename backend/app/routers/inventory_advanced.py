@@ -42,17 +42,47 @@ def _resolve_inventory_branch(branch_id: int | None, current_user: User) -> int:
 def list_suppliers(current_user: User = Depends(get_current_user)):
     suppliers = Supplier.query.filter_by(is_active=True).all()
     return {"suppliers": [{
-        "id": s.id, "name": s.name, "contact_person": s.contact_person,
+        "id": s.id, "name": s.name, "sku": s.sku, "contact_person": s.contact_person,
         "phone": s.phone, "email": s.email, "address": s.address, 
         "notes": s.notes
     } for s in suppliers]}
 
 @inventory_advanced_router.post("/suppliers")
 def create_supplier(payload: SupplierCreate, current_user: User = Depends(get_current_user)):
-    s = Supplier(**payload.model_dump())
+    data = payload.model_dump()
+    sku = (data.get("sku") or "").strip() or None
+    if sku and Supplier.query.filter_by(sku=sku).first():
+        return JSONResponse(status_code=409, content={"message": "Supplier with this SKU already exists"})
+    data["sku"] = sku
+    s = Supplier(**data)
     db.session.add(s)
     db.session.commit()
     return {"id": s.id, "message": "Supplier created"}
+
+
+@inventory_advanced_router.put("/suppliers/{supplier_id}")
+def update_supplier(
+    supplier_id: int,
+    payload: SupplierUpdate,
+    current_user: User = Depends(get_current_user),
+):
+    supplier = db.session.get(Supplier, supplier_id)
+    if not supplier:
+        return JSONResponse(status_code=404, content={"message": "Not found"})
+
+    data = payload.model_dump(exclude_unset=True)
+    if "sku" in data:
+        sku = (data.get("sku") or "").strip() or None
+        existing = Supplier.query.filter_by(sku=sku).first() if sku else None
+        if existing and existing.id != supplier.id:
+            return JSONResponse(status_code=409, content={"message": "Supplier with this SKU already exists"})
+        data["sku"] = sku
+
+    for key, value in data.items():
+        setattr(supplier, key, value)
+
+    db.session.commit()
+    return {"message": "Supplier updated"}
 
 
 # --- Ingredients ---

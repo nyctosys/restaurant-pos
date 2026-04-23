@@ -108,6 +108,12 @@ def _init_database_core() -> None:
                     print("Added 'variant_key' column to 'recipe_items' table.")
                 except (OperationalError, ProgrammingError):
                     db.session.rollback()
+                try:
+                    db.session.execute(text("ALTER TABLE suppliers ADD COLUMN sku VARCHAR(100)"))
+                    db.session.commit()
+                    print("Added 'sku' column to 'suppliers' table.")
+                except (OperationalError, ProgrammingError):
+                    db.session.rollback()
                 break
             except Exception as e:
                 if i < retries - 1:
@@ -118,4 +124,3 @@ def _init_database_core() -> None:
                     raise
     finally:
         unbind_request_session(_tok)
-

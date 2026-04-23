@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react';
-import { Plus, Trash2, Edit2, Loader2, X, Building2, Archive, ArchiveRestore } from 'lucide-react';
+import { useState, useEffect, useMemo } from 'react';
+import { Plus, Trash2, Edit2, Loader2, X, Building2, Archive, ArchiveRestore, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 import { showToast } from '../Toast';
 import { showConfirm } from '../ConfirmDialog';
+import SearchableSelect from '../SearchableSelect';
 import { get, post, put, patch, del, getUserMessage } from '../../api';
 import { getTerminalBranchId, parseUserFromStorage } from '../../utils/branchContext';
 
@@ -14,6 +15,9 @@ type User = {
   created_at: string;
   archived_at?: string | null;
 };
+
+type SortKey = 'username' | 'branch_name' | 'role' | 'archived_at';
+type SortDirection = 'asc' | 'desc';
 
 export default function UsersSettings() {
   const [users, setUsers] = useState<User[]>([]);
@@ -30,6 +34,8 @@ export default function UsersSettings() {
   // Filters & External Data
   const [includeArchived, setIncludeArchived] = useState(false);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [sortKey, setSortKey] = useState<SortKey>('username');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
 
   useEffect(() => {
     const userStr = localStorage.getItem('user');
@@ -147,6 +153,48 @@ export default function UsersSettings() {
   const filteredUsers =
     terminalId == null ? users : users.filter(u => u.branch_id === terminalId);
 
+  const handleSort = (key: SortKey) => {
+    if (sortKey === key) {
+      setSortDirection(prev => (prev === 'asc' ? 'desc' : 'asc'));
+      return;
+    }
+    setSortKey(key);
+    setSortDirection('asc');
+  };
+
+  const sortedUsers = useMemo(() => {
+    const direction = sortDirection === 'asc' ? 1 : -1;
+    return filteredUsers
+      .map((user, index) => ({ user, index }))
+      .sort((a, b) => {
+        const left = a.user;
+        const right = b.user;
+
+        let result = 0;
+        switch (sortKey) {
+          case 'archived_at':
+            result = Number(Boolean(left.archived_at)) - Number(Boolean(right.archived_at));
+            break;
+          case 'username':
+          case 'branch_name':
+          case 'role':
+            result = (left[sortKey] || '').localeCompare(right[sortKey] || '', undefined, { sensitivity: 'base' });
+            break;
+        }
+
+        if (result !== 0) return result * direction;
+        return a.index - b.index;
+      })
+      .map(entry => entry.user);
+  }, [filteredUsers, sortDirection, sortKey]);
+
+  const renderSortIcon = (key: SortKey) => {
+    if (sortKey !== key) return <ArrowUpDown className="w-3.5 h-3.5 text-soot-400" aria-hidden="true" />;
+    return sortDirection === 'asc'
+      ? <ArrowUp className="w-3.5 h-3.5 text-brand-700" aria-hidden="true" />
+      : <ArrowDown className="w-3.5 h-3.5 text-brand-700" aria-hidden="true" />;
+  };
+
   return (
     <div className="max-w-6xl">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
@@ -181,14 +229,34 @@ export default function UsersSettings() {
           <table className="w-full text-left">
             <thead className="bg-white/20 border-b border-soot-200">
               <tr>
-                <th className="px-6 py-3 text-xs font-semibold text-soot-500 uppercase tracking-wider">Username</th>
-                <th className="px-6 py-3 text-xs font-semibold text-soot-500 uppercase tracking-wider">Branch</th>
-                <th className="px-6 py-3 text-xs font-semibold text-soot-500 uppercase tracking-wider">Role</th>
-                <th className="px-6 py-3 text-xs font-semibold text-soot-500 uppercase tracking-wider text-right">Actions</th>
+                <th aria-sort={sortKey === 'username' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'} className="px-6 py-3 text-xs font-semibold text-soot-500 uppercase tracking-wider">
+                  <button type="button" onClick={() => handleSort('username')} className="flex items-center gap-2 text-left transition-colors hover:text-soot-700 focus:outline-none focus-visible:text-soot-900">
+                    <span>Username</span>
+                    {renderSortIcon('username')}
+                  </button>
+                </th>
+                <th aria-sort={sortKey === 'branch_name' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'} className="px-6 py-3 text-xs font-semibold text-soot-500 uppercase tracking-wider">
+                  <button type="button" onClick={() => handleSort('branch_name')} className="flex items-center gap-2 text-left transition-colors hover:text-soot-700 focus:outline-none focus-visible:text-soot-900">
+                    <span>Branch</span>
+                    {renderSortIcon('branch_name')}
+                  </button>
+                </th>
+                <th aria-sort={sortKey === 'role' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'} className="px-6 py-3 text-xs font-semibold text-soot-500 uppercase tracking-wider">
+                  <button type="button" onClick={() => handleSort('role')} className="flex items-center gap-2 text-left transition-colors hover:text-soot-700 focus:outline-none focus-visible:text-soot-900">
+                    <span>Role</span>
+                    {renderSortIcon('role')}
+                  </button>
+                </th>
+                <th aria-sort={sortKey === 'archived_at' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'} className="px-6 py-3 text-xs font-semibold text-soot-500 uppercase tracking-wider text-right">
+                  <button type="button" onClick={() => handleSort('archived_at')} className="ml-auto flex items-center gap-2 text-right transition-colors hover:text-soot-700 focus:outline-none focus-visible:text-soot-900">
+                    <span>Actions</span>
+                    {renderSortIcon('archived_at')}
+                  </button>
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-soot-100">
-              {filteredUsers.map((user) => (
+              {sortedUsers.map((user) => (
                 <tr key={user.id} className={`hover:bg-white/25 transition-colors ${user.archived_at ? 'bg-white/20 opacity-90' : ''}`}>
                   <td className="px-6 py-4 font-medium text-soot-900">
                     {user.username}
@@ -299,16 +367,18 @@ export default function UsersSettings() {
                   </>
                 ) : (
                   <>
-                    <select
+                    <SearchableSelect
                       value={role}
-                      onChange={(e) => setRole(e.target.value)}
-                      className="w-full px-4 py-2 glass-card focus:ring-2 focus:ring-brand-500 focus:outline-none"
-                    >
-                      <option value="manager">Manager</option>
-                      <option value="cashier">Cashier</option>
-                      <option value="inventory_manager">Inventory Manager</option>
-                      <option value="kitchen">Kitchen (display only)</option>
-                    </select>
+                      onChange={setRole}
+                      searchPlaceholder="Search roles…"
+                      options={[
+                        { value: 'cashier', label: 'Cashier' },
+                        { value: 'inventory_manager', label: 'Inventory Manager' },
+                        { value: 'kitchen', label: 'Kitchen (display only)' },
+                        { value: 'manager', label: 'Manager' },
+                      ]}
+                      className="glass-card border-0 px-4 py-2"
+                    />
                     <p className="mt-1 text-xs text-soot-500">
                       Kitchen users only see the kitchen display after login — scoped to this terminal&apos;s branch.
                     </p>

@@ -28,6 +28,7 @@ def test_create_supplier_and_ingredient(client, app):
     # 1. Create supplier
     r1 = client.post("/api/inventory-advanced/suppliers", headers=h, json={
         "name": "Test Supplier",
+        "sku": "SUP-TEST-SUPPLIER",
         "contact_person": "John",
         "email": "john@example.com"
     })
@@ -49,6 +50,34 @@ def test_create_supplier_and_ingredient(client, app):
     r3 = client.get("/api/inventory-advanced/ingredients", headers=h)
     ingredients = r3.get_json()["ingredients"]
     assert any(i["id"] == ing_id for i in ingredients)
+
+    r_suppliers = client.get("/api/inventory-advanced/suppliers", headers=h)
+    suppliers = r_suppliers.get_json()["suppliers"]
+    created_supplier = next(s for s in suppliers if s["id"] == sup_id)
+    assert created_supplier["sku"] == "SUP-TEST-SUPPLIER"
+
+
+def test_update_supplier_sku(client, app):
+    h = _auth_headers(client, app)
+    create = client.post(
+        "/api/inventory-advanced/suppliers",
+        headers=h,
+        json={"name": "Fresh Farms", "sku": "SUP-FRESH-FARMS"},
+    )
+    sup_id = create.get_json()["id"]
+
+    update = client.put(
+        f"/api/inventory-advanced/suppliers/{sup_id}",
+        headers=h,
+        json={"sku": "SUP-FRESH-FARMS-002", "phone": "12345"},
+    )
+    assert update.status_code == 200
+
+    listed = client.get("/api/inventory-advanced/suppliers", headers=h)
+    suppliers = listed.get_json()["suppliers"]
+    supplier = next(s for s in suppliers if s["id"] == sup_id)
+    assert supplier["sku"] == "SUP-FRESH-FARMS-002"
+    assert supplier["phone"] == "12345"
 
 
 def test_recipe_mapping_and_product_deletion(client, app):

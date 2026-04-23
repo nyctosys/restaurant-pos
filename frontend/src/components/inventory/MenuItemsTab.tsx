@@ -1,6 +1,7 @@
-import { useState, useEffect, useCallback } from 'react';
-import { Plus, X, Loader2, ChevronDown, Trash2, ScanBarcode, Upload, Archive, ArchiveRestore, Pencil } from 'lucide-react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { Plus, X, Loader2, Trash2, ScanBarcode, Upload, Archive, ArchiveRestore, Pencil, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 import BarcodeModal from '../BarcodeModal';
+import SearchableSelect from '../SearchableSelect';
 import { showToast } from '../Toast';
 import { showConfirm } from '../ConfirmDialog';
 import { useScanner } from '../../hooks/useScanner';
@@ -19,6 +20,9 @@ type Product = {
   archived_at?: string | null;
 };
 
+type SortKey = 'sku' | 'title' | 'section' | 'base_price' | 'archived_at';
+type SortDirection = 'asc' | 'desc';
+
 /** Menu catalog only — stock is tracked per ingredient (Recipes / Ingredients tabs). */
 export default function MenuItemsTab() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -29,6 +33,8 @@ export default function MenuItemsTab() {
   const [barcodeProduct, setBarcodeProduct] = useState<Product | null>(null);
   const [addViaScanner, setAddViaScanner] = useState(false);
   const [includeArchived, setIncludeArchived] = useState(false);
+  const [sortKey, setSortKey] = useState<SortKey>('title');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
   const { lastScannedBarcode, clearBarcode } = useScanner();
 
   const [formSku, setFormSku] = useState('');
@@ -214,6 +220,55 @@ export default function MenuItemsTab() {
     }
   };
 
+  const handleSort = (key: SortKey) => {
+    if (sortKey === key) {
+      setSortDirection(prev => (prev === 'asc' ? 'desc' : 'asc'));
+      return;
+    }
+    setSortKey(key);
+    setSortDirection('asc');
+  };
+
+  const sortedProducts = useMemo(() => {
+    const direction = sortDirection === 'asc' ? 1 : -1;
+    return products
+      .map((product, index) => ({ product, index }))
+      .sort((a, b) => {
+        const left = a.product;
+        const right = b.product;
+
+        let result = 0;
+        switch (sortKey) {
+          case 'base_price':
+            result = left.base_price - right.base_price;
+            break;
+          case 'archived_at': {
+            const leftArchived = left.archived_at ? 1 : 0;
+            const rightArchived = right.archived_at ? 1 : 0;
+            result = leftArchived - rightArchived;
+            break;
+          }
+          case 'sku':
+          case 'title':
+          case 'section': {
+            result = (left[sortKey] || '').localeCompare(right[sortKey] || '', undefined, { sensitivity: 'base' });
+            break;
+          }
+        }
+
+        if (result !== 0) return result * direction;
+        return a.index - b.index;
+      })
+      .map(entry => entry.product);
+  }, [products, sortDirection, sortKey]);
+
+  const renderSortIcon = (key: SortKey) => {
+    if (sortKey !== key) return <ArrowUpDown className="w-3.5 h-3.5 text-soot-400" aria-hidden="true" />;
+    return sortDirection === 'asc'
+      ? <ArrowUp className="w-3.5 h-3.5 text-brand-700" aria-hidden="true" />
+      : <ArrowDown className="w-3.5 h-3.5 text-brand-700" aria-hidden="true" />;
+  };
+
   return (
     <>
       {barcodeProduct && (
@@ -285,15 +340,75 @@ export default function MenuItemsTab() {
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="border-b-2 border-soot-200 text-sm uppercase text-soot-500 font-semibold tracking-wider">
-                  <th className="py-3 px-3 lg:px-4 xl:py-2 xl:text-xs">SKU</th>
-                  <th className="py-3 px-3 lg:px-4 xl:py-2 xl:text-xs">Item name</th>
-                  <th className="py-3 px-3 lg:px-4 xl:py-2 xl:text-xs">Category</th>
-                  <th className="py-3 px-3 lg:px-4 xl:py-2 xl:text-xs">Base Price</th>
-                  <th className="py-3 px-3 lg:px-4 xl:py-2 xl:text-xs text-right">Actions</th>
+                  <th
+                    aria-sort={sortKey === 'sku' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}
+                    className="sticky top-0 z-10 bg-white/90 backdrop-blur-md py-3 px-3 lg:px-4 xl:py-2 xl:text-xs"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => handleSort('sku')}
+                      className="flex w-full items-center gap-2 text-left transition-colors hover:text-soot-700 focus:outline-none focus-visible:text-soot-900"
+                    >
+                      <span>SKU</span>
+                      {renderSortIcon('sku')}
+                    </button>
+                  </th>
+                  <th
+                    aria-sort={sortKey === 'title' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}
+                    className="sticky top-0 z-10 bg-white/90 backdrop-blur-md py-3 px-3 lg:px-4 xl:py-2 xl:text-xs"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => handleSort('title')}
+                      className="flex w-full items-center gap-2 text-left transition-colors hover:text-soot-700 focus:outline-none focus-visible:text-soot-900"
+                    >
+                      <span>Item name</span>
+                      {renderSortIcon('title')}
+                    </button>
+                  </th>
+                  <th
+                    aria-sort={sortKey === 'section' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}
+                    className="sticky top-0 z-10 bg-white/90 backdrop-blur-md py-3 px-3 lg:px-4 xl:py-2 xl:text-xs"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => handleSort('section')}
+                      className="flex w-full items-center gap-2 text-left transition-colors hover:text-soot-700 focus:outline-none focus-visible:text-soot-900"
+                    >
+                      <span>Category</span>
+                      {renderSortIcon('section')}
+                    </button>
+                  </th>
+                  <th
+                    aria-sort={sortKey === 'base_price' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}
+                    className="sticky top-0 z-10 bg-white/90 backdrop-blur-md py-3 px-3 lg:px-4 xl:py-2 xl:text-xs"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => handleSort('base_price')}
+                      className="flex w-full items-center gap-2 text-left transition-colors hover:text-soot-700 focus:outline-none focus-visible:text-soot-900"
+                    >
+                      <span>Base Price</span>
+                      {renderSortIcon('base_price')}
+                    </button>
+                  </th>
+                  <th
+                    aria-sort={sortKey === 'archived_at' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}
+                    className="sticky top-0 z-10 bg-white/90 backdrop-blur-md py-3 px-3 lg:px-4 xl:py-2 xl:text-xs text-right"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => handleSort('archived_at')}
+                      className="flex w-full items-center justify-end gap-2 text-right transition-colors hover:text-soot-700 focus:outline-none focus-visible:text-soot-900"
+                    >
+                      <span>Actions</span>
+                      {renderSortIcon('archived_at')}
+                    </button>
+                  </th>
                 </tr>
               </thead>
               <tbody className="glass-card">
-                {products.map(p => (
+                {sortedProducts.map(p => (
                   <tr
                     key={p.id}
                     className={`border-b border-white/20 hover:bg-white/40 transition-colors min-h-[52px] xl:min-h-0 ${
@@ -536,21 +651,14 @@ export default function MenuItemsTab() {
                 <label className="block text-sm font-medium text-neutral-700 mb-1">
                   Category <span className="text-red-400">*</span>
                 </label>
-                <div className="relative">
-                  <select
-                    value={formSection}
-                    onChange={handleSectionChange}
-                    className="w-full appearance-none px-4 py-2.5 pr-10 glass-card text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none"
-                  >
-                    <option value="">— Select category —</option>
-                    {sections.map(s => (
-                      <option key={s} value={s}>
-                        {s}
-                      </option>
-                    ))}
-                  </select>
-                  <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-400 pointer-events-none" />
-                </div>
+                <SearchableSelect
+                  value={formSection}
+                  onChange={(value) => handleSectionChange({ target: { value } } as React.ChangeEvent<HTMLSelectElement>)}
+                  placeholder="— Select category —"
+                  searchPlaceholder="Search categories…"
+                  options={sections.map((section) => ({ value: section, label: section }))}
+                  className="glass-card border-0 pr-4"
+                />
                 {sections.length === 0 && (
                   <p className="text-xs text-neutral-400 mt-1">Add categories in Settings → Menu categories.</p>
                 )}

@@ -1,10 +1,11 @@
 import { useCallback, useMemo, useState, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useScanner } from '../hooks/useScanner';
-import { ShoppingBag, Plus, Minus, Trash2, Search, Loader2, CreditCard, Banknote, Smartphone, LayoutGrid, List, X, Printer, Usb, Tag, ChevronDown, ChevronRight, CheckCircle, XCircle, Package, UtensilsCrossed, Truck, ClipboardList } from 'lucide-react';
+import { ShoppingBag, Plus, Minus, Trash2, Search, Loader2, CreditCard, Banknote, Smartphone, X, Printer, Usb, Tag, ChevronDown, ChevronRight, CheckCircle, XCircle, Package, UtensilsCrossed, Truck, ClipboardList } from 'lucide-react';
 import { formatCurrency } from '../utils/formatCurrency';
 import { get, post, patch, getUserMessage } from '../api';
 import { getTerminalBranchIdString, parseUserFromStorage } from '../utils/branchContext';
+import SearchableSelect from '../components/SearchableSelect';
 
 type Product = {
   id: number;
@@ -151,6 +152,7 @@ export default function Dashboard() {
         'Online Transfer': rates['Online Transfer'] ?? 8,
       });
       const rawDiscounts = Array.isArray(config?.discounts) ? (config.discounts as (DiscountPreset & { archived?: boolean })[]) : [];
+      setLayoutView(config?.dashboard_menu_layout === 'grid' ? 'grid' : 'list');
       setDiscounts(rawDiscounts.filter(d => !d.archived));
       const tablesList = config?.tables;
       setTables(Array.isArray(tablesList) ? (tablesList as string[]) : []);
@@ -753,6 +755,10 @@ export default function Dashboard() {
       ? subtotal * (appliedDiscount.value / 100)
       : Math.min(appliedDiscount.value, subtotal)
     : 0;
+  const sortedDiscounts = useMemo(
+    () => [...discounts].sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: 'base' })),
+    [discounts]
+  );
   const discountedSubtotal = subtotal - discountAmount;
   const taxPct = taxEnabled ? (taxRatesByPaymentMethod[paymentMethod] ?? 0) : 0;
   const taxRate = taxPct / 100;
@@ -875,24 +881,14 @@ export default function Dashboard() {
                         <label htmlFor={`cart-variant-${item.uniqueId.replace(/\W/g, '-')}`} className="sr-only">
                           Variant
                         </label>
-                        <div className="relative">
-                          <select
-                            id={`cart-variant-${item.uniqueId.replace(/\W/g, '-')}`}
-                            value={item.variant || ''}
-                            onChange={(e) => handleChangeVariant(item.uniqueId, e.target.value)}
-                            aria-label={`Variant for ${item.title}`}
-                            className="w-full min-h-[32px] appearance-none py-1 pl-2 pr-8 text-xs font-bold text-neutral-800 bg-white border border-brand-300/80 rounded-lg shadow-sm hover:border-brand-400 hover:bg-brand-50/30 focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500 transition-colors cursor-pointer"
-                          >
-                            {(baseProd?.variants || []).map((v: string) => (
-                              <option key={v} value={v}>{v}</option>
-                            ))}
-                          </select>
-                          <ChevronDown
-                            className="pointer-events-none absolute right-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-brand-600/90"
-                            strokeWidth={2.25}
-                            aria-hidden
-                          />
-                        </div>
+                        <SearchableSelect
+                          value={item.variant || ''}
+                          onChange={(value) => handleChangeVariant(item.uniqueId, value)}
+                          searchPlaceholder="Search variants…"
+                          options={(baseProd?.variants || []).map((variant: string) => ({ value: variant, label: variant }))}
+                          className="min-h-[32px] border-brand-300/80 bg-white py-1 pl-2 pr-2 text-xs font-bold text-neutral-800 shadow-sm hover:border-brand-400 hover:bg-brand-50/30 focus:border-brand-500"
+                          dropdownClassName="min-w-[8.5rem]"
+                        />
                       </div>
                     ) : item.variant ? (
                       <span className="inline-block mt-0.5 px-1.5 py-0.5 bg-neutral-200/80 text-neutral-700 text-[10px] font-bold rounded">
@@ -1028,33 +1024,11 @@ export default function Dashboard() {
           ========================================= */}
       <div className="flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden order-1 lg:order-2">
         <div className="page-padding pb-0 pt-4 lg:pt-5">
-          <div className="flex items-center justify-between mb-4 lg:mb-5">
-            <div>
-              <h1 className="text-2xl xl:text-3xl font-black text-neutral-900 tracking-tight">Menu</h1>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold shadow-sm ${scannerStatus === 'active' ? 'bg-brand-100 text-brand-800 border border-brand-300' : scannerStatus === 'idle' ? 'bg-amber-100 text-amber-800 border border-amber-300' : 'bg-neutral-100 text-neutral-600 border border-neutral-300'}`}>
-                <Usb className="w-4 h-4" />
-                <span className="hidden sm:inline">{scannerStatus === 'active' ? 'Scanner Active' : scannerStatus === 'idle' ? 'Scanner Idle' : 'Scanner Waiting'}</span>
-              </div>
-              <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold shadow-sm ${printerStatus === 'connected' ? 'bg-brand-100 text-brand-800 border border-brand-300' : printerStatus === 'checking' ? 'bg-neutral-100 text-neutral-600 border border-neutral-300' : 'bg-red-100 text-red-700 border border-red-300'}`}>
-                <Printer className="w-4 h-4" />
-                <span className="hidden sm:inline">{printerStatus === 'connected' ? 'Printer Ready' : printerStatus === 'checking' ? 'Checking…' : 'Printer Offline'}</span>
-              </div>
-            </div>
+          <div className="mb-4 lg:mb-5">
+            <h1 className="text-2xl xl:text-3xl font-black text-neutral-900 tracking-tight">Menu</h1>
           </div>
 
-          <div className="flex items-center gap-3 mb-5">
-            <div className="relative flex-1 min-w-0">
-              <Search className="pointer-events-none absolute left-4 top-1/2 z-10 -translate-y-1/2 w-5 h-5 text-neutral-400" aria-hidden />
-              <input type="text" inputMode="search" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search menu items..." className="w-full min-h-[48px] pl-12 pr-4 py-2.5 glass-card bg-white/70 text-sm font-medium focus:ring-2 focus:ring-brand-500 focus:border-brand-500 focus:outline-none transition-all shadow-sm rounded-xl border border-white/60" />
-            </div>
-            <button onClick={() => setLayoutView(prev => prev === 'grid' ? 'list' : 'grid')} className="w-12 h-12 shrink-0 flex items-center justify-center glass-card bg-white/70 hover:bg-white border text-neutral-600 border-white/60 rounded-xl transition-all shadow-sm active:scale-95" type="button">
-              {layoutView === 'grid' ? <List className="w-5 h-5" /> : <LayoutGrid className="w-5 h-5" />}
-            </button>
-          </div>
-
-          <div className="flex items-center gap-2 border-b border-brand-200/40 overflow-x-auto no-scrollbar pb-1 -mx-2 px-2">
+          <div className="flex flex-wrap items-center gap-2 border-b border-brand-200/40 pb-2">
             {categories.map(cat => (
               <button key={cat} type="button" onClick={() => setActiveCategory(cat)} className={`px-5 py-2.5 rounded-full text-sm font-bold whitespace-nowrap transition-all active:scale-95 ${activeCategory === cat ? 'bg-brand-600 text-white shadow-md shadow-brand-500/20' : 'bg-white/50 text-neutral-600 hover:bg-white/80 hover:text-neutral-900 border border-transparent hover:border-white/60'}`}>
                 {cat}
@@ -1076,26 +1050,21 @@ export default function Dashboard() {
               <p className="text-xs">Try adjusting your search criteria</p>
             </div>
           ) : (
-            <div className={layoutView === 'grid' ? "grid grid-cols-1 sm:grid-cols-2 md:grid-cols-[repeat(auto-fill,minmax(220px,1fr))] tap-highlight-transparent gap-5 lg:gap-6 pb-20 lg:pb-6 w-full" : "flex flex-col gap-4 pb-20 lg:pb-6 w-full"}>
+            <div className={layoutView === 'grid' ? "grid grid-cols-2 md:grid-cols-[repeat(auto-fill,minmax(170px,1fr))] xl:grid-cols-[repeat(auto-fill,minmax(180px,1fr))] tap-highlight-transparent gap-2.5 lg:gap-3 pb-20 lg:pb-6 w-full" : "flex flex-col gap-2.5 pb-20 lg:pb-6 w-full"}>
               {filteredProducts.map(product => {
                 return (
                 <button
                   key={product.id}
                   onClick={() => handleProductClick(product)}
-                  className={`glass-card bg-white/80 overflow-hidden w-full transition-all duration-200 group text-left border border-white/50 shadow-sm ${layoutView === 'grid' ? 'flex flex-col rounded-xl min-h-[220px]' : 'flex items-center p-4 lg:p-5 rounded-xl'} hover:shadow-md hover:border-brand-300 hover:bg-white hover:scale-[1.02] active:scale-[0.98]`}
+                  className={`glass-card bg-white/80 overflow-hidden w-full transition-all duration-200 group text-left border border-white/50 shadow-sm ${layoutView === 'grid' ? 'flex items-center gap-3 rounded-xl min-h-[72px] px-3 py-2.5' : 'flex items-center gap-3 p-3 rounded-xl'} hover:shadow-md hover:border-brand-300 hover:bg-white hover:scale-[1.02] active:scale-[0.98]`}
                 >
-                  <div className={`${layoutView === 'grid' ? 'w-full h-36 shrink-0 p-2' : 'w-24 h-24 shrink-0 rounded-lg p-1'} flex items-center justify-center overflow-hidden transition-colors relative bg-gradient-to-br from-brand-50/40 to-brand-100/40 group-hover:from-brand-100/50 group-hover:to-brand-200/50`}>
+                  <div className={`${layoutView === 'grid' ? 'w-14 h-14' : 'w-14 h-14 lg:w-16 lg:h-16'} shrink-0 rounded-lg p-1 flex items-center justify-center overflow-hidden transition-colors relative bg-gradient-to-br from-brand-50/40 to-brand-100/40 group-hover:from-brand-100/50 group-hover:to-brand-200/50`}>
                     <img src={getProductImageUrl(product)} alt="" className="h-full w-full object-contain object-center" />
                     <div className="absolute inset-0 bg-brand-900/0 group-hover:bg-brand-900/5 transition-colors duration-300" />
                   </div>
-                  <div className={layoutView === 'grid' ? "p-4 flex-1 flex flex-col justify-between gap-1 w-full" : "ml-5 flex-1 min-w-0 flex flex-col justify-center gap-1"}>
-                    <p className="text-lg font-semibold text-neutral-800 leading-tight line-clamp-2">{product.title}</p>
-                    <div className="flex items-center justify-between gap-2 mt-auto pt-2">
-                      <p className="text-xl font-bold text-brand-700 whitespace-nowrap">{formatCurrency(product.base_price)}</p>
-                      {product.section ? (
-                         <span className="text-[10px] font-bold text-brand-700 bg-brand-100 px-2 py-0.5 rounded border border-brand-200 truncate min-w-0 shadow-sm">{product.section}</span>
-                      ) : null}
-                    </div>
+                  <div className="flex min-w-0 flex-1 items-center justify-between gap-3">
+                    <p className={`${layoutView === 'grid' ? 'text-sm line-clamp-3 whitespace-normal' : 'text-sm lg:text-base truncate'} min-w-0 font-semibold text-neutral-800 leading-tight`}>{product.title}</p>
+                    <p className={`${layoutView === 'grid' ? 'text-sm' : 'text-base'} shrink-0 font-bold text-brand-700 whitespace-nowrap`}>{formatCurrency(product.base_price)}</p>
                   </div>
                 </button>
                 );
@@ -1126,6 +1095,27 @@ export default function Dashboard() {
         </div>
 
         <div className="flex-1 overflow-auto p-4 lg:p-5 space-y-4 lg:space-y-6">
+          <div className="glass-card !overflow-visible p-4 rounded-xl shadow-sm border border-white/60 bg-white/70">
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold shadow-sm ${scannerStatus === 'active' ? 'bg-brand-100 text-brand-800 border border-brand-300' : scannerStatus === 'idle' ? 'bg-amber-100 text-amber-800 border border-amber-300' : 'bg-neutral-100 text-neutral-600 border border-neutral-300'}`}>
+                <Usb className="w-4 h-4" />
+                <span>{scannerStatus === 'active' ? 'Scanner Active' : scannerStatus === 'idle' ? 'Scanner Idle' : 'Scanner Waiting'}</span>
+              </div>
+              <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold shadow-sm ${printerStatus === 'connected' ? 'bg-brand-100 text-brand-800 border border-brand-300' : printerStatus === 'checking' ? 'bg-neutral-100 text-neutral-600 border border-neutral-300' : 'bg-red-100 text-red-700 border border-red-300'}`}>
+                <Printer className="w-4 h-4" />
+                <span>{printerStatus === 'connected' ? 'Printer Ready' : printerStatus === 'checking' ? 'Checking…' : 'Printer Offline'}</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="glass-card !overflow-visible p-4 rounded-xl shadow-sm border border-white/60 bg-white/70">
+            <h3 className="text-sm font-black text-neutral-800 mb-3 tracking-wide">MENU SEARCH</h3>
+            <div className="relative min-w-0">
+              <Search className="pointer-events-none absolute left-4 top-1/2 z-10 -translate-y-1/2 w-5 h-5 text-neutral-400" aria-hidden />
+              <input type="text" inputMode="search" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search menu items..." className="w-full min-h-[48px] pl-12 pr-4 py-2.5 glass-card bg-white/70 text-sm font-medium focus:ring-2 focus:ring-brand-500 focus:border-brand-500 focus:outline-none transition-all shadow-sm rounded-xl border border-white/60" />
+            </div>
+          </div>
+
           
           {/* SECTION 1: ORDER INFO */}
           <div className="glass-card !overflow-visible p-4 rounded-xl shadow-sm border border-white/60 bg-white/70">
@@ -1259,8 +1249,8 @@ export default function Dashboard() {
                         <button type="button" onClick={applyCustomCoupon} disabled={!customCouponInput.trim()} className="px-4 py-2.5 bg-brand-600 text-white rounded-lg text-sm font-bold hover:bg-brand-700 disabled:opacity-50 shadow-sm active:scale-95 transition-all">Apply</button>
                       </div>
                     </div>
-                    {discounts.length > 0 && <div className="h-px bg-neutral-100 my-1" />}
-                    {discounts.map(d => (
+                    {sortedDiscounts.length > 0 && <div className="h-px bg-neutral-100 my-1" />}
+                    {sortedDiscounts.map(d => (
                       <button key={d.id} type="button" onClick={() => { setAppliedDiscount(d); setCouponDropdownOpen(false); }} className="w-full px-4 py-3 border-b border-black/5 last:border-0 text-left text-sm font-bold text-neutral-800 hover:bg-brand-50 transition-colors">{d.name} <span className="text-neutral-500 font-medium ml-1">— {d.type === 'percent' ? `${d.value}%` : formatCurrency(d.value)}</span></button>
                     ))}
                   </div>

@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, X, Loader2, ArrowRightCircle, CheckCircle2, ChevronDown, PackageCheck, Ban } from 'lucide-react';
+import { Plus, X, Loader2, ArrowRightCircle, CheckCircle2, PackageCheck, Ban } from 'lucide-react';
 import { get, post, getUserMessage } from '../../api';
 import { showToast } from '../Toast';
 import { showConfirm } from '../ConfirmDialog';
 import { formatCurrency } from '../../utils/formatCurrency';
+import SearchableSelect from '../SearchableSelect';
 
 type Supplier = { id: number; name: string };
 type Ingredient = { id: number; name: string; unit: string; last_purchase_price: number };
@@ -277,13 +278,14 @@ export default function PurchaseOrdersTab() {
                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                    <div>
                      <label className="block text-sm font-medium text-neutral-700 mb-1">Supplier <span className="text-red-400">*</span></label>
-                     <div className="relative">
-                       <select required value={formSupplierId} onChange={e => setFormSupplierId(e.target.value)} className="w-full appearance-none px-4 py-2.5 pr-10 glass-card text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none">
-                         <option value="">— Select Supplier —</option>
-                         {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                       </select>
-                       <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-400 pointer-events-none" />
-                     </div>
+                     <SearchableSelect
+                       value={formSupplierId}
+                       onChange={setFormSupplierId}
+                       placeholder="— Select supplier —"
+                       searchPlaceholder="Search suppliers…"
+                       options={suppliers.map((supplier) => ({ value: String(supplier.id), label: supplier.name }))}
+                       className="glass-card border-0 pr-4"
+                     />
                    </div>
                    <div>
                      <label className="block text-sm font-medium text-neutral-700 mb-1">Expected Delivery</label>
@@ -305,15 +307,20 @@ export default function PurchaseOrdersTab() {
                      <div className="space-y-2">
                        {formItems.map((item, idx) => (
                          <div key={idx} className="flex flex-wrap sm:flex-nowrap gap-2 items-center bg-white/40 p-2 rounded-lg border border-soot-200">
-                            <select 
-                              required
-                              value={item.ingredient_id || ''}
-                              onChange={e => handleUpdateItem(idx, 'ingredient_id', parseInt(e.target.value, 10))}
-                              className="flex-1 min-w-[120px] px-3 py-2 glass-card text-sm"
-                            >
-                              <option value="">— Material —</option>
-                              {ingredients.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
-                            </select>
+                            <div className="flex-1 min-w-[120px]">
+                              <SearchableSelect
+                                value={item.ingredient_id ? String(item.ingredient_id) : ''}
+                                onChange={(value) => handleUpdateItem(idx, 'ingredient_id', parseInt(value, 10))}
+                                placeholder="— Material —"
+                                searchPlaceholder="Search materials…"
+                                options={ingredients.map((ingredient) => ({
+                                  value: String(ingredient.id),
+                                  label: ingredient.name,
+                                  searchText: ingredient.unit,
+                                }))}
+                                className="glass-card border-0 px-3 py-2"
+                              />
+                            </div>
                             
                             <input 
                               type="number" step="any" min="0.01" required

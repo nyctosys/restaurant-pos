@@ -4,6 +4,8 @@ import { get, post, del, getUserMessage } from '../../api';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { showToast } from '../Toast';
 import { showConfirm } from '../ConfirmDialog';
+import SearchableSelect from '../SearchableSelect';
+import { generateAutoSku } from '../../utils/sku';
 
 interface Product {
   id: number;
@@ -37,6 +39,7 @@ export default function DealsTab() {
   const [loading, setLoading] = useState(true);
   
   const [showForm, setShowForm] = useState(false);
+  const [formSkuTouched, setFormSkuTouched] = useState(false);
   const [formData, setFormData] = useState({
     title: '',
     sku: '',
@@ -102,6 +105,7 @@ export default function DealsTab() {
       showToast('Deal created successfully', 'success');
       setShowForm(false);
       setFormData({ title: '', sku: '', base_price: '', variants: '', combo_items: [] });
+      setFormSkuTouched(false);
       fetchData();
     } catch (err) {
       showToast(getUserMessage(err), 'error');
@@ -147,6 +151,14 @@ export default function DealsTab() {
     }));
   };
 
+  useEffect(() => {
+    if (formSkuTouched) {
+      return;
+    }
+    const nextSku = formData.title.trim() ? generateAutoSku('DEAL', formData.title, deals.map((deal) => deal.sku)) : '';
+    setFormData((prev) => (prev.sku === nextSku ? prev : { ...prev, sku: nextSku }));
+  }, [deals, formData.title, formSkuTouched]);
+
   if (loading) {
     return (
       <div className="flex justify-center items-center h-64">
@@ -170,7 +182,15 @@ export default function DealsTab() {
           </p>
         </div>
         <button
-          onClick={() => setShowForm(!showForm)}
+          onClick={() => {
+            setShowForm((prev) => {
+              const next = !prev;
+              if (next) {
+                setFormSkuTouched(false);
+              }
+              return next;
+            });
+          }}
           className="flex items-center gap-2 bg-brand-600 hover:bg-brand-700 text-white px-4 py-2 rounded-xl transition-all shadow-md touch-target font-semibold"
         >
           {showForm ? <X className="w-5 h-5" /> : <Plus className="w-5 h-5" />}
@@ -216,10 +236,14 @@ export default function DealsTab() {
                   type="text"
                   required
                   value={formData.sku}
-                  onChange={e => setFormData({...formData, sku: e.target.value})}
+                  onChange={e => {
+                    setFormSkuTouched(true);
+                    setFormData({...formData, sku: e.target.value});
+                  }}
                   className="w-full bg-white/50 border border-soot-200 rounded-xl px-4 py-3 focus:ring-2 focus:ring-brand-500 transition-all font-medium touch-target outline-none"
-                  placeholder="e.g. DL-BURGER-1"
+                  placeholder="Auto-generated from deal title"
                 />
+                <p className="text-xs text-soot-500 mt-1.5">Auto-generated for new deals. You can still edit it.</p>
               </div>
               <div>
                 <label className="block text-sm font-semibold text-soot-700 mb-2">Bundled price (PKR)</label>
@@ -253,17 +277,18 @@ export default function DealsTab() {
                   <div key={index} className="flex flex-wrap gap-4 items-end bg-white/30 p-4 rounded-xl border border-soot-100">
                     <div className="flex-1 min-w-[200px]">
                       <label className="block text-xs font-semibold text-soot-600 mb-1">Menu Item</label>
-                      <select
-                        required
-                        value={item.product_id}
-                        onChange={(e) => updateComboItem(index, 'product_id', parseInt(e.target.value))}
-                        className="w-full bg-white border border-soot-200 rounded-lg px-3 py-2 font-medium focus:ring-2 focus:ring-brand-400 outline-none"
-                      >
-                        <option value="0" disabled>Select Product...</option>
-                        {products.map(p => (
-                          <option key={p.id} value={p.id}>{p.title} ({formatCurrency(p.base_price)})</option>
-                        ))}
-                      </select>
+                      <SearchableSelect
+                        value={item.product_id ? String(item.product_id) : ''}
+                        onChange={(value) => updateComboItem(index, 'product_id', parseInt(value, 10))}
+                        placeholder="Select product…"
+                        searchPlaceholder="Search menu items…"
+                        options={products.map((product) => ({
+                          value: String(product.id),
+                          label: `${product.title} (${formatCurrency(product.base_price)})`,
+                          searchText: `${product.sku} ${product.title}`,
+                        }))}
+                        className="border-soot-200 bg-white px-3 py-2 font-medium"
+                      />
                     </div>
                     <div className="w-24 shrink-0">
                       <label className="block text-xs font-semibold text-soot-600 mb-1">Quantity</label>
@@ -279,16 +304,14 @@ export default function DealsTab() {
                     {dealVariantOptions.length > 0 && (
                       <div className="w-full sm:w-44 shrink-0">
                         <label className="block text-xs font-semibold text-soot-600 mb-1">Combo for variant</label>
-                        <select
+                        <SearchableSelect
                           value={item.variant_key || ''}
-                          onChange={e => updateComboItem(index, 'variant_key', e.target.value)}
-                          className="w-full bg-white border border-soot-200 rounded-lg px-3 py-2 font-medium focus:ring-2 focus:ring-brand-400 outline-none"
-                        >
-                          <option value="">Base (all)</option>
-                          {dealVariantOptions.map(v => (
-                            <option key={v} value={v}>{v}</option>
-                          ))}
-                        </select>
+                          onChange={(value) => updateComboItem(index, 'variant_key', value)}
+                          placeholder="Base (all)"
+                          searchPlaceholder="Search variants…"
+                          options={dealVariantOptions.map((variant) => ({ value: variant, label: variant }))}
+                          className="border-soot-200 bg-white px-3 py-2 font-medium"
+                        />
                       </div>
                     )}
                     <button
