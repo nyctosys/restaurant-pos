@@ -167,8 +167,8 @@ export default function SuppliersTab() {
                     </div>
                   </div>
                   
-                  <div className="absolute top-4 right-4 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button onClick={() => handleOpenEdit(s)} className="p-1.5 text-neutral-400 hover:text-brand-600 hover:bg-brand-50 rounded-md">
+                  <div className="absolute top-4 right-4 flex gap-1 ">
+                    <button onClick={() => handleOpenEdit(s)} className="p-1.5 text-neutral-400 hover:text-brand-600 hover:bg-brand-50 rounded-md transition-colors touch-target" title="Edit supplier">
                       <Pencil className="w-4 h-4" />
                     </button>
                   </div>

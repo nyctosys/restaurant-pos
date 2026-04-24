@@ -1,7 +1,8 @@
 import { useCallback, useMemo, useState, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useScanner } from '../hooks/useScanner';
-import { ShoppingBag, Plus, Minus, Trash2, Search, Loader2, CreditCard, Banknote, Smartphone, X, Printer, Usb, Tag, ChevronDown, ChevronRight, CheckCircle, XCircle, Package, UtensilsCrossed, Truck, ClipboardList } from 'lucide-react';
+import { ShoppingBag, Plus, Minus, Trash2, Search, Loader2, CreditCard, Banknote, Smartphone, X, Printer, Usb, Tag, ChevronDown, ChevronRight, CheckCircle, XCircle, Package, UtensilsCrossed, Truck, ClipboardList, Bell } from 'lucide-react';
+import { getSocket } from '../realtime/socket';
 import { formatCurrency } from '../utils/formatCurrency';
 import { get, post, patch, getUserMessage } from '../api';
 import { getTerminalBranchIdString, parseUserFromStorage } from '../utils/branchContext';
@@ -116,6 +117,7 @@ export default function Dashboard() {
   const [checkoutSubmitting, setCheckoutSubmitting] = useState(false);
   /** Set when resuming an open dine-in sale from Active Dine-in → Modify */
   const [editingOpenSaleId, setEditingOpenSaleId] = useState<number | null>(null);
+  const [orderReadyAlerts, setOrderReadyAlerts] = useState<{ id: string; sale_id: number; table_name?: string | null }[]>([]);
 
   const ACTIVE_COUPON_STORAGE_KEY = 'pos_active_coupon';
 
@@ -306,6 +308,24 @@ export default function Dashboard() {
     };
     checkPrinter();
   }, [fetchData]);
+
+  // ORDER_READY real-time notification from KDS
+  useEffect(() => {
+    const s = getSocket();
+    const handler = (payload: { sale_id?: number; table_name?: string | null }) => {
+      const alertId = `${Date.now()}_${payload.sale_id ?? 0}`;
+      setOrderReadyAlerts(prev => [
+        { id: alertId, sale_id: payload.sale_id ?? 0, table_name: payload.table_name ?? null },
+        ...prev,
+      ]);
+      // Auto-dismiss after 60s
+      setTimeout(() => {
+        setOrderReadyAlerts(prev => prev.filter(a => a.id !== alertId));
+      }, 60_000);
+    };
+    s.on('order_ready', handler);
+    return () => { s.off('order_ready', handler); };
+  }, []);
 
   // Categories: settings sections, plus "Deals" when any deal product exists (section may be missing from settings JSON).
   const categories = useMemo(() => {
@@ -584,7 +604,10 @@ export default function Dashboard() {
     }
   };
 
-  /** Takeaway / delivery: KOT to kitchen + payment + receipt in one step. */
+  /**
+   * Takeaway / delivery: open KOT (same flow as dine-in).
+   * Payment is collected from the Active Orders page — unified across all order types.
+   */
   const submitTakeawayDeliveryKotAndPay = async () => {
     if (cart.length === 0 || checkoutSubmitting || editingOpenSaleId) return;
     if (orderType === 'delivery') {
@@ -615,42 +638,28 @@ export default function Dashboard() {
           phone: deliveryPhone.trim(),
           address: deliveryAddress.trim(),
         };
+      } else if (orderType === 'takeaway') {
+        order_snapshot = undefined;
       }
-      const kotData = await post<{ sale_id?: number; print_success?: boolean; message?: string }>('/orders/kot', {
+      const data = await post<{ sale_id?: number; print_success?: boolean; message?: string }>('/orders/kot', {
         items,
         order_type: orderType,
         ...(order_snapshot ? { order_snapshot } : {}),
       });
-      const saleId = kotData?.sale_id ?? 0;
-      if (!saleId) {
-        setNotification({ type: 'error', msg: 'Could not create order.' });
-        setTimeout(() => setNotification(null), 4000);
-        return;
-      }
-      const finBody: Record<string, unknown> = {
-        payment_method: paymentMethod,
-        discount: appliedDiscount
-          ? { id: appliedDiscount.id, name: appliedDiscount.name, type: appliedDiscount.type, value: appliedDiscount.value }
-          : null,
-      };
-      if (orderType === 'delivery') {
-        finBody.delivery_charge = Math.max(0, Number(deliveryChargePkr) || 0);
-      }
-      const finData = await post<{ sale_id?: number; print_success?: boolean }>(`/orders/${saleId}/finalize`, finBody);
-      const kotPrintOk = kotData?.print_success !== false;
-      const finPrintOk = finData?.print_success !== false;
-      if (!kotPrintOk || !finPrintOk) {
+      const saleId = data?.sale_id ?? 0;
+      const typeLabel = orderType === 'delivery' ? 'Delivery' : 'Takeaway';
+      if (data?.print_success === false) {
         setNotification({
           type: 'error',
-          msg: `Order #${saleId} completed, but a printer reported an error (kitchen or receipt).`,
+          msg: `${typeLabel} KOT saved (#${saleId}), but the kitchen printer reported an error.`,
         });
       } else {
         setNotification({
           type: 'ok',
-          msg: `Paid & sent to kitchen — Order #${saleId}`,
+          msg: `${typeLabel} order #${saleId} sent to kitchen — collect payment in Open Orders.`,
         });
       }
-      setTimeout(() => setNotification(null), 4000);
+      setTimeout(() => setNotification(null), 5000);
       setCart([]);
       setOrderId(`#ORD-${String(saleId + 1).padStart(4, '0')}`);
       setAppliedDiscount(activeCoupon);
@@ -826,6 +835,35 @@ export default function Dashboard() {
             : 'bg-red-600 text-white'
         }`}>
           {notification.msg}
+        </div>
+      )}
+
+      {/* ORDER READY Alerts (from KDS) */}
+      {orderReadyAlerts.length > 0 && (
+        <div className="fixed top-5 right-5 z-[199] flex flex-col gap-2 max-w-sm">
+          {orderReadyAlerts.map(alert => (
+            <div
+              key={alert.id}
+              className="flex items-center gap-3 bg-green-700 text-white px-4 py-3 rounded-xl shadow-2xl border border-green-500 animate-pulse-once"
+              role="alert"
+            >
+              <Bell className="w-5 h-5 shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="font-bold text-sm leading-tight">Order Ready!</p>
+                <p className="text-xs text-green-100 truncate">
+                  {alert.table_name ? `Table: ${alert.table_name}` : `Order #${alert.sale_id}`}
+                  {alert.table_name ? ` · #${alert.sale_id}` : ''}
+                </p>
+              </div>
+              <button
+                onClick={() => setOrderReadyAlerts(prev => prev.filter(a => a.id !== alert.id))}
+                className="p-1 rounded-md hover:bg-green-600 transition-colors shrink-0"
+                aria-label="Dismiss"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          ))}
         </div>
       )}
 
@@ -1271,9 +1309,10 @@ export default function Dashboard() {
                   )}
                 </div>
               )}
-            </div>
+              </div>
 
-            {/* Payment Method */}
+            {/* Payment Method — only relevant for takeaway/delivery */}
+            {(orderType === 'takeaway' || orderType === 'delivery') && (
             <div className="border-t border-black/10 pt-4 mt-4">
               <button type="button" onClick={() => setPaymentMethodSectionExpanded(prev => !prev)} className="w-full flex items-center justify-between gap-2 py-1 px-1 -mx-1 rounded-lg hover:bg-white/60 text-left transition-colors">
                 <h3 className="text-sm font-black text-neutral-800 tracking-wide">PAYMENT METHOD</h3>
@@ -1290,6 +1329,7 @@ export default function Dashboard() {
               </div>
               )}
             </div>
+            )}
           </div>
         </div>
 
@@ -1297,34 +1337,29 @@ export default function Dashboard() {
         <div className="p-4 lg:p-5 border-t border-black/10 bg-white/70 backdrop-blur-2xl shrink-0 shadow-[0_-4px_24px_-12px_rgba(0,0,0,0.1)]">
           {orderType === 'dine_in' && !editingOpenSaleId ? (
             <div className="grid grid-cols-1 gap-2.5">
-              <button type="button" onClick={handleGenerateKot} disabled={cart.length === 0 || checkoutSubmitting} className="w-full bg-white border-2 border-brand-600 text-brand-800 hover:bg-brand-50 disabled:bg-neutral-200 disabled:text-neutral-400 disabled:border-neutral-200 disabled:cursor-not-allowed py-4 rounded-xl font-bold text-[15px] transition-all active:scale-[0.98] flex items-center justify-center gap-2 shadow-sm">
-                <ClipboardList className="w-5 h-5" /> {checkoutSubmitting ? 'Working…' : 'Generate KOT'}
+              <button type="button" onClick={handleGenerateKot} disabled={cart.length === 0 || checkoutSubmitting} className="w-full bg-brand-600 hover:bg-brand-700 disabled:bg-neutral-200 disabled:text-neutral-400 disabled:border-neutral-200 disabled:cursor-not-allowed text-white py-4 rounded-xl font-bold text-[15px] transition-all active:scale-[0.98] flex items-center justify-center gap-2 shadow-sm">
+                <ClipboardList className="w-5 h-5" /> {checkoutSubmitting ? 'Working…' : 'Send to Kitchen (KOT)'}
               </button>
-              <button type="button" onClick={handleCheckout} disabled={cart.length === 0 || checkoutSubmitting} className="w-full bg-brand-600 hover:bg-brand-700 disabled:bg-neutral-200 disabled:text-neutral-400 disabled:cursor-not-allowed text-white py-4 rounded-xl font-bold text-[15px] shadow-lg shadow-brand-900/20 transition-all active:scale-[0.98] flex items-center justify-center gap-2">
-                <ShoppingBag className="w-5 h-5" /> {checkoutSubmitting ? 'Processing…' : 'Proceed payment'}
-              </button>
+              <p className="text-center text-xs text-neutral-400 font-medium">To collect payment, open Active Dine-in Orders.</p>
             </div>
           ) : (orderType === 'takeaway' || orderType === 'delivery') && !editingOpenSaleId ? (
-            <button
-              type="button"
-              onClick={() => void submitTakeawayDeliveryKotAndPay()}
-              disabled={cart.length === 0 || checkoutSubmitting}
-              className="w-full bg-brand-600 hover:bg-brand-700 disabled:bg-neutral-200 disabled:text-neutral-400 disabled:cursor-not-allowed text-white py-4 rounded-2xl font-black text-lg shadow-lg shadow-brand-900/20 transition-all active:scale-[0.98] flex items-center justify-center gap-2.5 tracking-wide"
-            >
-              <span className="flex items-center gap-1.5">
-                <ClipboardList className="w-5 h-5" />
-                <ShoppingBag className="w-5 h-5" />
-              </span>
-              {checkoutSubmitting ? 'Processing…' : 'Pay & send to kitchen'}
-            </button>
+            <div className="grid grid-cols-1 gap-2.5">
+              <button
+                type="button"
+                onClick={() => void submitTakeawayDeliveryKotAndPay()}
+                disabled={cart.length === 0 || checkoutSubmitting}
+                className="w-full bg-brand-600 hover:bg-brand-700 disabled:bg-neutral-200 disabled:text-neutral-400 disabled:cursor-not-allowed text-white py-4 rounded-xl font-bold text-[15px] shadow-lg shadow-brand-900/20 transition-all active:scale-[0.98] flex items-center justify-center gap-2"
+              >
+                <ClipboardList className="w-5 h-5" /> {checkoutSubmitting ? 'Working…' : 'Send to Kitchen (KOT)'}
+              </button>
+              <p className="text-center text-xs text-neutral-400 font-medium">Order saved to Active Orders — collect payment there.</p>
+            </div>
           ) : editingOpenSaleId ? (
             <div className="grid grid-cols-1 gap-2.5">
-              <button type="button" onClick={submitUpdateOrder} disabled={cart.length === 0 || checkoutSubmitting} className="w-full bg-white border-2 border-amber-500 text-amber-800 hover:bg-amber-50 disabled:bg-neutral-200 disabled:text-neutral-400 disabled:border-neutral-200 disabled:cursor-not-allowed py-4 rounded-xl font-bold text-[15px] transition-all active:scale-[0.98] flex items-center justify-center gap-2 shadow-sm">
+              <button type="button" onClick={submitUpdateOrder} disabled={cart.length === 0 || checkoutSubmitting} className="w-full bg-brand-600 hover:bg-brand-700 border-2 border-amber-500 text-white disabled:bg-neutral-200 disabled:text-neutral-400 disabled:border-neutral-200 disabled:cursor-not-allowed py-4 rounded-xl font-bold text-[15px] transition-all active:scale-[0.98] flex items-center justify-center gap-2 shadow-sm">
                 <ClipboardList className="w-5 h-5" /> {checkoutSubmitting ? 'Working…' : 'Update Order'}
               </button>
-              <button type="button" onClick={handleCheckout} disabled={cart.length === 0 || checkoutSubmitting} className="w-full bg-brand-600 hover:bg-brand-700 disabled:bg-neutral-200 disabled:text-neutral-400 disabled:cursor-not-allowed text-white py-4 rounded-xl font-bold text-[15px] shadow-lg shadow-brand-900/20 transition-all active:scale-[0.98] flex items-center justify-center gap-2">
-                <ShoppingBag className="w-5 h-5" /> {checkoutSubmitting ? 'Processing…' : 'Proceed payment'}
-              </button>
+              <p className="text-center text-xs text-neutral-400 font-medium">To collect payment, open Active Dine-in Orders.</p>
             </div>
           ) : (
             <button onClick={handleCheckout} disabled={cart.length === 0 || checkoutSubmitting} className="w-full bg-brand-600 hover:bg-brand-700 disabled:bg-neutral-200 disabled:text-neutral-400 disabled:cursor-not-allowed text-white py-4 rounded-2xl font-black text-lg shadow-lg shadow-brand-900/20 transition-all active:scale-[0.98] flex items-center justify-center gap-2 tracking-wide">

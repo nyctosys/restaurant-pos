@@ -37,6 +37,7 @@ export default function SearchableSelect({
   onChange,
   options,
   placeholder = 'Select an option',
+  searchPlaceholder = 'Search…',
   emptyMessage = 'No results found.',
   disabled = false,
   className,
@@ -44,7 +45,10 @@ export default function SearchableSelect({
 }: SearchableSelectProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  // Tracks the portal dropdown div so outside-click detection includes it
+  const portalRef = useRef<HTMLDivElement | null>(null);
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
   const [menuStyle, setMenuStyle] = useState<{ top: number; left: number; width: number } | null>(null);
 
   const sortedOptions = useMemo(
@@ -55,13 +59,30 @@ export default function SearchableSelect({
     [options]
   );
 
+  const filteredOptions = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return sortedOptions;
+    return sortedOptions.filter(
+      (opt) =>
+        opt.label.toLowerCase().includes(q) ||
+        (opt.searchText ?? '').toLowerCase().includes(q)
+    );
+  }, [sortedOptions, query]);
+
   const selectedOption = sortedOptions.find((option) => option.value === value);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      setQuery('');
+      return;
+    }
 
     const handlePointerDown = (event: MouseEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) {
+      const target = event.target as Node;
+      // Close only if click is outside BOTH the trigger wrapper AND the portal dropdown
+      const insideRoot = rootRef.current?.contains(target) ?? false;
+      const insidePortal = portalRef.current?.contains(target) ?? false;
+      if (!insideRoot && !insidePortal) {
         setOpen(false);
       }
     };
@@ -145,23 +166,43 @@ export default function SearchableSelect({
       {open && menuStyle
         ? createPortal(
             <div
+              ref={portalRef}
               className={cx(
                 'fixed z-[120] min-w-[12rem] overflow-hidden rounded-xl border border-soot-200 bg-white/95 shadow-xl backdrop-blur-md',
                 dropdownClassName
               )}
               style={{ top: menuStyle.top, left: menuStyle.left, width: menuStyle.width }}
             >
+              {sortedOptions.length > 6 && (
+                <div className="p-2 border-b border-soot-100">
+                  <input
+                    type="text"
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder={searchPlaceholder}
+                    className="w-full px-3 py-1.5 text-sm bg-white border border-soot-200 rounded-md focus:outline-none focus:ring-1 focus:ring-brand-400"
+                    // Prevent form submit on Enter inside search box
+                    onKeyDown={(e) => { if (e.key === 'Enter') e.preventDefault(); }}
+                    autoFocus
+                  />
+                </div>
+              )}
               <div className="max-h-64 overflow-y-auto p-1.5" role="listbox">
-                {sortedOptions.length === 0 ? (
+                {filteredOptions.length === 0 ? (
                   <div className="px-3 py-2 text-sm text-soot-400">{emptyMessage}</div>
                 ) : (
-                  sortedOptions.map((option) => {
+                  filteredOptions.map((option) => {
                     const selected = option.value === value;
                     return (
                       <button
                         key={option.value}
                         type="button"
                         disabled={option.disabled}
+                        onMouseDown={(e) => {
+                          // Use onMouseDown to fire before the outside-click handler,
+                          // and prevent the blur from the trigger button.
+                          e.preventDefault();
+                        }}
                         onClick={() => {
                           if (option.disabled) return;
                           onChange(option.value);

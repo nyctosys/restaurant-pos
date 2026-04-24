@@ -5,8 +5,9 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
+from sqlalchemy.orm import joinedload
 
-from app.models import Inventory, Product, SaleItem, User, db
+from app.models import Ingredient, Inventory, Product, RecipeItem, SaleItem, User, db
 from app.deps import get_current_user, require_owner
 from app.routers.common import yes
 
@@ -28,6 +29,26 @@ def _normalize_variants_list(raw: Any) -> list[str]:
 
 
 def _product_to_dict(product: Product) -> dict[str, Any]:
+    recipe_items = []
+    for recipe_item in sorted(
+        list(getattr(product, "recipe_items", None) or []),
+        key=lambda item: ((getattr(item, "variant_key", None) or "").strip(), item.id or 0),
+    ):
+        ingredient = getattr(recipe_item, "ingredient", None)
+        unit = getattr(recipe_item, "unit", "") or ""
+        recipe_items.append(
+            {
+                "id": recipe_item.id,
+                "ingredient_id": recipe_item.ingredient_id,
+                "ingredient_name": ingredient.name if ingredient else None,
+                "brand_name": getattr(ingredient, "brand_name", None) if ingredient else None,
+                "brandName": getattr(ingredient, "brand_name", None) if ingredient else None,
+                "quantity": float(recipe_item.quantity),
+                "unit": unit,
+                "unitOfMeasure": unit,
+                "variant_key": (getattr(recipe_item, "variant_key", None) or "").strip(),
+            }
+        )
     return {
         "id": product.id,
         "sku": product.sku,
@@ -38,12 +59,15 @@ def _product_to_dict(product: Product) -> dict[str, Any]:
         "image_url": product.image_url or "",
         "is_deal": getattr(product, "is_deal", False) or False,
         "archived_at": product.archived_at.isoformat() if getattr(product, "archived_at", None) else None,
+        "unit": getattr(product, "unit", "") or "",
+        "unitOfMeasure": getattr(product, "unit", "") or "",
+        "recipe_items": recipe_items,
     }
 
 
 @menu_router.get("/")
 def get_products(include_archived: str | None = None, _: User = Depends(get_current_user)):
-    query = Product.query
+    query = Product.query.options(joinedload(Product.recipe_items).joinedload(RecipeItem.ingredient))
     if not yes(include_archived):
         query = query.filter(Product.archived_at == None)  # noqa: E711
     return {"products": [_product_to_dict(p) for p in query.all()]}
@@ -75,6 +99,7 @@ def create_product(payload: dict[str, Any] | None = None, _: User = Depends(requ
             section=(data.get("section") or "").strip(),
             variants=_normalize_variants_list(data.get("variants")),
             image_url=(data.get("image_url") or "").strip() or "",
+            unit=(data.get("unitOfMeasure") or data.get("unit") or "").strip() or None,
         )
         db.session.add(new_product)
         db.session.commit()
@@ -110,6 +135,8 @@ def update_product(product_id: int, payload: dict[str, Any] | None = None, _: Us
         product.variants = _normalize_variants_list(data.get("variants"))
     if "image_url" in data:
         product.image_url = data["image_url"] or ""
+    if "unitOfMeasure" in data or "unit" in data:
+        product.unit = (data.get("unitOfMeasure") or data.get("unit") or "").strip() or None
     try:
         db.session.commit()
         return {"message": "Product updated!"}

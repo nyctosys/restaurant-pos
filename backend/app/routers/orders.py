@@ -10,9 +10,15 @@ from sqlalchemy import and_, func, inspect, or_
 from app.order_metadata import normalize_order_type_and_snapshot
 from app.models import Branch, Ingredient, Modifier, Product, Sale, SaleItem, Setting, User, db
 from app.services.branch_scope import resolve_terminal_branch_id
+from app.services.ingredient_deduction import (
+    deduct_ingredient_stock,
+    ingredient_display_name,
+    restore_inventory_allocations,
+)
 from app.services.printer_service import PrinterService
 from app.services.recipe_variants import combo_items_for_variant, normalize_variant_key, recipe_rows_for_variant
 from app.services.sync_outbox import enqueue_sync_event
+from app.socketio_server import RealtimeEvents, schedule_emit_event
 from app.deps import get_current_user, require_owner
 from app.routers.common import yes
 
@@ -66,6 +72,25 @@ def _forbidden_unless_sale_branch(sale: Sale, current_user: User) -> JSONRespons
     if sale.branch_id != tid:
         return _json_error("Forbidden", "Not allowed for this branch", 403)
     return None
+
+
+def _order_event_payload(sale: Sale, **extra: Any) -> dict[str, Any]:
+    snapshot = sale.order_snapshot if isinstance(getattr(sale, "order_snapshot", None), dict) else {}
+    payload: dict[str, Any] = {
+        "sale_id": int(sale.id),
+        "branch_id": int(sale.branch_id),
+        "status": getattr(sale, "status", None),
+        "kitchen_status": getattr(sale, "kitchen_status", None),
+        "order_type": getattr(sale, "order_type", None),
+        "table_name": snapshot.get("table_name"),
+        "customer_name": snapshot.get("customer_name"),
+    }
+    payload.update(extra)
+    return payload
+
+
+def _schedule_order_event(event: str, sale: Sale, **extra: Any) -> None:
+    schedule_emit_event(event, _order_event_payload(sale, **extra))
 
 
 def _parse_optional_non_negative_charge(value: Any, default: float) -> float:
@@ -192,31 +217,28 @@ def _process_modifier_depletions(
     branch_id: int,
     current_user_id: int,
     sale_id: int,
-) -> tuple[bool, str]:
-    from app.services.branch_ingredient_stock import InsufficientIngredientStock, adjust_branch_ingredient_stock
-
+) -> tuple[bool, str, list[dict[str, Any]]]:
+    allocations: list[dict[str, Any]] = []
     for mid in modifier_ids:
         mod = db.session.get(Modifier, mid)
         if mod is None or mod.ingredient_id is None:
             continue
         dep = float(mod.depletion_quantity) if mod.depletion_quantity is not None else 1.0
         total = dep * line_qty
-        ing = mod.ingredient
         try:
-            adjust_branch_ingredient_stock(
-                mod.ingredient_id,
-                branch_id,
-                -total,
-                movement_type="sale_deduction",
+            modifier_allocations = deduct_ingredient_stock(
+                source_ingredient=mod.ingredient,
+                required_quantity=total,
+                branch_id=branch_id,
                 user_id=current_user_id,
-                reference_id=sale_id,
-                reference_type="sale",
+                sale_id=sale_id,
                 reason=f"Modifier '{mod.name}' on sale",
-                unit_cost=float(ing.average_cost) if ing else 0.0,
             )
-        except InsufficientIngredientStock as exc:
-            return False, str(exc)
-    return True, ""
+        except Exception as exc:
+            return False, str(exc), []
+        for allocation in modifier_allocations:
+            allocations.append({"kind": "modifier", "modifier_id": mid, **allocation})
+    return True, "", allocations
 
 
 def _normalize_product_variant_labels(raw: Any) -> list[str]:
@@ -240,8 +262,7 @@ def _deduct_recipe_for_product(
     current_user_id: int,
     sale_id: int,
     variant_key: str | None = None,
-) -> tuple[bool, str]:
-    from app.services.branch_ingredient_stock import InsufficientIngredientStock, adjust_branch_ingredient_stock
+) -> tuple[bool, str, list[dict[str, Any]]]:
 
     recipe_items = recipe_rows_for_variant(product, variant_key)
     if not recipe_items:
@@ -251,29 +272,30 @@ def _deduct_recipe_for_product(
                 False,
                 f'Add a recipe (BOM) for "{product.title}" (variant "{vk}") in Inventory → Recipes, '
                 "or add a base recipe that applies to all variants.",
+                [],
             )
-        return False, f"Add a recipe (BOM) for menu item: {product.title}"
+        return False, f"Add a recipe (BOM) for menu item: {product.title}", []
 
+    allocations: list[dict[str, Any]] = []
     for recipe_item in recipe_items:
         ingredient = recipe_item.ingredient
         if ingredient is None:
             continue
         total_ing = float(recipe_item.quantity) * qty
         try:
-            adjust_branch_ingredient_stock(
-                ingredient.id,
-                branch_id,
-                -total_ing,
-                movement_type="sale_deduction",
+            recipe_allocations = deduct_ingredient_stock(
+                source_ingredient=ingredient,
+                required_quantity=total_ing,
+                branch_id=branch_id,
                 user_id=current_user_id,
-                reference_id=sale_id,
-                reference_type="sale",
+                sale_id=sale_id,
                 reason=f"Sold {qty}x {product.title}",
-                unit_cost=float(ingredient.average_cost or 0),
             )
-        except InsufficientIngredientStock as exc:
-            return False, str(exc)
-    return True, ""
+        except Exception as exc:
+            return False, str(exc), []
+        for allocation in recipe_allocations:
+            allocations.append({"kind": "recipe", **allocation})
+    return True, "", allocations
 
 
 def _restore_recipe_for_sale_item(
@@ -368,6 +390,17 @@ def _restore_sale_item_side_effects(
     inventory_reason: str,
 ) -> None:
     del inventory_reason  # retail finished-goods ledger removed; kept for API compatibility
+    stored_allocations = sale_item.inventory_allocations if isinstance(sale_item.inventory_allocations, list) else []
+    if stored_allocations:
+        restore_inventory_allocations(
+            allocations=stored_allocations,
+            branch_id=branch_id,
+            user_id=current_user_id,
+            sale_id=int(sale_item.sale_id),
+            reason=reason,
+        )
+        return
+
     product = sale_item.product
     if not product:
         return
@@ -436,17 +469,26 @@ def _deduct_product_inventory_and_create_sale_items(
     db.session.add(sale_item)
     db.session.flush()
 
+    inventory_allocations: list[dict[str, Any]] = []
     if not is_deal_child and modifier_ids:
-        ok, err = _process_modifier_depletions(modifier_ids, qty, branch_id, current_user_id, sale_id)
+        ok, err, modifier_allocations = _process_modifier_depletions(
+            modifier_ids,
+            qty,
+            branch_id,
+            current_user_id,
+            sale_id,
+        )
         if not ok:
             return False, err, 0.0
+        inventory_allocations.extend(modifier_allocations)
 
     if not product.is_deal:
-        ok_r, err_r = _deduct_recipe_for_product(
+        ok_r, err_r, recipe_allocations = _deduct_recipe_for_product(
             product, qty, branch_id, current_user_id, sale_id, variant_key=line_variant or None
         )
         if not ok_r:
             return False, err_r, 0.0
+        inventory_allocations.extend(recipe_allocations)
     else:
         expanded = combo_items_for_variant(product, line_variant or None)
         if not expanded:
@@ -473,6 +515,7 @@ def _deduct_product_inventory_and_create_sale_items(
                 if not ok:
                     return False, err, 0.0
 
+    sale_item.inventory_allocations = inventory_allocations or None
     return True, "", subtotal
 
 
@@ -571,6 +614,7 @@ def checkout(payload: dict[str, Any] | None = None, current_user: User = Depends
             },
         )
         db.session.commit()
+        _schedule_order_event(RealtimeEvents.ORDER_CREATED, new_sale, total=float(new_sale.total_amount))
         printer_service = PrinterService()
         branch_name = "Main Branch"
         branch_obj = db.session.get(Branch, branch_id) if branch_id else None
@@ -849,6 +893,7 @@ def list_active_dine_in_orders(
         _maybe_add("archived_at", Sale.archived_at)
         _maybe_add("order_type", Sale.order_type)
         _maybe_add("order_snapshot", Sale.order_snapshot)
+        _maybe_add("kitchen_status", Sale.kitchen_status)
 
         if not select_cols:
             return {"sales": []}
@@ -894,6 +939,8 @@ def list_active_dine_in_orders(
             sale_id_val = data.get("id")
             if sale_id_val is None:
                 continue
+            raw_kitchen_status = data.get("kitchen_status")
+            kitchen_status = raw_kitchen_status if raw_kitchen_status in ("placed", "preparing", "ready") else "placed"
 
             out_row: dict[str, Any] = {
                 "id": sale_id_val,
@@ -907,6 +954,7 @@ def list_active_dine_in_orders(
                 "order_type": inferred_order_type,
                 "order_snapshot": snap,
                 "table_name": table_name,
+                "kitchen_status": kitchen_status,
             }
             out.append(out_row)
             sale_ids.append(sale_id_val)
@@ -1159,6 +1207,9 @@ def update_kitchen_status(
     else:
         sale.kitchen_ready_at = None
     db.session.commit()
+    _schedule_order_event(RealtimeEvents.ORDER_STATUS_CHANGED, sale)
+    if status_new == "ready":
+        _schedule_order_event(RealtimeEvents.ORDER_READY, sale)
     return {"ok": True, "id": sale.id, "kitchen_status": status_new}
 
 
@@ -1235,6 +1286,7 @@ def _create_open_kot_response(
             payload={"total": float(total_amount)},
         )
         db.session.commit()
+        _schedule_order_event(RealtimeEvents.ORDER_CREATED, new_sale, total=float(total_amount))
 
         branch_name = "Main Branch"
         branch_obj = db.session.get(Branch, bid) if bid else None
@@ -1353,6 +1405,7 @@ def update_open_sale_items(sale_id: int, payload: dict[str, Any] | None = None, 
         sale.discount_id = None
         sale.discount_snapshot = None
         db.session.commit()
+        _schedule_order_event(RealtimeEvents.ORDER_UPDATED, sale, total=float(total_amount))
         return {"message": "Order updated", "sale_id": sale_id, "total_amount": float(total_amount)}
     except Exception as exc:
         db.session.rollback()
@@ -1424,6 +1477,7 @@ def finalize_open_sale(sale_id: int, payload: dict[str, Any] | None = None, curr
             payload={"total": float(sale.total_amount), "payment_method": data.get("payment_method")},
         )
         db.session.commit()
+        _schedule_order_event(RealtimeEvents.ORDER_UPDATED, sale, total=float(sale.total_amount))
 
         branch_name = "Main Branch"
         if sale.branch:
@@ -1492,6 +1546,7 @@ def cancel_open_sale(sale_id: int, current_user: User = Depends(get_current_user
             )
         db.session.delete(sale)
         db.session.commit()
+        _schedule_order_event(RealtimeEvents.ORDER_UPDATED, sale, deleted=True)
         return {"message": "Open order cancelled", "sale_id": sale_id}
     except Exception as exc:
         db.session.rollback()
@@ -1579,6 +1634,7 @@ def rollback_sale(sale_id: int, current_user: User = Depends(get_current_user)):
             payload={"status": "refunded"},
         )
         db.session.commit()
+        _schedule_order_event(RealtimeEvents.ORDER_UPDATED, sale, refunded=True)
         return {"message": "Sale rolled back successfully"}
     except Exception as exc:
         db.session.rollback()

@@ -114,6 +114,31 @@ def _init_database_core() -> None:
                     print("Added 'sku' column to 'suppliers' table.")
                 except (OperationalError, ProgrammingError):
                     db.session.rollback()
+                try:
+                    db.session.execute(text("ALTER TABLE ingredients ADD COLUMN brand_name VARCHAR(120)"))
+                    db.session.commit()
+                    print("Added 'brand_name' column to 'ingredients' table.")
+                except (OperationalError, ProgrammingError):
+                    db.session.rollback()
+                try:
+                    db.session.execute(text("ALTER TABLE sale_items ADD COLUMN inventory_allocations JSON"))
+                    db.session.commit()
+                    print("Added 'inventory_allocations' column to 'sale_items' table.")
+                except (OperationalError, ProgrammingError):
+                    db.session.rollback()
+                if db.engine.dialect.name == "postgresql":
+                    for table_name in ("ingredients", "recipe_items", "purchase_order_items"):
+                        try:
+                            db.session.execute(
+                                text(
+                                    f"ALTER TABLE {table_name} "
+                                    "ALTER COLUMN unit TYPE VARCHAR(50) USING unit::text"
+                                )
+                            )
+                            db.session.commit()
+                            print(f"Converted '{table_name}.unit' to VARCHAR(50).")
+                        except (OperationalError, ProgrammingError):
+                            db.session.rollback()
                 break
             except Exception as e:
                 if i < retries - 1:
