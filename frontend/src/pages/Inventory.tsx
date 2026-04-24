@@ -1,16 +1,18 @@
 import { useState } from 'react';
 import IngredientsTab from '../components/inventory/IngredientsTab';
+import PreparedItemsTab from '../components/inventory/PreparedItemsTab';
 import RecipesTab from '../components/inventory/RecipesTab';
 import SuppliersTab from '../components/inventory/SuppliersTab';
 import PurchaseOrdersTab from '../components/inventory/PurchaseOrdersTab';
 
-type TabId = 'ingredients' | 'recipes' | 'suppliers' | 'purchase_orders';
+type TabId = 'ingredients' | 'prepared_items' | 'recipes' | 'suppliers' | 'purchase_orders';
 
 export default function InventoryPage() {
   const [activeTab, setActiveTab] = useState<TabId>('ingredients');
 
   const tabs: { id: TabId; label: string }[] = [
     { id: 'ingredients', label: 'Ingredients' },
+    { id: 'prepared_items', label: 'Marinations & Sauces' },
     { id: 'recipes', label: 'Recipes (BOM)' },
     { id: 'suppliers', label: 'Suppliers' },
     { id: 'purchase_orders', label: 'Purchase Orders' },
@@ -43,6 +45,7 @@ export default function InventoryPage() {
       <div className="flex-1 min-h-0 relative">
         <div className="absolute inset-0 overflow-y-auto page-padding py-6">
           {activeTab === 'ingredients' && <IngredientsTab />}
+          {activeTab === 'prepared_items' && <PreparedItemsTab />}
           {activeTab === 'recipes' && <RecipesTab />}
           {activeTab === 'suppliers' && <SuppliersTab />}
           {activeTab === 'purchase_orders' && <PurchaseOrdersTab />}

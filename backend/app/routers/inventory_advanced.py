@@ -7,25 +7,36 @@ from fastapi.responses import JSONResponse
 
 from app.models import (
     Ingredient,
+    PreparedItem,
+    PreparedItemComponent,
     Product,
     PurchaseOrder,
     PurchaseOrderItem,
     RecipeItem,
+    RecipePreparedItem,
     Supplier,
     User,
     db,
 )
 from app.services.branch_ingredient_stock import (
+    InsufficientIngredientStock,
     adjust_branch_ingredient_stock,
     get_branch_stock,
     seed_branch_stocks_for_new_ingredient,
 )
 from app.services.ingredient_master_stock import sync_ingredient_master_total
+from app.services.prepared_item_stock import (
+    adjust_prepared_branch_stock,
+    get_prepared_branch_stock,
+    seed_prepared_branch_stocks_for_new_item,
+    sync_prepared_master_total,
+)
 from app.services.branch_scope import resolve_terminal_branch_id
 from app.deps import get_current_user
 from app.schemas.inventory_schemas import (
-    SupplierCreate, SupplierUpdate, IngredientCreate, IngredientUpdate,
-    RecipeItemCreate, PurchaseOrderCreate, PurchaseOrderReceive, StockMovementCreate
+    SupplierCreate, SupplierUpdate, IngredientCreate, IngredientUpdate, IngredientBulkCreate,
+    RecipeItemCreate, PurchaseOrderCreate, PurchaseOrderReceive, StockMovementCreate,
+    PreparedItemCreate, PreparedItemUpdate, PreparedItemBatchCreate, RecipePreparedItemCreate,
 )
 
 inventory_advanced_router = APIRouter(prefix="/api/inventory-advanced", tags=["inventory-advanced"])
@@ -101,6 +112,8 @@ def list_ingredients(
                 "name": i.name,
                 "sku": i.sku,
                 "unit": i.unit.value if hasattr(i.unit, "value") else i.unit,
+                "purchase_unit": i.purchase_unit,
+                "conversion_factor": i.conversion_factor,
                 "current_stock": get_branch_stock(i.id, bid),
                 "minimum_stock": i.minimum_stock,
                 "reorder_quantity": i.reorder_quantity,
@@ -127,6 +140,22 @@ def create_ingredient(payload: IngredientCreate, current_user: User = Depends(ge
     return {"id": i.id, "message": "Ingredient created"}
 
 
+@inventory_advanced_router.post("/ingredients/bulk")
+def create_ingredients_bulk(payload: IngredientBulkCreate, current_user: User = Depends(get_current_user)):
+    results = []
+    for ing_data in payload.ingredients:
+        data = ing_data.model_dump()
+        i = Ingredient(**data)
+        db.session.add(i)
+        db.session.flush()
+        seed_branch_stocks_for_new_ingredient(i.id, float(data.get("current_stock") or 0.0))
+        sync_ingredient_master_total(i.id)
+        results.append({"id": i.id, "name": i.name})
+    
+    db.session.commit()
+    return {"message": f"Successfully created {len(results)} ingredients", "results": results}
+
+
 @inventory_advanced_router.put("/ingredients/{ingredient_id}")
 def update_ingredient(ingredient_id: int, payload: IngredientUpdate, current_user: User = Depends(get_current_user)):
     i = db.session.get(Ingredient, ingredient_id)
@@ -140,16 +169,171 @@ def update_ingredient(ingredient_id: int, payload: IngredientUpdate, current_use
     return {"message": "Ingredient updated"}
 
 
+# --- Prepared sauces / marinations ---
+
+def _component_payload(component: PreparedItemComponent) -> dict[str, Any]:
+    return {
+        "id": component.id,
+        "ingredient_id": component.ingredient_id,
+        "quantity": component.quantity,
+        "unit": component.unit.value if hasattr(component.unit, "value") else component.unit,
+        "notes": component.notes,
+    }
+
+
+def _prepared_item_payload(item: PreparedItem, branch_id: int) -> dict[str, Any]:
+    return {
+        "id": item.id,
+        "name": item.name,
+        "sku": item.sku,
+        "kind": item.kind,
+        "unit": item.unit.value if hasattr(item.unit, "value") else item.unit,
+        "current_stock": get_prepared_branch_stock(item.id, branch_id),
+        "average_cost": item.average_cost,
+        "notes": item.notes,
+        "components": [_component_payload(c) for c in item.components],
+        "branch_id": branch_id,
+    }
+
+
+def _replace_prepared_components(item: PreparedItem, components: list[Any]) -> None:
+    item.components.clear()
+    db.session.flush()
+    for component in components:
+        data = component.model_dump() if hasattr(component, "model_dump") else dict(component)
+        item.components.append(PreparedItemComponent(**data))
+
+
+@inventory_advanced_router.get("/prepared-items")
+def list_prepared_items(
+    branch_id: int | None = None,
+    current_user: User = Depends(get_current_user),
+):
+    bid = _resolve_inventory_branch(branch_id, current_user)
+    items = PreparedItem.query.filter_by(is_active=True).order_by(PreparedItem.name.asc()).all()
+    return {"prepared_items": [_prepared_item_payload(item, bid) for item in items]}
+
+
+@inventory_advanced_router.post("/prepared-items")
+def create_prepared_item(payload: PreparedItemCreate, current_user: User = Depends(get_current_user)):
+    data = payload.model_dump()
+    components = data.pop("components", [])
+    sku = (data.get("sku") or "").strip() or None
+    if sku and PreparedItem.query.filter_by(sku=sku).first():
+        return JSONResponse(status_code=409, content={"message": "Prepared item with this SKU already exists"})
+    data["sku"] = sku
+    item = PreparedItem(**data)
+    db.session.add(item)
+    db.session.flush()
+    _replace_prepared_components(item, components)
+    seed_prepared_branch_stocks_for_new_item(item.id, 0.0)
+    db.session.commit()
+    return {"id": item.id, "message": "Prepared sauce/marination created"}
+
+
+@inventory_advanced_router.put("/prepared-items/{prepared_item_id}")
+def update_prepared_item(
+    prepared_item_id: int,
+    payload: PreparedItemUpdate,
+    current_user: User = Depends(get_current_user),
+):
+    item = db.session.get(PreparedItem, prepared_item_id)
+    if not item:
+        return JSONResponse(status_code=404, content={"message": "Prepared item not found"})
+    data = payload.model_dump(exclude_unset=True)
+    components = data.pop("components", None)
+    if "sku" in data:
+        sku = (data.get("sku") or "").strip() or None
+        existing = PreparedItem.query.filter_by(sku=sku).first() if sku else None
+        if existing and existing.id != item.id:
+            return JSONResponse(status_code=409, content={"message": "Prepared item with this SKU already exists"})
+        data["sku"] = sku
+    for key, value in data.items():
+        setattr(item, key, value)
+    if components is not None:
+        _replace_prepared_components(item, components)
+    db.session.commit()
+    return {"message": "Prepared sauce/marination updated"}
+
+
+@inventory_advanced_router.post("/prepared-items/{prepared_item_id}/batches")
+def make_prepared_batch(
+    prepared_item_id: int,
+    payload: PreparedItemBatchCreate,
+    current_user: User = Depends(get_current_user),
+):
+    item = db.session.get(PreparedItem, prepared_item_id)
+    if not item or not item.is_active:
+        return JSONResponse(status_code=404, content={"message": "Prepared item not found"})
+    if not item.components:
+        return JSONResponse(status_code=400, content={"message": "Add ingredients before making this sauce/marination"})
+
+    branch_id = _resolve_inventory_branch(payload.branch_id, current_user)
+    qty = float(payload.quantity)
+    total_cost = 0.0
+    try:
+        for component in item.components:
+            ing = component.ingredient
+            if ing is None:
+                continue
+            needed = float(component.quantity) * qty
+            total_cost += needed * float(ing.average_cost or 0.0)
+            adjust_branch_ingredient_stock(
+                ing.id,
+                branch_id,
+                -needed,
+                movement_type="preparation",
+                user_id=current_user.id,
+                reference_id=item.id,
+                reference_type="prepared_item",
+                reason=payload.reason or f"Made {qty:g} {item.unit.value if hasattr(item.unit, 'value') else item.unit} {item.name}",
+                unit_cost=float(ing.average_cost or 0.0),
+                allow_negative=False,
+            )
+            sync_ingredient_master_total(ing.id)
+
+        before = get_prepared_branch_stock(item.id, branch_id)
+        total_value_before = before * float(item.average_cost or 0.0)
+        new_total_qty = before + qty
+        if new_total_qty > 0:
+            item.average_cost = (total_value_before + total_cost) / new_total_qty
+        _, after = adjust_prepared_branch_stock(
+            item.id,
+            branch_id,
+            qty,
+            movement_type="preparation",
+            user_id=current_user.id,
+            reference_id=item.id,
+            reference_type="prepared_item",
+            reason=payload.reason or f"Made {item.name}",
+            allow_negative=False,
+        )
+        sync_prepared_master_total(item.id)
+        db.session.commit()
+        return {"message": "Batch made and ingredient stock deducted", "new_stock": after}
+    except InsufficientIngredientStock as exc:
+        db.session.rollback()
+        return JSONResponse(status_code=400, content={"message": str(exc)})
+    except Exception as exc:
+        db.session.rollback()
+        return JSONResponse(status_code=400, content={"message": str(exc)})
+
+
 # --- Recipes (BOM) ---
 
 @inventory_advanced_router.get("/recipes/{product_id}")
 def get_recipe(product_id: int, current_user: User = Depends(get_current_user)):
     items = RecipeItem.query.filter_by(product_id=product_id).all()
+    prepared_items = RecipePreparedItem.query.filter_by(product_id=product_id).all()
     return {"recipe_items": [{
         "id": r.id, "ingredient_id": r.ingredient_id,
         "quantity": r.quantity, "unit": r.unit.value if hasattr(r.unit, 'value') else r.unit, "notes": r.notes,
         "variant_key": getattr(r, "variant_key", None) or "",
-    } for r in items]}
+    } for r in items], "recipe_prepared_items": [{
+        "id": r.id, "prepared_item_id": r.prepared_item_id,
+        "quantity": r.quantity, "unit": r.unit.value if hasattr(r.unit, 'value') else r.unit, "notes": r.notes,
+        "variant_key": getattr(r, "variant_key", None) or "",
+    } for r in prepared_items]}
 
 @inventory_advanced_router.post("/recipes")
 def add_recipe_item(payload: RecipeItemCreate, current_user: User = Depends(get_current_user)):
@@ -166,6 +350,25 @@ def add_recipe_item(payload: RecipeItemCreate, current_user: User = Depends(get_
 @inventory_advanced_router.delete("/recipes/{recipe_item_id}")
 def delete_recipe_item(recipe_item_id: int, current_user: User = Depends(get_current_user)):
     r = db.session.get(RecipeItem, recipe_item_id)
+    if r:
+        db.session.delete(r)
+        db.session.commit()
+    return {"message": "Deleted"}
+
+
+@inventory_advanced_router.post("/recipes/prepared-items")
+def add_recipe_prepared_item(payload: RecipePreparedItemCreate, current_user: User = Depends(get_current_user)):
+    data = payload.model_dump()
+    data["variant_key"] = str(data.get("variant_key") or "").strip()[:100]
+    r = RecipePreparedItem(**data)
+    db.session.add(r)
+    db.session.commit()
+    return {"id": r.id, "message": "Prepared sauce/marination mapped"}
+
+
+@inventory_advanced_router.delete("/recipes/prepared-items/{recipe_item_id}")
+def delete_recipe_prepared_item(recipe_item_id: int, current_user: User = Depends(get_current_user)):
+    r = db.session.get(RecipePreparedItem, recipe_item_id)
     if r:
         db.session.delete(r)
         db.session.commit()

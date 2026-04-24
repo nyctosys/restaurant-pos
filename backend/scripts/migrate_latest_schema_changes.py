@@ -44,6 +44,115 @@ def _apply_column_migration(migration: ColumnMigration) -> None:
     print(f"  + Added {migration.table}.{migration.column}")
 
 
+def _table_exists(table: str) -> bool:
+    inspector = inspect(db.engine)
+    try:
+        return table in inspector.get_table_names()
+    except Exception:
+        return False
+
+
+def _ensure_stock_movement_preparation_value(dialect: str) -> None:
+    if dialect != "postgresql":
+        return
+    exists = db.session.execute(
+        text(
+            """
+            SELECT 1
+            FROM pg_enum e
+            JOIN pg_type t ON e.enumtypid = t.oid
+            WHERE t.typname = 'stockmovementtype' AND e.enumlabel = 'PREPARATION'
+            """
+        )
+    ).scalar()
+    if exists:
+        print("  - stockmovementtype.PREPARATION already exists")
+        return
+    db.session.execute(text("ALTER TYPE stockmovementtype ADD VALUE IF NOT EXISTS 'PREPARATION'"))
+    print("  + Added stockmovementtype.PREPARATION")
+
+
+def _ensure_prepared_item_tables(dialect: str) -> None:
+    float_type = "DOUBLE PRECISION" if dialect == "postgresql" else "FLOAT"
+    id_type = "SERIAL PRIMARY KEY" if dialect == "postgresql" else "INTEGER PRIMARY KEY AUTOINCREMENT"
+    ts_type = "TIMESTAMPTZ" if dialect == "postgresql" else "TIMESTAMP"
+
+    table_ddls = {
+        "prepared_items": f"""
+            CREATE TABLE prepared_items (
+              id {id_type},
+              name VARCHAR(200) NOT NULL,
+              sku VARCHAR(100) UNIQUE,
+              kind VARCHAR(50) NOT NULL DEFAULT 'sauce',
+              unit VARCHAR(6) NOT NULL DEFAULT 'KG',
+              current_stock {float_type} NOT NULL DEFAULT 0,
+              average_cost {float_type} NOT NULL DEFAULT 0,
+              notes TEXT,
+              is_active BOOLEAN DEFAULT TRUE,
+              created_at {ts_type},
+              updated_at {ts_type},
+              CONSTRAINT ck_prepared_item_stock_nonneg CHECK (current_stock >= 0),
+              CONSTRAINT ck_prepared_item_average_cost_nonneg CHECK (average_cost >= 0)
+            )
+        """,
+        "prepared_item_components": f"""
+            CREATE TABLE prepared_item_components (
+              id {id_type},
+              prepared_item_id INTEGER NOT NULL REFERENCES prepared_items(id),
+              ingredient_id INTEGER NOT NULL REFERENCES ingredients(id),
+              quantity {float_type} NOT NULL,
+              unit VARCHAR(6) NOT NULL,
+              notes VARCHAR(500)
+            )
+        """,
+        "prepared_item_branch_stocks": f"""
+            CREATE TABLE prepared_item_branch_stocks (
+              id {id_type},
+              prepared_item_id INTEGER NOT NULL REFERENCES prepared_items(id),
+              branch_id INTEGER NOT NULL REFERENCES branches(id),
+              current_stock {float_type} NOT NULL DEFAULT 0,
+              CONSTRAINT uq_prepared_item_branch_stock UNIQUE (prepared_item_id, branch_id),
+              CONSTRAINT ck_prepared_item_branch_stock_nonneg CHECK (current_stock >= 0)
+            )
+        """,
+        "recipe_prepared_items": f"""
+            CREATE TABLE recipe_prepared_items (
+              id {id_type},
+              product_id INTEGER NOT NULL REFERENCES products(id),
+              prepared_item_id INTEGER NOT NULL REFERENCES prepared_items(id),
+              quantity {float_type} NOT NULL,
+              unit VARCHAR(6) NOT NULL,
+              notes VARCHAR(500),
+              variant_key VARCHAR(100) NOT NULL DEFAULT '',
+              created_at {ts_type}
+            )
+        """,
+        "prepared_item_stock_movements": f"""
+            CREATE TABLE prepared_item_stock_movements (
+              id {id_type},
+              prepared_item_id INTEGER NOT NULL REFERENCES prepared_items(id),
+              movement_type VARCHAR(50) NOT NULL,
+              quantity_change {float_type} NOT NULL,
+              quantity_before {float_type} NOT NULL,
+              quantity_after {float_type} NOT NULL,
+              reference_id INTEGER,
+              reference_type VARCHAR(50),
+              reason VARCHAR(500),
+              created_by INTEGER REFERENCES users(id),
+              branch_id INTEGER REFERENCES branches(id),
+              created_at {ts_type}
+            )
+        """,
+    }
+
+    for table, ddl in table_ddls.items():
+        if _table_exists(table):
+            print(f"  - {table} already exists")
+            continue
+        db.session.execute(text(ddl))
+        print(f"  + Created {table}")
+
+
 def main() -> None:
     app = create_app()
     with app.app_context():
@@ -84,6 +193,8 @@ def main() -> None:
 
         print("migrate_latest_schema_changes: starting ...")
         try:
+            _ensure_stock_movement_preparation_value(dialect)
+            _ensure_prepared_item_tables(dialect)
             for migration in migrations:
                 _apply_column_migration(migration)
             db.session.commit()

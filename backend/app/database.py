@@ -114,6 +114,18 @@ def _init_database_core() -> None:
                     print("Added 'sku' column to 'suppliers' table.")
                 except (OperationalError, ProgrammingError):
                     db.session.rollback()
+                try:
+                    db.session.execute(text("ALTER TABLE ingredients ADD COLUMN purchase_unit VARCHAR(50)"))
+                    db.session.commit()
+                    print("Added 'purchase_unit' column to 'ingredients' table.")
+                except (OperationalError, ProgrammingError):
+                    db.session.rollback()
+                try:
+                    db.session.execute(text("ALTER TABLE ingredients ADD COLUMN conversion_factor FLOAT DEFAULT 1.0"))
+                    db.session.commit()
+                    print("Added 'conversion_factor' column to 'ingredients' table.")
+                except (OperationalError, ProgrammingError):
+                    db.session.rollback()
                 break
             except Exception as e:
                 if i < retries - 1:

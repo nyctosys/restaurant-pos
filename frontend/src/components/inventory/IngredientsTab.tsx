@@ -17,6 +17,8 @@ type Ingredient = {
   reorder_quantity: number;
   last_purchase_price: number;
   average_cost: number;
+  purchase_unit?: string;
+  conversion_factor?: number;
   preferred_supplier_id?: number;
   category?: string;
   notes?: string;
@@ -32,6 +34,21 @@ type RestockRow = {
   ingredientId: string;
   quantity: string;
   unitCost: string;
+  usePurchaseUnit: boolean;
+};
+
+type BulkAddRow = {
+  key: string;
+  name: string;
+  sku: string;
+  unit: string;
+  minStock: string;
+  reorderQty: string;
+  avgCost: string;
+  lastPurchasePrice: string;
+  purchaseUnit: string;
+  conversionFactor: string;
+  supplierId: string;
 };
 
 type SortKey = 'name' | 'current_stock' | 'average_cost' | 'supplier' | 'id';
@@ -55,6 +72,8 @@ export default function IngredientsTab() {
   const [formReorderQty, setFormReorderQty] = useState('0');
   const [formLastPurchasePrice, setFormLastPurchasePrice] = useState('0');
   const [formAverageCost, setFormAverageCost] = useState('0');
+  const [formPurchaseUnit, setFormPurchaseUnit] = useState('');
+  const [formConversionFactor, setFormConversionFactor] = useState('1');
   const [formSupplierId, setFormSupplierId] = useState('');
   const [formCategory, setFormCategory] = useState('');
   const [formError, setFormError] = useState('');
@@ -67,11 +86,31 @@ export default function IngredientsTab() {
   const [sortKey, setSortKey] = useState<SortKey>('name');
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
 
+  const [showBulkAddModal, setShowBulkAddModal] = useState(false);
+  const [bulkAddRows, setBulkAddRows] = useState<BulkAddRow[]>([]);
+  const [bulkAddError, setBulkAddError] = useState('');
+  const [bulkAddSubmitting, setBulkAddSubmitting] = useState(false);
+
   const createRestockRow = (): RestockRow => ({
-    key: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    key: Math.random().toString(36).substring(7),
     ingredientId: '',
     quantity: '',
     unitCost: '',
+    usePurchaseUnit: false,
+  });
+
+  const createBulkAddRow = (): BulkAddRow => ({
+    key: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    name: '',
+    sku: '',
+    unit: 'kg',
+    minStock: '0',
+    reorderQty: '0',
+    avgCost: '0',
+    lastPurchasePrice: '0',
+    purchaseUnit: '',
+    conversionFactor: '1',
+    supplierId: '',
   });
 
   useEffect(() => {
@@ -107,6 +146,8 @@ export default function IngredientsTab() {
     setFormReorderQty('0');
     setFormLastPurchasePrice('0');
     setFormAverageCost('0');
+    setFormPurchaseUnit('');
+    setFormConversionFactor('1');
     setFormSupplierId('');
     setFormCategory('');
     setFormError('');
@@ -145,6 +186,94 @@ export default function IngredientsTab() {
     });
   };
 
+  const handleOpenBulkAdd = () => {
+    setBulkAddRows([createBulkAddRow()]);
+    setBulkAddError('');
+    setShowBulkAddModal(true);
+  };
+
+  const handleCloseBulkAdd = () => {
+    setShowBulkAddModal(false);
+    setBulkAddRows([]);
+    setBulkAddError('');
+  };
+
+  const updateBulkAddRow = (key: string, patch: Partial<BulkAddRow>) => {
+    setBulkAddRows((prev) => {
+      const newRows = prev.map((row) => {
+        if (row.key === key) {
+          const updated = { ...row, ...patch };
+          
+          // Auto-calculate Avg Cost if Last Purchase Price or Conversion Factor changed
+          if (patch.lastPurchasePrice !== undefined || patch.conversionFactor !== undefined) {
+             const price = parseFloat(updated.lastPurchasePrice);
+             const factor = parseFloat(updated.conversionFactor);
+             if (!isNaN(price) && factor > 0) {
+                updated.avgCost = (price / factor).toFixed(2);
+             }
+          }
+          return updated;
+        }
+        return row;
+      });
+      return newRows;
+    });
+  };
+
+  const addBulkAddRow = () => setBulkAddRows((prev) => [...prev, createBulkAddRow()]);
+
+  const removeBulkAddRow = (key: string) => {
+    setBulkAddRows((prev) => {
+      if (prev.length <= 1) return prev;
+      return prev.filter((row) => row.key !== key);
+    });
+  };
+
+  const handleSubmitBulkAdd = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const ingredientsToCreate = [];
+
+    for (let i = 0; i < bulkAddRows.length; i += 1) {
+      const row = bulkAddRows[i];
+      if (!row.name.trim()) {
+        setBulkAddError(`Row ${i + 1}: Name is required.`);
+        return;
+      }
+      if (!row.unit) {
+        setBulkAddError(`Row ${i + 1}: Unit is required.`);
+        return;
+      }
+
+      ingredientsToCreate.push({
+        name: row.name.trim(),
+        sku: row.sku.trim() || undefined,
+        unit: row.unit,
+        purchase_unit: row.purchaseUnit.trim() || undefined,
+        conversion_factor: parseFloat(row.conversionFactor) || 1.0,
+        minimum_stock: parseFloat(row.minStock) || 0,
+        reorder_quantity: parseFloat(row.reorderQty) || 0,
+        last_purchase_price: parseFloat(row.lastPurchasePrice) || 0,
+        average_cost: parseFloat(row.avgCost) || 0,
+        preferred_supplier_id: row.supplierId ? parseInt(row.supplierId, 10) : undefined,
+      });
+    }
+
+    setBulkAddSubmitting(true);
+    setBulkAddError('');
+    try {
+      await post('/inventory-advanced/ingredients/bulk', {
+        ingredients: ingredientsToCreate,
+      });
+      showToast(`Successfully added ${ingredientsToCreate.length} materials`, 'success');
+      handleCloseBulkAdd();
+      fetchData();
+    } catch (error) {
+      setBulkAddError(getUserMessage(error));
+    } finally {
+      setBulkAddSubmitting(false);
+    }
+  };
+
   const handleSubmitBulkRestock = async (e: React.FormEvent) => {
     e.preventDefault();
     const trimmedReason = restockReason.trim();
@@ -153,14 +282,23 @@ export default function IngredientsTab() {
     for (let i = 0; i < restockRows.length; i += 1) {
       const row = restockRows[i];
       const ingredientId = Number.parseInt(row.ingredientId, 10);
-      const quantity = Number.parseFloat(row.quantity);
+      let quantity = Number.parseFloat(row.quantity);
       const unitCostText = row.unitCost.trim();
-      const unitCost = unitCostText === '' ? undefined : Number.parseFloat(unitCostText);
+      let unitCost = unitCostText === '' ? undefined : Number.parseFloat(unitCostText);
 
       if (!Number.isFinite(ingredientId)) {
         setRestockError(`Row ${i + 1}: select a material.`);
         return;
       }
+
+      const ing = ingredients.find(ing => ing.id === ingredientId);
+      if (row.usePurchaseUnit && ing && ing.conversion_factor) {
+        quantity *= ing.conversion_factor;
+        if (unitCost !== undefined) {
+          unitCost /= ing.conversion_factor;
+        }
+      }
+
       if (!Number.isFinite(quantity) || quantity <= 0) {
         setRestockError(`Row ${i + 1}: quantity must be greater than 0.`);
         return;
@@ -204,6 +342,8 @@ export default function IngredientsTab() {
     setFormReorderQty(ing.reorder_quantity.toString());
     setFormLastPurchasePrice(String(ing.last_purchase_price ?? 0));
     setFormAverageCost(String(ing.average_cost ?? 0));
+    setFormPurchaseUnit(ing.purchase_unit || '');
+    setFormConversionFactor(String(ing.conversion_factor ?? 1));
     setFormSupplierId(ing.preferred_supplier_id ? ing.preferred_supplier_id.toString() : '');
     setFormCategory(ing.category || '');
     setFormError('');
@@ -237,6 +377,8 @@ export default function IngredientsTab() {
         name: formName.trim(),
         sku: formSku.trim() || undefined,
         unit: formUnit,
+        purchase_unit: formPurchaseUnit.trim() || undefined,
+        conversion_factor: parseFloat(formConversionFactor) || 1.0,
         minimum_stock: parseFloat(formMinStock) || 0,
         reorder_quantity: parseFloat(formReorderQty) || 0,
         last_purchase_price: lastPurchase,
@@ -326,18 +468,18 @@ export default function IngredientsTab() {
         <h3 className="text-xl font-bold text-soot-900 hidden sm:block">Raw Materials</h3>
         <div className="ml-auto flex items-center gap-2">
           <button
-            onClick={handleOpenBulkRestock}
-            className="flex items-center gap-2 bg-white/70 border border-white/70 text-soot-700 px-4 py-2 rounded-lg font-medium hover:bg-white/90 touch-target transition-colors"
-          >
-            <Layers className="w-4 h-4" />
-            Bulk restock
-          </button>
-          <button
-            onClick={handleOpenAdd}
+            onClick={handleOpenBulkAdd}
             className="flex items-center gap-2 bg-brand-700 text-white px-4 py-2 rounded-lg font-medium hover:bg-brand-600 touch-target transition-colors"
           >
             <Plus className="w-4 h-4" />
             Add material
+          </button>
+          <button
+            onClick={handleOpenBulkRestock}
+            className="flex items-center gap-2 bg-white/70 border border-white/70 text-soot-700 px-4 py-2 rounded-lg font-medium hover:bg-white/90 touch-target transition-colors"
+          >
+            <Layers className="w-4 h-4" />
+            Restock
           </button>
         </div>
       </div>
@@ -489,33 +631,74 @@ export default function IngredientsTab() {
                  <div>
                     <label className="block text-sm font-medium text-neutral-700 mb-1">Reorder Quantity</label>
                     <input type="number" step="any" min="0" value={formReorderQty} onChange={e => setFormReorderQty(e.target.value)} className="w-full px-4 py-2.5 glass-card text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none" />
-                 </div>
+                 </div>                  <div className="col-span-2 grid grid-cols-2 gap-4 p-4 bg-brand-50/50 rounded-xl border border-brand-100 mb-2">
+                    <div className="col-span-2 text-xs font-bold text-brand-700 uppercase tracking-wider mb-1">Packaging & Conversion</div>
+                    <div>
+                        <label className="block text-sm font-medium text-neutral-700 mb-1">Purchase Unit</label>
+                        <input
+                          type="text"
+                          value={formPurchaseUnit}
+                          onChange={e => setFormPurchaseUnit(e.target.value)}
+                          className="w-full px-4 py-2.5 glass-card text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none"
+                          placeholder="e.g. Carton, Packet"
+                        />
+                        <p className="text-[10px] text-neutral-500 mt-1">Unit you buy from supplier.</p>
+                    </div>
 
-                 <div>
-                    <label className="block text-sm font-medium text-neutral-700 mb-1">Average cost (PKR / unit)</label>
-                    <input
-                      type="number"
-                      step="any"
-                      min="0"
-                      value={formAverageCost}
-                      onChange={e => setFormAverageCost(e.target.value)}
-                      className="w-full px-4 py-2.5 glass-card text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none"
-                    />
-                    <p className="text-xs text-neutral-500 mt-1">Used in the materials list and for recipe cost context.</p>
-                 </div>
+                    <div>
+                        <label className="block text-sm font-medium text-neutral-700 mb-1">Conversion Factor</label>
+                        <input
+                          type="number"
+                          step="any"
+                          min="0.0001"
+                          value={formConversionFactor}
+                          onChange={e => {
+                            const val = e.target.value;
+                            setFormConversionFactor(val);
+                            const factor = parseFloat(val);
+                            const price = parseFloat(formLastPurchasePrice);
+                            if (factor > 0 && !isNaN(price)) {
+                              setFormAverageCost((price / factor).toFixed(2));
+                            }
+                          }}
+                          className="w-full px-4 py-2.5 glass-card text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none"
+                        />
+                        <p className="text-[10px] text-neutral-500 mt-1">How many {formUnit} in 1 {formPurchaseUnit || 'unit'}?</p>
+                    </div>
 
-                 <div>
-                    <label className="block text-sm font-medium text-neutral-700 mb-1">Last purchase price (PKR / unit)</label>
-                    <input
-                      type="number"
-                      step="any"
-                      min="0"
-                      value={formLastPurchasePrice}
-                      onChange={e => setFormLastPurchasePrice(e.target.value)}
-                      className="w-full px-4 py-2.5 glass-card text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none"
-                    />
-                    <p className="text-xs text-neutral-500 mt-1">Latest price paid per unit (optional reference).</p>
-                 </div>
+                    <div>
+                        <label className="block text-sm font-medium text-neutral-700 mb-1">Purchase Price (PKR / {formPurchaseUnit || 'unit'})</label>
+                        <input
+                          type="number"
+                          step="any"
+                          min="0"
+                          value={formLastPurchasePrice}
+                          onChange={e => {
+                            const val = e.target.value;
+                            setFormLastPurchasePrice(val);
+                            const price = parseFloat(val);
+                            const factor = parseFloat(formConversionFactor);
+                            if (factor > 0 && !isNaN(price)) {
+                              setFormAverageCost((price / factor).toFixed(2));
+                            }
+                          }}
+                          className="w-full px-4 py-2.5 glass-card text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none"
+                        />
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-medium text-neutral-700 mb-1">Base Cost (PKR / {formUnit})</label>
+                        <input
+                          type="number"
+                          step="any"
+                          min="0"
+                          value={formAverageCost}
+                          onChange={e => setFormAverageCost(e.target.value)}
+                          className="w-full px-4 py-2.5 glass-card text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none font-bold text-brand-700"
+                        />
+                        <p className="text-[10px] text-neutral-500 mt-1">Auto-calculated from purchase price.</p>
+                    </div>
+                  </div>
                  
                  <div className="col-span-2">
                     <label className="block text-sm font-medium text-neutral-700 mb-1">Preferred Supplier</label>
@@ -546,7 +729,7 @@ export default function IngredientsTab() {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 glass-overlay overflow-y-auto">
           <div className="glass-floating w-full max-w-3xl my-auto flex flex-col max-h-[90vh] overflow-hidden">
             <div className="flex items-center justify-between px-6 py-4 border-b border-neutral-200/60 bg-white/25 shrink-0">
-              <h3 className="text-lg font-bold text-neutral-900">Bulk restock materials</h3>
+              <h3 className="text-lg font-bold text-neutral-900">Restock materials</h3>
               <button onClick={handleCloseBulkRestock} className="p-1.5 rounded-lg hover:bg-neutral-200 transition-colors">
                 <X className="w-5 h-5 text-neutral-500" />
               </button>
@@ -571,67 +754,99 @@ export default function IngredientsTab() {
               </div>
 
               <div className="space-y-3">
-                {restockRows.map((row, idx) => (
-                  <div key={row.key} className="grid grid-cols-12 gap-2 items-end glass-card p-3 rounded-lg">
-                    <div className="col-span-12 md:col-span-6">
-                      <label className="block text-xs font-semibold text-neutral-600 mb-1">Material</label>
-                      <SearchableSelect
-                        value={row.ingredientId}
-                        onChange={(value) => updateRestockRow(row.key, { ingredientId: value })}
-                        placeholder="Select material"
-                        searchPlaceholder="Search materials…"
-                        options={ingredients.map((ingredient) => ({
-                          value: String(ingredient.id),
-                          label: `${ingredient.name} (${ingredient.unit})`,
-                          searchText: `${ingredient.sku ?? ''} ${ingredient.category ?? ''}`.trim(),
-                        }))}
-                        className="glass-card border-0 px-3 py-2.5"
-                      />
+                {restockRows.map((row, idx) => {
+                  const selectedIng = ingredients.find(ing => String(ing.id) === row.ingredientId);
+                  const hasConversion = !!(selectedIng?.purchase_unit && (selectedIng?.conversion_factor ?? 0) > 1);
+
+                  return (
+                    <div key={row.key} className="grid grid-cols-12 gap-2 items-end glass-card p-4 rounded-xl border border-white/40">
+                      <div className="col-span-12 md:col-span-5">
+                        <label className="block text-xs font-semibold text-neutral-600 mb-1 flex justify-between items-center">
+                          <span>Material</span>
+                          {hasConversion && (
+                            <button
+                              type="button"
+                              onClick={() => updateRestockRow(row.key, { usePurchaseUnit: !row.usePurchaseUnit })}
+                              className={`text-[10px] uppercase tracking-wider font-bold px-1.5 py-0.5 rounded transition-colors ${
+                                row.usePurchaseUnit 
+                                  ? 'bg-brand-100 text-brand-700 border border-brand-200' 
+                                  : 'bg-neutral-100 text-neutral-500 border border-neutral-200 hover:bg-neutral-200'
+                              }`}
+                            >
+                              {row.usePurchaseUnit ? `Using ${selectedIng.purchase_unit}` : `Use ${selectedIng.purchase_unit}?`}
+                            </button>
+                          )}
+                        </label>
+                        <SearchableSelect
+                          value={row.ingredientId}
+                          onChange={(value) => updateRestockRow(row.key, { ingredientId: value, usePurchaseUnit: false })}
+                          placeholder="Select material"
+                          searchPlaceholder="Search materials…"
+                          options={ingredients.map((ingredient) => ({
+                            value: String(ingredient.id),
+                            label: `${ingredient.name} (${ingredient.unit})`,
+                            searchText: `${ingredient.sku ?? ''} ${ingredient.category ?? ''}`.trim(),
+                          }))}
+                          className="glass-card border-0 px-3 py-2.5"
+                        />
+                      </div>
+                      <div className="col-span-6 md:col-span-3">
+                        <label className="block text-xs font-semibold text-neutral-600 mb-1">
+                          Quantity ({row.usePurchaseUnit ? selectedIng?.purchase_unit : selectedIng?.unit || '—'})
+                        </label>
+                        <input
+                          type="number"
+                          step="any"
+                          min="0"
+                          value={row.quantity}
+                          onChange={(e) => updateRestockRow(row.key, { quantity: e.target.value })}
+                          className="w-full px-3 py-2.5 glass-card text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none"
+                          placeholder="0"
+                        />
+                      </div>
+                      <div className="col-span-6 md:col-span-3">
+                        <label className="block text-xs font-semibold text-neutral-600 mb-1">
+                          {row.usePurchaseUnit ? `Price per ${selectedIng?.purchase_unit}` : `Unit cost (${selectedIng?.unit || 'PKR'})`}
+                        </label>
+                        <input
+                          type="number"
+                          step="any"
+                          min="0"
+                          value={row.unitCost}
+                          onChange={(e) => updateRestockRow(row.key, { unitCost: e.target.value })}
+                          className="w-full px-3 py-2.5 glass-card text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none"
+                          placeholder="Optional"
+                        />
+                      </div>
+                      <div className="col-span-12 md:col-span-1 flex justify-end">
+                        <button
+                          type="button"
+                          onClick={() => removeRestockRow(row.key)}
+                          className="p-2 rounded-lg text-neutral-500 hover:text-red-600 hover:bg-red-50 transition-colors"
+                          title={`Remove row ${idx + 1}`}
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                      {row.usePurchaseUnit && selectedIng && (
+                        <div className="col-span-12 mt-2 text-[11px] text-neutral-500 italic flex items-center gap-1">
+                          <Package className="w-3 h-3" />
+                          Will add {(parseFloat(row.quantity) * (selectedIng.conversion_factor || 1)).toFixed(2)} {selectedIng.unit} to stock
+                          {row.unitCost && ` at Rs. ${(parseFloat(row.unitCost) / (selectedIng.conversion_factor || 1)).toFixed(2)} per ${selectedIng.unit}`}
+                        </div>
+                      )}
                     </div>
-                    <div className="col-span-6 md:col-span-2">
-                      <label className="block text-xs font-semibold text-neutral-600 mb-1">Quantity</label>
-                      <input
-                        type="number"
-                        step="any"
-                        min="0"
-                        value={row.quantity}
-                        onChange={(e) => updateRestockRow(row.key, { quantity: e.target.value })}
-                        className="w-full px-3 py-2.5 glass-card text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none"
-                        placeholder="0"
-                      />
-                    </div>
-                    <div className="col-span-6 md:col-span-3">
-                      <label className="block text-xs font-semibold text-neutral-600 mb-1">Unit cost (PKR)</label>
-                      <input
-                        type="number"
-                        step="any"
-                        min="0"
-                        value={row.unitCost}
-                        onChange={(e) => updateRestockRow(row.key, { unitCost: e.target.value })}
-                        className="w-full px-3 py-2.5 glass-card text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none"
-                        placeholder="Optional"
-                      />
-                    </div>
-                    <div className="col-span-12 md:col-span-1 flex justify-end">
-                      <button
-                        type="button"
-                        onClick={() => removeRestockRow(row.key)}
-                        className="p-2 rounded-lg text-neutral-500 hover:text-red-600 hover:bg-red-50 transition-colors"
-                        title={`Remove row ${idx + 1}`}
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
 
               <button
                 type="button"
                 onClick={addRestockRow}
-                className="px-4 py-2 text-sm font-medium rounded-lg border border-white/80 bg-white/70 hover:bg-white/90 transition-colors"
+                className="flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg border border-white/80 bg-white/70 hover:bg-white/90 transition-colors"
               >
-                Add row
+                <Plus className="w-4 h-4" />
+                Add another item
               </button>
 
               <div className="flex gap-3 pt-2">
@@ -648,7 +863,151 @@ export default function IngredientsTab() {
                   className="flex-1 px-4 py-2.5 bg-brand-700 text-white rounded-lg text-sm font-medium hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 touch-target"
                 >
                   {restockSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
-                  Submit restock
+                  Restock All Items
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+      {showBulkAddModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 glass-overlay overflow-y-auto">
+          <div className="glass-floating w-full max-w-5xl my-auto flex flex-col max-h-[90vh] overflow-hidden">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-neutral-200/60 bg-white/25 shrink-0">
+              <h3 className="text-lg font-bold text-neutral-900">Add raw materials</h3>
+              <button onClick={handleCloseBulkAdd} className="p-1.5 rounded-lg hover:bg-neutral-200 transition-colors">
+                <X className="w-5 h-5 text-neutral-500" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmitBulkAdd} className="p-6 space-y-4 overflow-y-auto min-h-0 flex-1">
+              {bulkAddError && (
+                <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-2 text-sm font-medium">
+                  {bulkAddError}
+                </div>
+              )}
+
+              <div className="space-y-4">
+                {bulkAddRows.map((row, idx) => (
+                  <div key={row.key} className="grid grid-cols-12 gap-3 items-end glass-card p-4 rounded-xl border border-white/40">
+                    <div className="col-span-12 md:col-span-3">
+                      <label className="block text-xs font-semibold text-neutral-600 mb-1">Name *</label>
+                      <input
+                        type="text"
+                        value={row.name}
+                        onChange={(e) => updateBulkAddRow(row.key, { name: e.target.value })}
+                        className="w-full px-3 py-2 glass-card text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none"
+                        placeholder="e.g. Flour"
+                      />
+                    </div>
+                    <div className="col-span-6 md:col-span-2">
+                      <label className="block text-xs font-semibold text-neutral-600 mb-1">SKU (optional)</label>
+                      <input
+                        type="text"
+                        value={row.sku}
+                        onChange={(e) => updateBulkAddRow(row.key, { sku: e.target.value })}
+                        className="w-full px-3 py-2 glass-card text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none"
+                        placeholder="Auto"
+                      />
+                    </div>
+                    <div className="col-span-6 md:col-span-2">
+                      <label className="block text-xs font-semibold text-neutral-600 mb-1">Unit *</label>
+                      <SearchableSelect
+                        value={row.unit}
+                        onChange={(val) => updateBulkAddRow(row.key, { unit: val })}
+                        options={UNITS.map(u => ({ value: u, label: u }))}
+                        className="glass-card border-0 px-2 py-1.5"
+                      />
+                    </div>
+                    <div className="col-span-6 md:col-span-2">
+                      <label className="block text-xs font-semibold text-neutral-600 mb-1">Purchase Unit</label>
+                      <input
+                        type="text"
+                        value={row.purchaseUnit}
+                        onChange={(e) => updateBulkAddRow(row.key, { purchaseUnit: e.target.value })}
+                        className="w-full px-3 py-2 glass-card text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none"
+                        placeholder="e.g. Carton"
+                      />
+                    </div>
+                    <div className="col-span-6 md:col-span-1">
+                      <label className="block text-xs font-semibold text-neutral-600 mb-1">Factor</label>
+                      <input
+                        type="number"
+                        step="any"
+                        value={row.conversionFactor}
+                        onChange={(e) => updateBulkAddRow(row.key, { conversionFactor: e.target.value })}
+                        className="w-full px-3 py-2 glass-card text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none"
+                      />
+                    </div>
+                    <div className="col-span-6 md:col-span-2">
+                      <label className="block text-xs font-semibold text-neutral-600 mb-1">P. Price ({row.purchaseUnit || 'unit'})</label>
+                      <input
+                        type="number"
+                        step="any"
+                        value={row.lastPurchasePrice}
+                        onChange={(e) => updateBulkAddRow(row.key, { lastPurchasePrice: e.target.value })}
+                        className="w-full px-3 py-2 glass-card text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none"
+                      />
+                    </div>
+                    <div className="col-span-6 md:col-span-2">
+                      <label className="block text-xs font-semibold text-neutral-600 mb-1">Base Cost ({row.unit})</label>
+                      <input
+                        type="number"
+                        step="any"
+                        value={row.avgCost}
+                        onChange={(e) => updateBulkAddRow(row.key, { avgCost: e.target.value })}
+                        className="w-full px-3 py-2 glass-card text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none font-bold text-brand-700"
+                      />
+                    </div>
+                    <div className="col-span-6 md:col-span-2">
+                      <label className="block text-xs font-semibold text-neutral-600 mb-1">Supplier</label>
+                      <SearchableSelect
+                        value={row.supplierId}
+                        onChange={(val) => updateBulkAddRow(row.key, { supplierId: val })}
+                        placeholder="—"
+                        options={suppliers.map(s => ({ value: String(s.id), label: s.name }))}
+                        className="glass-card border-0 px-2 py-1.5"
+                      />
+                    </div>
+                    <div className="col-span-12 md:col-span-1 flex justify-end">
+                      <button
+                        type="button"
+                        onClick={() => removeBulkAddRow(row.key)}
+                        className="p-2 rounded-lg text-neutral-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex justify-between items-center pt-2">
+                <button
+                  type="button"
+                  onClick={addBulkAddRow}
+                  className="flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg border border-white/80 bg-white/70 hover:bg-white/90 transition-colors"
+                >
+                  <Plus className="w-4 h-4" />
+                  Add another material
+                </button>
+              </div>
+
+              <div className="flex gap-3 pt-4 border-t border-neutral-100">
+                <button
+                  type="button"
+                  onClick={handleCloseBulkAdd}
+                  className="flex-1 px-4 py-2.5 border border-neutral-200 rounded-lg text-sm font-medium text-neutral-600 hover:bg-neutral-50 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={bulkAddSubmitting}
+                  className="flex-1 px-4 py-2.5 bg-brand-700 text-white rounded-lg text-sm font-medium hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 touch-target"
+                >
+                  {bulkAddSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
+                  Create All Materials
                 </button>
               </div>
             </form>

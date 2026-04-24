@@ -11,7 +11,12 @@ from app.order_metadata import normalize_order_type_and_snapshot
 from app.models import Branch, Ingredient, Modifier, Product, Sale, SaleItem, Setting, User, db
 from app.services.branch_scope import resolve_terminal_branch_id
 from app.services.printer_service import PrinterService
-from app.services.recipe_variants import combo_items_for_variant, normalize_variant_key, recipe_rows_for_variant
+from app.services.recipe_variants import (
+    combo_items_for_variant,
+    normalize_variant_key,
+    prepared_recipe_rows_for_variant,
+    recipe_rows_for_variant,
+)
 from app.services.sync_outbox import enqueue_sync_event
 from app.deps import get_current_user, require_owner
 from app.routers.common import yes
@@ -242,9 +247,15 @@ def _deduct_recipe_for_product(
     variant_key: str | None = None,
 ) -> tuple[bool, str]:
     from app.services.branch_ingredient_stock import InsufficientIngredientStock, adjust_branch_ingredient_stock
+    from app.services.prepared_item_stock import (
+        InsufficientPreparedItemStock,
+        adjust_prepared_branch_stock,
+        sync_prepared_master_total,
+    )
 
     recipe_items = recipe_rows_for_variant(product, variant_key)
-    if not recipe_items:
+    prepared_items = prepared_recipe_rows_for_variant(product, variant_key)
+    if not recipe_items and not prepared_items:
         vk = normalize_variant_key(variant_key)
         if vk:
             return (
@@ -273,6 +284,26 @@ def _deduct_recipe_for_product(
             )
         except InsufficientIngredientStock as exc:
             return False, str(exc)
+    for recipe_item in prepared_items:
+        prepared_item = recipe_item.prepared_item
+        if prepared_item is None:
+            continue
+        total_prepared = float(recipe_item.quantity) * qty
+        try:
+            adjust_prepared_branch_stock(
+                prepared_item.id,
+                branch_id,
+                -total_prepared,
+                movement_type="sale_deduction",
+                user_id=current_user_id,
+                reference_id=sale_id,
+                reference_type="sale",
+                reason=f"Sold {qty}x {product.title}",
+                allow_negative=False,
+            )
+            sync_prepared_master_total(prepared_item.id)
+        except InsufficientPreparedItemStock as exc:
+            return False, str(exc)
     return True, ""
 
 
@@ -286,6 +317,7 @@ def _restore_recipe_for_sale_item(
     variant_key: str | None = None,
 ) -> None:
     from app.services.branch_ingredient_stock import adjust_branch_ingredient_stock
+    from app.services.prepared_item_stock import adjust_prepared_branch_stock, sync_prepared_master_total
 
     for recipe_item in recipe_rows_for_variant(product, variant_key):
         ingredient = recipe_item.ingredient
@@ -304,6 +336,23 @@ def _restore_recipe_for_sale_item(
             unit_cost=float(ingredient.average_cost or 0),
             allow_negative=False,
         )
+    for recipe_item in prepared_recipe_rows_for_variant(product, variant_key):
+        prepared_item = recipe_item.prepared_item
+        if prepared_item is None:
+            continue
+        restored_qty = float(recipe_item.quantity) * qty
+        adjust_prepared_branch_stock(
+            prepared_item.id,
+            branch_id,
+            restored_qty,
+            movement_type="adjustment",
+            user_id=current_user_id,
+            reference_id=sale_id,
+            reference_type="sale",
+            reason=reason,
+            allow_negative=False,
+        )
+        sync_prepared_master_total(prepared_item.id)
 
 
 def _restore_modifier_depletions_from_sale_item(
