@@ -137,28 +137,6 @@ export default function IngredientsTab() {
     }
   };
 
-  const resetForm = () => {
-    setFormName('');
-    setFormSku('');
-    setFormSkuTouched(false);
-    setFormUnit('kg');
-    setFormMinStock('0');
-    setFormReorderQty('0');
-    setFormLastPurchasePrice('0');
-    setFormAverageCost('0');
-    setFormPurchaseUnit('');
-    setFormConversionFactor('1');
-    setFormSupplierId('');
-    setFormCategory('');
-    setFormError('');
-    setEditingIngredient(null);
-  };
-
-  const handleOpenAdd = () => {
-    resetForm();
-    setShowModal(true);
-  };
-
   const handleOpenBulkRestock = () => {
     setRestockRows([createRestockRow()]);
     setRestockReason('');
@@ -888,7 +866,7 @@ export default function IngredientsTab() {
               )}
 
               <div className="space-y-4">
-                {bulkAddRows.map((row, idx) => (
+                {bulkAddRows.map((row) => (
                   <div key={row.key} className="grid grid-cols-12 gap-3 items-end glass-card p-4 rounded-xl border border-white/40">
                     <div className="col-span-12 md:col-span-3">
                       <label className="block text-xs font-semibold text-neutral-600 mb-1">Name *</label>

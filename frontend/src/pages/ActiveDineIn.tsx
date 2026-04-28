@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Loader2, RefreshCw, UtensilsCrossed, Pencil, CreditCard, Ban } from 'lucide-react';
+import { Loader2, RefreshCw, UtensilsCrossed, Pencil, CreditCard, Ban, ChefHat, CheckCircle2, Bell, X } from 'lucide-react';
 import { get, post, getUserMessage } from '../api';
+import { getSocket } from '../realtime/socket';
 import { getTerminalBranchIdString, parseUserFromStorage } from '../utils/branchContext';
 import { formatCurrency } from '../utils/formatCurrency';
 import { showConfirm } from '../components/ConfirmDialog';
@@ -23,6 +24,7 @@ type ActiveSale = {
   created_at: string;
   status: string;
   order_type: string | null;
+  kitchen_status: 'placed' | 'preparing' | 'ready' | null;
   table_name?: string | null;
   order_snapshot?: { table_name?: string } | null;
   items?: ActiveSaleLine[];
@@ -53,6 +55,7 @@ export default function ActiveDineIn() {
   const [payModalSale, setPayModalSale] = useState<ActiveSale | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<'Card' | 'Cash' | 'Online Transfer'>('Card');
   const [paySubmitting, setPaySubmitting] = useState(false);
+  const [readyAlerts, setReadyAlerts] = useState<{ id: string; sale_id: number; label: string }[]>([]);
 
   const terminalBranchId = getTerminalBranchIdString(parseUserFromStorage());
 
@@ -75,6 +78,40 @@ export default function ActiveDineIn() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Real-time: update kitchen_status on ORDER_STATUS_CHANGED without full reload
+  useEffect(() => {
+    const s = getSocket();
+    const onStatusChanged = (payload: { sale_id?: number; kitchen_status?: string }) => {
+      if (!payload?.sale_id) return;
+      setSales(prev =>
+        prev.map(sale =>
+          sale.id === payload.sale_id
+            ? { ...sale, kitchen_status: (payload.kitchen_status as ActiveSale['kitchen_status']) ?? sale.kitchen_status }
+            : sale
+        )
+      );
+    };
+    const onOrderReady = (payload: { sale_id?: number; table_name?: string | null }) => {
+      if (!payload?.sale_id) return;
+      const label = payload.table_name
+        ? `Table ${payload.table_name} · #${payload.sale_id}`
+        : `Order #${payload.sale_id}`;
+      const alertId = `${Date.now()}_${payload.sale_id}`;
+      setReadyAlerts(prev => [{ id: alertId, sale_id: payload.sale_id!, label }, ...prev]);
+      // Auto-dismiss after 60 s
+      setTimeout(() => setReadyAlerts(prev => prev.filter(a => a.id !== alertId)), 60_000);
+      // Also refresh the card to show 'Ready' badge
+      void load();
+    };
+    s.on('ORDER_STATUS_CHANGED', onStatusChanged);
+    s.on('order_ready', onOrderReady);
+    return () => {
+      s.off('ORDER_STATUS_CHANGED', onStatusChanged);
+      s.off('order_ready', onOrderReady);
+    };
+  }, [sales, load]);
+
 
   const orderLabel = (s: ActiveSale) => {
     const ot = s.order_type || '';
@@ -174,6 +211,33 @@ export default function ActiveDineIn() {
         </div>
       )}
 
+      {/* ORDER READY alerts — sticky top banner */}
+      {readyAlerts.length > 0 && (
+        <div className="mb-4 flex flex-col gap-2 shrink-0">
+          {readyAlerts.map(alert => (
+            <div
+              key={alert.id}
+              className="flex items-center gap-3 px-4 py-3 rounded-xl bg-emerald-600 text-white shadow-lg border border-emerald-400"
+              role="alert"
+            >
+              <Bell className="w-5 h-5 shrink-0 animate-bounce" />
+              <div className="flex-1 min-w-0">
+                <p className="font-bold text-sm">Order Ready — {alert.label}</p>
+                <p className="text-xs text-emerald-100">Kitchen has finished preparing this order.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setReadyAlerts(prev => prev.filter(a => a.id !== alert.id))}
+                className="p-1 rounded-md hover:bg-emerald-500 transition-colors shrink-0"
+                aria-label="Dismiss"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
       {loading && sales.length === 0 ? (
         <div className="flex-1 flex items-center justify-center text-neutral-400 gap-2">
           <Loader2 className="w-5 h-5 animate-spin" /> Loading…
@@ -197,7 +261,20 @@ export default function ActiveDineIn() {
                     <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wide">{orderKindLabel(s)}</p>
                     <p className="text-xl font-bold text-neutral-900">{orderLabel(s)}</p>
                   </div>
-                  <span className="text-xs font-mono text-neutral-400">#{s.id}</span>
+                  <div className="flex flex-col items-end gap-1">
+                    <span className="text-xs font-mono text-neutral-400">#{s.id}</span>
+                    {/* Kitchen status badge */}
+                    {s.kitchen_status === 'ready' && (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
+                        <CheckCircle2 className="w-3 h-3" /> Ready
+                      </span>
+                    )}
+                    {s.kitchen_status === 'preparing' && (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300">
+                        <ChefHat className="w-3 h-3" /> Preparing
+                      </span>
+                    )}
+                  </div>
                 </div>
                 <div className="text-sm text-neutral-600">
                   <span className="text-neutral-500">Subtotal </span>
@@ -274,7 +351,9 @@ export default function ActiveDineIn() {
                   <button
                     type="button"
                     onClick={() => goModify(s)}
-                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl glass-card text-sm font-semibold text-brand-900"
+                    disabled={s.kitchen_status === 'preparing' || s.kitchen_status === 'ready'}
+                    title={s.kitchen_status === 'preparing' || s.kitchen_status === 'ready' ? 'Cannot modify — kitchen is already working on this order' : 'Modify order'}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl glass-card text-sm font-semibold text-brand-900 disabled:opacity-40 disabled:cursor-not-allowed disabled:pointer-events-none"
                   >
                     <Pencil className="w-4 h-4" />
                     Modify

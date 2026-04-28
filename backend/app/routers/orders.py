@@ -20,6 +20,7 @@ from app.services.recipe_variants import (
 from app.services.sync_outbox import enqueue_sync_event
 from app.deps import get_current_user, require_owner
 from app.routers.common import yes
+from app.routers.menu import _normalize_variants_list
 
 orders_router = APIRouter(prefix="/api/orders", tags=["orders"])
 DELIVERY_CHARGE = 300.0
@@ -225,17 +226,7 @@ def _process_modifier_depletions(
 
 
 def _normalize_product_variant_labels(raw: Any) -> list[str]:
-    if not isinstance(raw, list):
-        return []
-    out: list[str] = []
-    seen: set[str] = set()
-    for x in raw:
-        if isinstance(x, str):
-            v = x.strip()
-            if v and v not in seen:
-                seen.add(v)
-                out.append(v)
-    return out
+    return _normalize_variants_list(raw)
 
 
 def _deduct_recipe_for_product(

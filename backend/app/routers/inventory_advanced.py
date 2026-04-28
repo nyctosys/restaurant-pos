@@ -47,31 +47,117 @@ def _resolve_inventory_branch(branch_id: int | None, current_user: User) -> int:
     return resolve_terminal_branch_id(current_user)
 
 
+def _ingredient_to_dict(ingredient: Ingredient, branch_id: int) -> dict[str, Any]:
+    unit_raw = ingredient.unit or ""
+    unit = unit_raw.value if hasattr(unit_raw, "value") else unit_raw
+    brand_name = getattr(ingredient, "brand_name", None)
+    return {
+        "id": ingredient.id,
+        "name": ingredient.name,
+        "sku": ingredient.sku,
+        "unit": unit,
+        "unitOfMeasure": unit,
+        "brand_name": brand_name,
+        "brandName": brand_name,
+        "current_stock": get_branch_stock(ingredient.id, branch_id),
+        "minimum_stock": ingredient.minimum_stock,
+        "reorder_quantity": ingredient.reorder_quantity,
+        "last_purchase_price": ingredient.last_purchase_price,
+        "average_cost": ingredient.average_cost,
+        "purchase_unit": getattr(ingredient, "purchase_unit", None),
+        "conversion_factor": float(getattr(ingredient, "conversion_factor", 1.0) or 1.0),
+        "preferred_supplier_id": ingredient.preferred_supplier_id,
+        "category": ingredient.category,
+        "notes": ingredient.notes,
+        "branch_id": branch_id,
+    }
+
+
+def _supplier_to_dict(supplier: Supplier, linked_materials: list[Ingredient]) -> dict[str, Any]:
+    linked = [
+        {
+            "id": ingredient.id,
+            "name": ingredient.name,
+            "sku": ingredient.sku,
+            "brand_name": getattr(ingredient, "brand_name", None),
+            "brandName": getattr(ingredient, "brand_name", None),
+            "unit": ingredient.unit or "",
+            "unitOfMeasure": ingredient.unit or "",
+        }
+        for ingredient in linked_materials
+    ]
+    return {
+        "id": supplier.id,
+        "name": supplier.name,
+        "sku": supplier.sku,
+        "contact_person": supplier.contact_person,
+        "phone": supplier.phone,
+        "email": supplier.email,
+        "address": supplier.address,
+        "notes": supplier.notes,
+        "linked_material_ids": [ingredient["id"] for ingredient in linked],
+        "linked_materials": linked,
+    }
+
+
+def _apply_supplier_material_links(supplier: Supplier, linked_material_ids: list[int] | None) -> None:
+    if linked_material_ids is None:
+        return
+
+    ingredient_rows = (
+        Ingredient.query.filter(Ingredient.id.in_(linked_material_ids)).all()
+        if linked_material_ids
+        else []
+    )
+    found_ids = {int(ingredient.id) for ingredient in ingredient_rows}
+    missing_ids = sorted(material_id for material_id in linked_material_ids if material_id not in found_ids)
+    if missing_ids:
+        raise ValueError(f"Material not found: {missing_ids[0]}")
+
+    Ingredient.query.filter_by(preferred_supplier_id=supplier.id).filter(~Ingredient.id.in_(found_ids or [-1])).update(
+        {"preferred_supplier_id": None},
+        synchronize_session=False,
+    )
+    for ingredient in ingredient_rows:
+        ingredient.preferred_supplier_id = supplier.id
+
+
 # --- Suppliers ---
 
 @inventory_advanced_router.get("/suppliers")
 def list_suppliers(current_user: User = Depends(get_current_user)):
     suppliers = Supplier.query.filter_by(is_active=True).all()
-    return {"suppliers": [{
-        "id": s.id, "name": s.name, "sku": s.sku, "contact_person": s.contact_person,
-        "phone": s.phone, "email": s.email, "address": s.address, 
-        "notes": s.notes
-    } for s in suppliers]}
+    supplier_ids = [supplier.id for supplier in suppliers]
+    linked_by_supplier: dict[int, list[Ingredient]] = {supplier_id: [] for supplier_id in supplier_ids}
+    if supplier_ids:
+        linked_rows = Ingredient.query.filter(Ingredient.preferred_supplier_id.in_(supplier_ids)).order_by(Ingredient.name.asc()).all()
+        for ingredient in linked_rows:
+            supplier_id = int(ingredient.preferred_supplier_id or 0)
+            linked_by_supplier.setdefault(supplier_id, []).append(ingredient)
+    return {"suppliers": [_supplier_to_dict(supplier, linked_by_supplier.get(supplier.id, [])) for supplier in suppliers]}
 
 @inventory_advanced_router.post("/suppliers")
 def create_supplier(payload: SupplierCreate, current_user: User = Depends(get_current_user)):
     data = payload.model_dump()
+    linked_material_ids = data.pop("linked_material_ids", None)
     sku = (data.get("sku") or "").strip() or None
     if sku and Supplier.query.filter_by(sku=sku).first():
         return JSONResponse(status_code=409, content={"message": "Supplier with this SKU already exists"})
     data["sku"] = sku
-    s = Supplier(**data)
-    db.session.add(s)
-    db.session.commit()
-    return {"id": s.id, "message": "Supplier created"}
+    try:
+        s = Supplier(**data)
+        db.session.add(s)
+        db.session.flush()
+        _apply_supplier_material_links(s, linked_material_ids)
+        db.session.commit()
+    except ValueError as exc:
+        db.session.rollback()
+        return JSONResponse(status_code=404, content={"message": str(exc)})
+    return {"id": s.id, "message": "Supplier created", "supplier": _supplier_to_dict(s, list(s.ingredients))}
 
 
 @inventory_advanced_router.put("/suppliers/{supplier_id}")
+@inventory_advanced_router.patch("/suppliers/{supplier_id}")
 def update_supplier(
     supplier_id: int,
     payload: SupplierUpdate,
@@ -82,6 +168,7 @@ def update_supplier(
         return JSONResponse(status_code=404, content={"message": "Not found"})
 
     data = payload.model_dump(exclude_unset=True)
+    linked_material_ids = data.pop("linked_material_ids", None)
     if "sku" in data:
         sku = (data.get("sku") or "").strip() or None
         existing = Supplier.query.filter_by(sku=sku).first() if sku else None
@@ -89,11 +176,15 @@ def update_supplier(
             return JSONResponse(status_code=409, content={"message": "Supplier with this SKU already exists"})
         data["sku"] = sku
 
-    for key, value in data.items():
-        setattr(supplier, key, value)
-
-    db.session.commit()
-    return {"message": "Supplier updated"}
+    try:
+        for key, value in data.items():
+            setattr(supplier, key, value)
+        _apply_supplier_material_links(supplier, linked_material_ids)
+        db.session.commit()
+    except ValueError as exc:
+        db.session.rollback()
+        return JSONResponse(status_code=404, content={"message": str(exc)})
+    return {"message": "Supplier updated", "supplier": _supplier_to_dict(supplier, list(supplier.ingredients))}
 
 
 # --- Ingredients ---
@@ -107,22 +198,7 @@ def list_ingredients(
     ingredients = Ingredient.query.filter_by(is_active=True).all()
     return {
         "ingredients": [
-            {
-                "id": i.id,
-                "name": i.name,
-                "sku": i.sku,
-                "unit": i.unit.value if hasattr(i.unit, "value") else i.unit,
-                "purchase_unit": i.purchase_unit,
-                "conversion_factor": i.conversion_factor,
-                "current_stock": get_branch_stock(i.id, bid),
-                "minimum_stock": i.minimum_stock,
-                "reorder_quantity": i.reorder_quantity,
-                "last_purchase_price": i.last_purchase_price,
-                "average_cost": i.average_cost,
-                "preferred_supplier_id": i.preferred_supplier_id,
-                "category": i.category,
-                "branch_id": bid,
-            }
+            _ingredient_to_dict(i, bid)
             for i in ingredients
         ]
     }
@@ -131,6 +207,8 @@ def list_ingredients(
 @inventory_advanced_router.post("/ingredients")
 def create_ingredient(payload: IngredientCreate, current_user: User = Depends(get_current_user)):
     data = payload.model_dump()
+    data.pop("brand_name", None)
+    data.pop("brandName", None)
     i = Ingredient(**data)
     db.session.add(i)
     db.session.flush()
@@ -145,6 +223,8 @@ def create_ingredients_bulk(payload: IngredientBulkCreate, current_user: User = 
     results = []
     for ing_data in payload.ingredients:
         data = ing_data.model_dump()
+        data.pop("brand_name", None)
+        data.pop("brandName", None)
         i = Ingredient(**data)
         db.session.add(i)
         db.session.flush()
@@ -163,6 +243,8 @@ def update_ingredient(ingredient_id: int, payload: IngredientUpdate, current_use
         return JSONResponse(status_code=404, content={"message": "Not found"})
     data = payload.model_dump(exclude_unset=True)
     data.pop("current_stock", None)
+    data.pop("brand_name", None)
+    data.pop("brandName", None)
     for k, v in data.items():
         setattr(i, k, v)
     db.session.commit()
@@ -201,6 +283,14 @@ def _replace_prepared_components(item: PreparedItem, components: list[Any]) -> N
     db.session.flush()
     for component in components:
         data = component.model_dump() if hasattr(component, "model_dump") else dict(component)
+        ingredient = db.session.get(Ingredient, int(data.get("ingredient_id", 0)))
+        if ingredient is None:
+            raise ValueError(f"Ingredient not found: {data.get('ingredient_id')}")
+        ingredient_unit = ingredient.unit.value if hasattr(ingredient.unit, "value") else str(ingredient.unit or "")
+        if str(data.get("unit", "")).strip().lower() != ingredient_unit:
+            raise ValueError(
+                f"Unit mismatch for ingredient '{ingredient.name}': expected '{ingredient_unit}'"
+            )
         item.components.append(PreparedItemComponent(**data))
 
 
@@ -225,7 +315,11 @@ def create_prepared_item(payload: PreparedItemCreate, current_user: User = Depen
     item = PreparedItem(**data)
     db.session.add(item)
     db.session.flush()
-    _replace_prepared_components(item, components)
+    try:
+        _replace_prepared_components(item, components)
+    except ValueError as exc:
+        db.session.rollback()
+        return JSONResponse(status_code=400, content={"message": str(exc)})
     seed_prepared_branch_stocks_for_new_item(item.id, 0.0)
     db.session.commit()
     return {"id": item.id, "message": "Prepared sauce/marination created"}
@@ -251,7 +345,11 @@ def update_prepared_item(
     for key, value in data.items():
         setattr(item, key, value)
     if components is not None:
-        _replace_prepared_components(item, components)
+        try:
+            _replace_prepared_components(item, components)
+        except ValueError as exc:
+            db.session.rollback()
+            return JSONResponse(status_code=400, content={"message": str(exc)})
     db.session.commit()
     return {"message": "Prepared sauce/marination updated"}
 
@@ -327,7 +425,13 @@ def get_recipe(product_id: int, current_user: User = Depends(get_current_user)):
     prepared_items = RecipePreparedItem.query.filter_by(product_id=product_id).all()
     return {"recipe_items": [{
         "id": r.id, "ingredient_id": r.ingredient_id,
-        "quantity": r.quantity, "unit": r.unit.value if hasattr(r.unit, 'value') else r.unit, "notes": r.notes,
+        "ingredient_name": r.ingredient.name if r.ingredient else None,
+        "brand_name": getattr(r.ingredient, "brand_name", None) if r.ingredient else None,
+        "brandName": getattr(r.ingredient, "brand_name", None) if r.ingredient else None,
+        "quantity": r.quantity,
+        "unit": r.unit.value if hasattr(r.unit, "value") else r.unit,
+        "unitOfMeasure": r.unit.value if hasattr(r.unit, "value") else r.unit,
+        "notes": r.notes,
         "variant_key": getattr(r, "variant_key", None) or "",
     } for r in items], "recipe_prepared_items": [{
         "id": r.id, "prepared_item_id": r.prepared_item_id,
@@ -338,6 +442,15 @@ def get_recipe(product_id: int, current_user: User = Depends(get_current_user)):
 @inventory_advanced_router.post("/recipes")
 def add_recipe_item(payload: RecipeItemCreate, current_user: User = Depends(get_current_user)):
     data = payload.model_dump()
+    ingredient = db.session.get(Ingredient, int(data.get("ingredient_id", 0)))
+    if ingredient is None:
+        return JSONResponse(status_code=404, content={"message": "Ingredient not found"})
+    ingredient_unit = ingredient.unit.value if hasattr(ingredient.unit, "value") else str(ingredient.unit or "")
+    if str(data.get("unit", "")).strip().lower() != ingredient_unit:
+        return JSONResponse(
+            status_code=400,
+            content={"message": f"Unit mismatch for ingredient '{ingredient.name}': expected '{ingredient_unit}'"},
+        )
     if "variant_key" not in data or data.get("variant_key") is None:
         data["variant_key"] = ""
     else:
@@ -359,6 +472,15 @@ def delete_recipe_item(recipe_item_id: int, current_user: User = Depends(get_cur
 @inventory_advanced_router.post("/recipes/prepared-items")
 def add_recipe_prepared_item(payload: RecipePreparedItemCreate, current_user: User = Depends(get_current_user)):
     data = payload.model_dump()
+    prepared_item = db.session.get(PreparedItem, int(data.get("prepared_item_id", 0)))
+    if prepared_item is None:
+        return JSONResponse(status_code=404, content={"message": "Prepared item not found"})
+    prepared_unit = prepared_item.unit.value if hasattr(prepared_item.unit, "value") else str(prepared_item.unit or "")
+    if str(data.get("unit", "")).strip().lower() != prepared_unit:
+        return JSONResponse(
+            status_code=400,
+            content={"message": f"Unit mismatch for prepared item '{prepared_item.name}': expected '{prepared_unit}'"},
+        )
     data["variant_key"] = str(data.get("variant_key") or "").strip()[:100]
     r = RecipePreparedItem(**data)
     db.session.add(r)

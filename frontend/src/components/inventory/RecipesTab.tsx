@@ -431,13 +431,14 @@ export default function RecipesTab() {
                       <SearchableSelect
                         value={formIngredientId}
                         onChange={setFormIngredientId}
-                        placeholder="— Select —"
-                        searchPlaceholder="Search ingredients…"
+                        placeholder="Select ingredient"
+                        searchPlaceholder="Search ingredients..."
                         options={ingredients.map((ingredient) => ({
                           value: String(ingredient.id),
                           label: `${ingredient.name} (${ingredient.unit})`,
                           searchText: ingredient.name,
                         }))}
+                        disabled={formMaterialType !== 'ingredient'}
                         className="glass-card border-0 px-3 py-2"
                       />
                     </div>

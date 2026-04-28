@@ -19,11 +19,19 @@ def _normalize_variants_list(raw: Any) -> list[str]:
     out: list[str] = []
     seen: set[str] = set()
     for x in raw:
+        value = ""
         if isinstance(x, str):
-            v = x.strip()
-            if v and v not in seen:
-                seen.add(v)
-                out.append(v)
+            value = x
+        elif isinstance(x, dict):
+            for key in ("label", "value", "name", "title"):
+                candidate = x.get(key)
+                if isinstance(candidate, str) and candidate.strip():
+                    value = candidate
+                    break
+        v = value.strip()
+        if v and v not in seen:
+            seen.add(v)
+            out.append(v)
     return out
 
 

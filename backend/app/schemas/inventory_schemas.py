@@ -1,7 +1,32 @@
 from __future__ import annotations
 from datetime import datetime
 from typing import Literal
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
+from app.models import UnitOfMeasure
+
+
+def _clean_optional_text(value: str | None) -> str | None:
+    if value is None:
+        return None
+    cleaned = str(value).strip()
+    return cleaned or None
+
+
+def _clean_required_text(value: str) -> str:
+    cleaned = str(value or "").strip()
+    if not cleaned:
+        raise ValueError("This field is required.")
+    return cleaned
+
+
+_UNIT_VALUES = {unit.value for unit in UnitOfMeasure}
+
+
+def _normalize_unit(value: str) -> str:
+    normalized = _clean_required_text(value).lower()
+    if normalized not in _UNIT_VALUES:
+        raise ValueError(f"Invalid unit '{normalized}'. Allowed: {', '.join(sorted(_UNIT_VALUES))}")
+    return normalized
 
 class SupplierBase(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -13,12 +38,41 @@ class SupplierBase(BaseModel):
     address: str | None = None
     notes: str | None = None
     is_active: bool = True
+    linked_material_ids: list[int] | None = None
+
+    _normalize_name = field_validator("name")(lambda cls, value: _clean_required_text(value))
+    _normalize_sku = field_validator("sku")(lambda cls, value: _clean_optional_text(value))
+    _normalize_contact_person = field_validator("contact_person")(lambda cls, value: _clean_optional_text(value))
+    _normalize_phone = field_validator("phone")(lambda cls, value: _clean_optional_text(value))
+    _normalize_email = field_validator("email")(lambda cls, value: _clean_optional_text(value))
+    _normalize_address = field_validator("address")(lambda cls, value: _clean_optional_text(value))
+    _normalize_notes = field_validator("notes")(lambda cls, value: _clean_optional_text(value))
+
+    @field_validator("linked_material_ids")
+    @classmethod
+    def validate_linked_material_ids(cls, value: list[int] | None) -> list[int] | None:
+        if value is None:
+            return None
+        normalized: list[int] = []
+        seen: set[int] = set()
+        for raw in value:
+            item_id = int(raw)
+            if item_id <= 0 or item_id in seen:
+                continue
+            seen.add(item_id)
+            normalized.append(item_id)
+        return normalized
 
 class SupplierCreate(SupplierBase):
     pass
 
 class SupplierUpdate(SupplierBase):
     name: str | None = None
+
+    @field_validator("name")
+    @classmethod
+    def normalize_optional_name(cls, value: str | None) -> str | None:
+        return _clean_optional_text(value)
 
 class SupplierResponse(SupplierBase):
     id: int
@@ -30,9 +84,17 @@ class IngredientBase(BaseModel):
     model_config = ConfigDict(extra="ignore")
     name: str
     sku: str | None = None
-    unit: str
+    unit: str = Field(
+        validation_alias=AliasChoices("unit", "unitOfMeasure"),
+        serialization_alias="unitOfMeasure",
+    )
     purchase_unit: str | None = None
     conversion_factor: float = 1.0
+    brand_name: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("brand_name", "brandName"),
+        serialization_alias="brandName",
+    )
     current_stock: float = 0.0
     minimum_stock: float = 0.0
     reorder_quantity: float = 0.0
@@ -42,6 +104,14 @@ class IngredientBase(BaseModel):
     category: str | None = None
     notes: str | None = None
     is_active: bool = True
+
+    _normalize_name = field_validator("name")(lambda cls, value: _clean_required_text(value))
+    _normalize_sku = field_validator("sku")(lambda cls, value: _clean_optional_text(value))
+    _normalize_unit = field_validator("unit")(lambda cls, value: _normalize_unit(value))
+    _normalize_purchase_unit = field_validator("purchase_unit")(lambda cls, value: _clean_optional_text(value))
+    _normalize_brand = field_validator("brand_name")(lambda cls, value: _clean_optional_text(value))
+    _normalize_category = field_validator("category")(lambda cls, value: _clean_optional_text(value))
+    _normalize_notes = field_validator("notes")(lambda cls, value: _clean_optional_text(value))
 
 class IngredientCreate(IngredientBase):
     pass
@@ -54,6 +124,16 @@ class IngredientUpdate(IngredientBase):
     name: str | None = None
     unit: str | None = None
 
+    @field_validator("name")
+    @classmethod
+    def normalize_optional_name(cls, value: str | None) -> str | None:
+        return _clean_optional_text(value)
+
+    @field_validator("unit")
+    @classmethod
+    def normalize_optional_unit(cls, value: str | None) -> str | None:
+        return _clean_optional_text(value.lower() if isinstance(value, str) else value)
+
 class IngredientResponse(IngredientBase):
     id: int
     created_at: datetime
@@ -64,9 +144,16 @@ class RecipeItemBase(BaseModel):
     model_config = ConfigDict(extra="ignore")
     ingredient_id: int
     quantity: float
-    unit: str
+    unit: str = Field(
+        validation_alias=AliasChoices("unit", "unitOfMeasure"),
+        serialization_alias="unitOfMeasure",
+    )
     notes: str | None = None
     variant_key: str = ""
+
+    _normalize_unit = field_validator("unit")(lambda cls, value: _normalize_unit(value))
+    _normalize_notes = field_validator("notes")(lambda cls, value: _clean_optional_text(value))
+    _normalize_variant_key = field_validator("variant_key")(lambda cls, value: str(value or "").strip())
 
 class RecipeItemCreate(RecipeItemBase):
     product_id: int
@@ -84,6 +171,9 @@ class PreparedItemComponentBase(BaseModel):
     unit: str
     notes: str | None = None
 
+    _normalize_unit = field_validator("unit")(lambda cls, value: _normalize_unit(value))
+    _normalize_notes = field_validator("notes")(lambda cls, value: _clean_optional_text(value))
+
 
 class PreparedItemCreate(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -93,6 +183,11 @@ class PreparedItemCreate(BaseModel):
     unit: str
     notes: str | None = None
     components: list[PreparedItemComponentBase] = Field(default_factory=list)
+
+    _normalize_name = field_validator("name")(lambda cls, value: _clean_required_text(value))
+    _normalize_sku = field_validator("sku")(lambda cls, value: _clean_optional_text(value))
+    _normalize_unit = field_validator("unit")(lambda cls, value: _normalize_unit(value))
+    _normalize_notes = field_validator("notes")(lambda cls, value: _clean_optional_text(value))
 
 
 class PreparedItemUpdate(BaseModel):
@@ -104,6 +199,28 @@ class PreparedItemUpdate(BaseModel):
     notes: str | None = None
     is_active: bool | None = None
     components: list[PreparedItemComponentBase] | None = None
+
+    @field_validator("name")
+    @classmethod
+    def normalize_optional_name(cls, value: str | None) -> str | None:
+        return _clean_optional_text(value)
+
+    @field_validator("sku")
+    @classmethod
+    def normalize_optional_sku(cls, value: str | None) -> str | None:
+        return _clean_optional_text(value)
+
+    @field_validator("unit")
+    @classmethod
+    def normalize_optional_unit(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return _normalize_unit(value)
+
+    @field_validator("notes")
+    @classmethod
+    def normalize_optional_notes(cls, value: str | None) -> str | None:
+        return _clean_optional_text(value)
 
 
 class PreparedItemBatchCreate(BaseModel):
@@ -121,6 +238,10 @@ class RecipePreparedItemBase(BaseModel):
     notes: str | None = None
     variant_key: str = ""
 
+    _normalize_unit = field_validator("unit")(lambda cls, value: _normalize_unit(value))
+    _normalize_notes = field_validator("notes")(lambda cls, value: _clean_optional_text(value))
+    _normalize_variant_key = field_validator("variant_key")(lambda cls, value: str(value or "").strip())
+
 
 class RecipePreparedItemCreate(RecipePreparedItemBase):
     product_id: int
@@ -131,8 +252,14 @@ class PurchaseOrderItemBase(BaseModel):
     ingredient_id: int
     quantity_ordered: float
     unit_price: float
-    unit: str
+    unit: str = Field(
+        validation_alias=AliasChoices("unit", "unitOfMeasure"),
+        serialization_alias="unitOfMeasure",
+    )
     notes: str | None = None
+
+    _normalize_unit = field_validator("unit")(lambda cls, value: _normalize_unit(value))
+    _normalize_notes = field_validator("notes")(lambda cls, value: _clean_optional_text(value))
 
 class PurchaseOrderCreate(BaseModel):
     model_config = ConfigDict(extra="ignore")

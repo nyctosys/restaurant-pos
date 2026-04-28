@@ -249,3 +249,64 @@ def test_recipe_can_deduct_prepared_sauce_on_sale(client, app):
     prepared_items = client.get("/api/inventory-advanced/prepared-items", headers=h).get_json()["prepared_items"]
     hot_sauce = next(i for i in prepared_items if i["id"] == prepared_id)
     assert hot_sauce["current_stock"] == pytest.approx(1.4)
+
+
+def test_recipe_rejects_ingredient_unit_mismatch(client, app):
+    h = _auth_headers(client, app)
+    r_product = client.post("/api/menu-items/", headers=h, json={
+        "sku": "PROD-UNIT-M1",
+        "title": "Unit Test Item",
+        "base_price": 100,
+        "section": "Mains",
+    })
+    assert r_product.status_code == 201
+    product_id = r_product.get_json()["id"]
+    r_ing = client.post("/api/inventory-advanced/ingredients", headers=h, json={
+        "name": "Milk",
+        "sku": "ING-MILK",
+        "unit": "ml",
+    })
+    ing_id = r_ing.get_json()["id"]
+    r_map = client.post("/api/inventory-advanced/recipes", headers=h, json={
+        "product_id": product_id,
+        "ingredient_id": ing_id,
+        "quantity": 50,
+        "unit": "kg",
+    })
+    assert r_map.status_code == 400
+    assert "Unit mismatch" in (r_map.get_json().get("message") or "")
+
+
+def test_recipe_rejects_prepared_item_unit_mismatch(client, app):
+    h = _auth_headers(client, app)
+    r_product = client.post("/api/menu-items/", headers=h, json={
+        "sku": "PROD-UNIT-M2",
+        "title": "Unit Test Sauce Item",
+        "base_price": 100,
+        "section": "Mains",
+    })
+    assert r_product.status_code == 201
+    product_id = r_product.get_json()["id"]
+    r_ing = client.post("/api/inventory-advanced/ingredients", headers=h, json={
+        "name": "Water",
+        "sku": "ING-WATER-U",
+        "unit": "l",
+    })
+    ing_id = r_ing.get_json()["id"]
+    r_prepared = client.post("/api/inventory-advanced/prepared-items", headers=h, json={
+        "name": "White Sauce",
+        "sku": "SAUCE-WHITE-U",
+        "kind": "sauce",
+        "unit": "l",
+        "components": [{"ingredient_id": ing_id, "quantity": 0.1, "unit": "l"}],
+    })
+    assert r_prepared.status_code == 200
+    prepared_id = r_prepared.get_json()["id"]
+    r_map = client.post("/api/inventory-advanced/recipes/prepared-items", headers=h, json={
+        "product_id": product_id,
+        "prepared_item_id": prepared_id,
+        "quantity": 0.05,
+        "unit": "kg",
+    })
+    assert r_map.status_code == 400
+    assert "Unit mismatch" in (r_map.get_json().get("message") or "")
