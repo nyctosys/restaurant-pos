@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import logging
 import time
 import uuid
@@ -18,7 +19,7 @@ from app.error_contract import internal_server_error_body, normalize_error_body,
 from app.logging_config import setup_logging
 from app.realtime import scanner_hub
 from app.request_context import set_request_id
-from app.socketio_server import asgi_app as socketio_asgi_app
+from app.socketio_server import asgi_app as socketio_asgi_app, capture_main_loop
 from app.routers import (
     auth_router,
     branches_router,
@@ -102,7 +103,14 @@ class RequestContextDBMiddleware:
             set_request_id(None)
 
 
-app = FastAPI(title="Stalls POS API")
+@contextlib.asynccontextmanager
+async def _lifespan(app: FastAPI):  # type: ignore[type-arg]
+    # Capture the main event loop so sync route threads can schedule socket emits.
+    capture_main_loop()
+    yield
+
+
+app = FastAPI(title="Stalls POS API", lifespan=_lifespan)
 # Bearer auth uses Authorization header; cookies are not required. allow_credentials=True
 # with allow_origins=["*"] is invalid per CORS and browsers reject (Safari: "access control checks").
 app.add_middleware(

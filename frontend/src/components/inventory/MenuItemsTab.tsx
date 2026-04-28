@@ -1,3 +1,4 @@
+import { formatQuantityWithUnit } from '../../utils/formatQuantityWithUnit';
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Plus, X, Loader2, Trash2, ScanBarcode, Upload, Archive, ArchiveRestore, Pencil, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 import BarcodeModal from '../BarcodeModal';
@@ -8,6 +9,7 @@ import { useScanner } from '../../hooks/useScanner';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { get, post, put, patch, del, getUserMessage } from '../../api';
 import { getTerminalBranchIdString, parseUserFromStorage } from '../../utils/branchContext';
+import { generateAutoSku } from '../../utils/sku';
 
 type Product = {
   id: number;
@@ -18,6 +20,7 @@ type Product = {
   variants: string[];
   image_url?: string;
   archived_at?: string | null;
+  unitOfMeasure?: string;
 };
 
 type SortKey = 'sku' | 'title' | 'section' | 'base_price' | 'archived_at';
@@ -42,6 +45,8 @@ export default function MenuItemsTab() {
   const [formPrice, setFormPrice] = useState('');
   const [formSection, setFormSection] = useState('');
   const [formImageUrl, setFormImageUrl] = useState('');
+  const [formUnit, setFormUnit] = useState('');
+  const [formSkuTouched, setFormSkuTouched] = useState(false);
   const [formVariants, setFormVariants] = useState<string[]>([]);
   const [formNewVariant, setFormNewVariant] = useState('');
   const [formError, setFormError] = useState('');
@@ -51,14 +56,14 @@ export default function MenuItemsTab() {
     void fetchData();
   }, [includeArchived]);
 
-  const fetchData = async () => {
+  const fetchData = async (forceRefresh = false) => {
     setLoading(true);
     const activeBranchId = getTerminalBranchIdString(parseUserFromStorage());
     const settingsQuery = activeBranchId ? `/settings/?branch_id=${activeBranchId}` : '/settings/';
     const productQuery = includeArchived ? '/menu-items/?include_archived=1' : '/menu-items/';
     try {
       const [prodData, settingsData] = await Promise.all([
-        get<{ products?: Product[] }>(productQuery),
+        get<{ products?: Product[] }>(productQuery, forceRefresh ? { forceRefresh: true } : undefined),
         get<{ config?: { sections?: string[] } }>(settingsQuery),
       ]);
       const productsList = prodData?.products ?? [];
@@ -82,6 +87,8 @@ export default function MenuItemsTab() {
     setFormPrice('');
     setFormSection('');
     setFormImageUrl('');
+    setFormUnit('');
+    setFormSkuTouched(false);
     setFormVariants([]);
     setFormNewVariant('');
     setFormError('');
@@ -96,10 +103,12 @@ export default function MenuItemsTab() {
   const handleOpenEditModal = useCallback((p: Product) => {
     setEditingProduct(p);
     setFormSku(p.sku);
+    setFormSkuTouched(true);
     setFormTitle(p.title);
     setFormPrice(p.base_price.toString());
     setFormSection(p.section || '');
     setFormImageUrl(p.image_url || '');
+    setFormUnit(p.unitOfMeasure || '');
     setFormVariants(Array.isArray(p.variants) ? [...p.variants] : []);
     setFormNewVariant('');
     setFormError('');
@@ -117,6 +126,15 @@ export default function MenuItemsTab() {
       clearBarcode();
     }
   }, [addViaScanner, lastScannedBarcode, products, clearBarcode, handleOpenEditModal]);
+
+  // Auto-generate SKU from title for new items (only when SKU hasn't been manually touched)
+  useEffect(() => {
+    if (editingProduct || formSkuTouched) return;
+    if (!formTitle.trim()) { setFormSku(''); return; }
+    const prefix = formSection ? formSection.substring(0, 3).toUpperCase() : 'MNU';
+    const next = generateAutoSku(prefix, formTitle, products.map(p => p.sku));
+    setFormSku(next);
+  }, [editingProduct, formTitle, formSection, formSkuTouched, products]);
 
   const handleSectionChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const section = e.target.value;
@@ -164,6 +182,7 @@ export default function MenuItemsTab() {
         section: formSection,
         variants: formVariants,
         image_url: formImageUrl.trim() || '',
+        unitOfMeasure: formUnit.trim() || '',
       };
       if (editingProduct) {
         await put(`/menu-items/${editingProduct.id}`, body);
@@ -171,7 +190,7 @@ export default function MenuItemsTab() {
         await post('/menu-items/', body);
       }
       setShowModal(false);
-      await fetchData();
+      await fetchData(true);
     } catch (e) {
       setFormError(getUserMessage(e));
     } finally {
@@ -183,7 +202,7 @@ export default function MenuItemsTab() {
     try {
       await patch(`/menu-items/${p.id}/archive`, null);
       showToast('Menu item archived', 'success');
-      await fetchData();
+      await fetchData(true);
     } catch (e) {
       showToast(getUserMessage(e), 'error');
     }
@@ -193,7 +212,7 @@ export default function MenuItemsTab() {
     try {
       await patch(`/menu-items/${p.id}/unarchive`, null);
       showToast('Menu item restored', 'success');
-      await fetchData();
+      await fetchData(true);
     } catch (e) {
       showToast(getUserMessage(e), 'error');
     }
@@ -214,7 +233,7 @@ export default function MenuItemsTab() {
     try {
       await del(`/menu-items/${p.id}`);
       showToast('Menu item deleted permanently', 'success');
-      await fetchData();
+      await fetchData(true);
     } catch (e) {
       showToast(getUserMessage(e), 'error');
     }
@@ -392,6 +411,9 @@ export default function MenuItemsTab() {
                       {renderSortIcon('base_price')}
                     </button>
                   </th>
+                  <th className="sticky top-0 z-10 bg-white/90 backdrop-blur-md py-3 px-3 lg:px-4 xl:py-2 xl:text-xs text-left text-soot-500 font-semibold">
+                    Unit
+                  </th>
                   <th
                     aria-sort={sortKey === 'archived_at' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}
                     className="sticky top-0 z-10 bg-white/90 backdrop-blur-md py-3 px-3 lg:px-4 xl:py-2 xl:text-xs text-right"
@@ -426,7 +448,18 @@ export default function MenuItemsTab() {
                         <span className="text-soot-300 text-sm">—</span>
                       )}
                     </td>
-                    <td className="py-3 px-3 lg:px-4 xl:py-2 font-semibold text-sm xl:text-xs">{formatCurrency(p.base_price)}</td>
+                    <td className="py-3 px-3 lg:px-4 xl:py-2 font-semibold text-sm xl:text-xs">
+                      {formatCurrency(p.base_price)}
+                    </td>
+                    <td className="py-3 px-3 lg:px-4 xl:py-2">
+                      {p.unitOfMeasure ? (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-soot-100 text-soot-600 text-xs font-semibold border border-soot-200">
+                          {p.unitOfMeasure}
+                        </span>
+                      ) : (
+                        <span className="text-soot-300 text-xs">—</span>
+                      )}
+                    </td>
                     <td className="py-3 px-3 lg:px-4 xl:py-2 text-right">
                       <div className="flex items-center justify-end gap-0.5 lg:gap-1 flex-wrap">
                         <button
@@ -511,20 +544,6 @@ export default function MenuItemsTab() {
 
               <div>
                 <label className="block text-sm font-medium text-neutral-700 mb-1">
-                  SKU <span className="text-red-400">*</span>
-                </label>
-                <input
-                  type="text"
-                  inputMode="text"
-                  value={formSku}
-                  onChange={e => setFormSku(e.target.value)}
-                  placeholder="e.g. BURGER-001"
-                  className="w-full px-4 py-2.5 glass-card text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-neutral-700 mb-1">
                   Item name <span className="text-red-400">*</span>
                 </label>
                 <input
@@ -539,18 +558,49 @@ export default function MenuItemsTab() {
 
               <div>
                 <label className="block text-sm font-medium text-neutral-700 mb-1">
-                  Base price <span className="text-red-400">*</span>
+                  SKU <span className="text-red-400">*</span>
                 </label>
                 <input
-                  type="number"
-                  inputMode="decimal"
-                  step="0.01"
-                  min="0"
-                  value={formPrice}
-                  onChange={e => setFormPrice(e.target.value)}
-                  placeholder="0.00"
+                  type="text"
+                  inputMode="text"
+                  value={formSku}
+                  onChange={e => { setFormSku(e.target.value); setFormSkuTouched(true); }}
+                  placeholder="Auto-generated from name"
                   className="w-full px-4 py-2.5 glass-card text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none"
                 />
+                <p className="text-xs text-neutral-400 mt-1">Auto-generated. Edit if needed.</p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-neutral-700 mb-1">
+                  Base price <span className="text-red-400">*</span>
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    step="0.01"
+                    min="0"
+                    value={formPrice}
+                    onChange={e => setFormPrice(e.target.value)}
+                    placeholder="0.00"
+                    className="flex-1 px-4 py-2.5 glass-card text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none"
+                  />
+                  <div className="w-1/3">
+                    <select
+                      value={formUnit}
+                      onChange={e => setFormUnit(e.target.value)}
+                      className="w-full h-full px-4 py-2.5 glass-card text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none"
+                    >
+                      <option value="">No unit</option>
+                      <option value="kg">kg</option>
+                      <option value="g">g</option>
+                      <option value="l">l</option>
+                      <option value="ml">ml</option>
+                      <option value="piece">piece</option>
+                    </select>
+                  </div>
+                </div>
               </div>
 
               <div>

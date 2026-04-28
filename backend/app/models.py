@@ -53,6 +53,7 @@ class Product(db.Model):
     created_at = db.Column(db.DateTime(timezone=True), default=utc_now)
     archived_at = db.Column(db.DateTime(timezone=True), nullable=True)
     is_deal = db.Column(db.Boolean, default=False)
+    unit = db.Column(db.String(50), nullable=True)
 
     inventory = db.relationship('Inventory', backref='product', lazy=True)
     sale_items = db.relationship('SaleItem', backref='product', lazy=True)
@@ -162,6 +163,7 @@ class SaleItem(db.Model):
     subtotal = db.Column(db.Numeric(12, 2), nullable=False)
     modifiers = db.Column(db.JSON, nullable=True, default=None)  # e.g. [{"ingredient_id": 1, "name": "Cheese Slice", "qty": 1}]
     parent_sale_item_id = db.Column(db.Integer, db.ForeignKey('sale_items.id'), nullable=True)  # For deal child items
+    inventory_allocations = db.Column(db.JSON, nullable=True, default=None)  # ingredient deduction audit trail for void/restore
 
     children = db.relationship('SaleItem', backref=db.backref('parent', remote_side='SaleItem.id'), lazy=True)
 

@@ -46,38 +46,45 @@ export default function SearchableSelect({
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const [open, setOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [menuStyle, setMenuStyle] = useState<{ top: number; left: number; width: number } | null>(null);
+  const portalRef = useRef<HTMLDivElement | null>(null);
 
-  const filteredOptions = useMemo(() => {
-    const query = searchQuery.toLowerCase().trim();
-    if (!query) return options;
-    return options.filter(option => 
-      option.label.toLowerCase().includes(query) || 
-      option.searchText?.toLowerCase().includes(query)
-    );
-  }, [options, searchQuery]);
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [menuStyle, setMenuStyle] = useState<{ top: number; left: number; width: number; openUp: boolean } | null>(
+    null
+  );
 
   const sortedOptions = useMemo(
     () =>
-      [...filteredOptions].sort((left, right) =>
+      [...options].sort((left, right) =>
         left.label.localeCompare(right.label, undefined, { numeric: true, sensitivity: 'base' })
       ),
-    [filteredOptions]
+    [options]
   );
 
-  const selectedOption = options.find((option) => option.value === value);
+  const filteredOptions = useMemo(() => {
+    const trimmed = query.toLowerCase().trim();
+    if (!trimmed) return sortedOptions;
+    return sortedOptions.filter(
+      option =>
+        option.label.toLowerCase().includes(trimmed) ||
+        (option.searchText ?? '').toLowerCase().includes(trimmed)
+    );
+  }, [query, sortedOptions]);
+
+  const selectedOption = sortedOptions.find(option => option.value === value);
 
   useEffect(() => {
     if (!open) {
-      setSearchQuery('');
+      setQuery('');
       return;
     }
 
     const handlePointerDown = (event: MouseEvent) => {
-      if (!rootRef.current?.contains(event.target as Node) && 
-          !(event.target as HTMLElement).closest('.searchable-select-dropdown')) {
+      const target = event.target as Node;
+      const insideRoot = rootRef.current?.contains(target) ?? false;
+      const insidePortal = portalRef.current?.contains(target) ?? false;
+      if (!insideRoot && !insidePortal) {
         setOpen(false);
       }
     };
@@ -91,12 +98,12 @@ export default function SearchableSelect({
     document.addEventListener('mousedown', handlePointerDown);
     document.addEventListener('keydown', handleEscape);
 
-    // Focus search input when opened
-    setTimeout(() => {
-        searchInputRef.current?.focus();
+    const timer = window.setTimeout(() => {
+      searchInputRef.current?.focus();
     }, 50);
 
     return () => {
+      window.clearTimeout(timer);
       document.removeEventListener('mousedown', handlePointerDown);
       document.removeEventListener('keydown', handleEscape);
     };
@@ -109,25 +116,18 @@ export default function SearchableSelect({
       const trigger = triggerRef.current;
       if (!trigger) return;
       const rect = trigger.getBoundingClientRect();
-      
-      // Determine if it should open upwards or downwards
+
       const spaceBelow = window.innerHeight - rect.bottom;
       const spaceAbove = rect.top;
-      const menuHeight = 320; // estimate
+      const menuHeight = 320;
+      const openUp = spaceBelow < menuHeight && spaceAbove > spaceBelow;
 
-      if (spaceBelow < menuHeight && spaceAbove > spaceBelow) {
-          setMenuStyle({
-            top: rect.top - 8, // logic to handle transform-translate-y would be better
-            left: rect.left,
-            width: rect.width,
-          });
-      } else {
-          setMenuStyle({
-            top: rect.bottom + 8,
-            left: rect.left,
-            width: rect.width,
-          });
-      }
+      setMenuStyle({
+        top: openUp ? rect.top - 8 : rect.bottom + 8,
+        left: rect.left,
+        width: rect.width,
+        openUp,
+      });
     };
 
     updateMenuPosition();
@@ -145,7 +145,7 @@ export default function SearchableSelect({
     if (disabled) return;
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
-      setOpen((current) => !current);
+      setOpen(current => !current);
     }
     if (event.key === 'ArrowDown') {
       event.preventDefault();
@@ -159,7 +159,7 @@ export default function SearchableSelect({
         ref={triggerRef}
         type="button"
         disabled={disabled}
-        onClick={() => setOpen((current) => !current)}
+        onClick={() => setOpen(current => !current)}
         onKeyDown={handleTriggerKeyDown}
         className={cx(
           'flex w-full items-center justify-between gap-3 rounded-lg border border-soot-200 bg-white/80 px-4 py-2.5 text-left text-sm text-soot-800 transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500 disabled:cursor-not-allowed disabled:opacity-50',
@@ -180,50 +180,63 @@ export default function SearchableSelect({
       {open && menuStyle
         ? createPortal(
             <div
+              ref={portalRef}
               className={cx(
                 'fixed z-[120] min-w-[12rem] overflow-hidden rounded-xl border border-soot-200 bg-white/95 shadow-xl backdrop-blur-md searchable-select-dropdown',
                 dropdownClassName
               )}
-              style={{ 
-                top: menuStyle.top, 
-                left: menuStyle.left, 
+              style={{
+                top: menuStyle.top,
+                left: menuStyle.left,
                 width: menuStyle.width,
-                transform: menuStyle.top < (triggerRef.current?.getBoundingClientRect().top ?? 0) ? 'translateY(-100%)' : 'none'
+                transform: menuStyle.openUp ? 'translateY(-100%)' : 'none',
               }}
             >
-              <div className="p-2 border-b border-soot-100 flex items-center gap-2">
-                <Search className="w-4 h-4 text-soot-400 ml-1" />
+              <div className="flex items-center gap-2 border-b border-soot-100 p-2">
+                <Search className="ml-1 h-4 w-4 text-soot-400" />
                 <input
                   ref={searchInputRef}
                   type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  onKeyDown={(e) => {
-                      if (e.key === 'Enter' && sortedOptions.length > 0) {
-                          onChange(sortedOptions[0].value);
-                          setOpen(false);
+                  value={query}
+                  onChange={e => setQuery(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      if (filteredOptions.length > 0) {
+                        onChange(filteredOptions[0].value);
+                        setOpen(false);
                       }
+                    }
                   }}
                   placeholder={searchPlaceholder}
-                  className="w-full bg-transparent border-0 text-sm focus:ring-0 p-1"
+                  className="w-full border-0 bg-transparent p-1 text-sm focus:ring-0"
                 />
-                {searchQuery && (
-                    <button onClick={() => setSearchQuery('')} className="p-1 hover:bg-soot-100 rounded">
-                        <X className="w-3 h-3 text-soot-400" />
-                    </button>
-                )}
+                {query ? (
+                  <button
+                    type="button"
+                    onClick={() => setQuery('')}
+                    className="rounded p-1 hover:bg-soot-100"
+                    aria-label="Clear search"
+                  >
+                    <X className="h-3 w-3 text-soot-400" />
+                  </button>
+                ) : null}
               </div>
+
               <div className="max-h-64 overflow-y-auto p-1.5" role="listbox">
-                {sortedOptions.length === 0 ? (
-                  <div className="px-3 py-2 text-sm text-soot-400 text-center py-4">{emptyMessage}</div>
+                {filteredOptions.length === 0 ? (
+                  <div className="px-3 py-4 text-center text-sm text-soot-400">{emptyMessage}</div>
                 ) : (
-                  sortedOptions.map((option) => {
+                  filteredOptions.map(option => {
                     const selected = option.value === value;
                     return (
                       <button
                         key={option.value}
                         type="button"
                         disabled={option.disabled}
+                        onMouseDown={e => {
+                          e.preventDefault();
+                        }}
                         onClick={() => {
                           if (option.disabled) return;
                           onChange(option.value);
