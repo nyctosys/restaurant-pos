@@ -1,4 +1,3 @@
-import { formatQuantityWithUnit } from '../../utils/formatQuantityWithUnit';
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Plus, X, Loader2, Trash2, ScanBarcode, Upload, Archive, ArchiveRestore, Pencil, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 import BarcodeModal from '../BarcodeModal';

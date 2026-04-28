@@ -12,6 +12,14 @@ def normalize_variant_key(raw: str | None) -> str:
     return (raw or "").strip()
 
 
+def normalize_combo_selection_type(raw: str | None) -> str:
+    return "category" if (raw or "").strip().lower() == "category" else "product"
+
+
+def normalize_combo_category_name(raw: str | None) -> str:
+    return (raw or "").strip()
+
+
 def combo_items_for_variant(product: "Product", variant_key: str | None) -> list["ComboItem"]:
     """
     - Rows with empty variant_key are the **base** combo (default for all deal variants).

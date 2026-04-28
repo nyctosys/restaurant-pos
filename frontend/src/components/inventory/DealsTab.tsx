@@ -12,13 +12,16 @@ interface Product {
   sku: string;
   title: string;
   base_price: number;
+  section?: string;
 }
 
 interface ComboItem {
   id?: number;
-  product_id: number;
+  product_id?: number | null;
   product_title?: string;
   quantity: number;
+  selection_type?: 'product' | 'category';
+  category_name?: string;
   /** Empty = base combo (all deal variants); otherwise must match a deal variant label. */
   variant_key?: string;
 }
@@ -48,6 +51,20 @@ export default function DealsTab() {
     variants: '',
     combo_items: [] as ComboItem[]
   });
+
+  const categoryOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          products
+            .map(product => (product.section || '').trim())
+            .filter(section => section && section !== 'Deals')
+        )
+      )
+        .sort((left, right) => left.localeCompare(right, undefined, { sensitivity: 'base' }))
+        .map(section => ({ value: section, label: section })),
+    [products]
+  );
 
   const dealVariantOptions = useMemo(
     () =>
@@ -84,8 +101,30 @@ export default function DealsTab() {
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
+    const normalizedPrice = Number(formData.base_price);
+    if (!Number.isFinite(normalizedPrice) || normalizedPrice < 0) {
+      showToast('Enter valid bundled price before saving deal', 'error');
+      return;
+    }
+
     if (formData.combo_items.length === 0) {
       showToast('Please add at least one menu item to the deal', 'error');
+      return;
+    }
+
+    const invalidRowIndex = formData.combo_items.findIndex((item) => {
+      const selectionType = item.selection_type || 'product';
+      const quantity = Number(item.quantity);
+      if (!Number.isInteger(quantity) || quantity <= 0) {
+        return true;
+      }
+      if (selectionType === 'category') {
+        return !item.category_name?.trim();
+      }
+      return !Number.isInteger(Number(item.product_id)) || Number(item.product_id) <= 0;
+    });
+    if (invalidRowIndex >= 0) {
+      showToast(`Complete combo line ${invalidRowIndex + 1} before saving deal`, 'error');
       return;
     }
 
@@ -94,11 +133,13 @@ export default function DealsTab() {
       await post('/inventory-advanced/deals/', {
         title: formData.title,
         sku: formData.sku,
-        base_price: parseFloat(formData.base_price),
+        base_price: normalizedPrice,
         variants: variantList,
-        combo_items: formData.combo_items.map(({ product_id, quantity, variant_key }) => ({
-          product_id,
-          quantity,
+        combo_items: formData.combo_items.map(({ product_id, quantity, variant_key, selection_type, category_name }) => ({
+          selection_type: selection_type || 'product',
+          product_id: (selection_type || 'product') === 'product' ? Number(product_id) : null,
+          category_name: (selection_type || 'product') === 'category' ? (category_name || '').trim() : '',
+          quantity: Number(quantity),
           variant_key: (variant_key || '').trim()
         }))
       });
@@ -134,7 +175,10 @@ export default function DealsTab() {
   const addComboItem = () => {
     setFormData(prev => ({
       ...prev,
-      combo_items: [...prev.combo_items, { product_id: 0, quantity: 1, variant_key: '' }]
+      combo_items: [
+        ...prev.combo_items,
+        { product_id: undefined, quantity: 1, variant_key: '', selection_type: 'product', category_name: '' },
+      ]
     }));
   };
 
@@ -274,21 +318,70 @@ export default function DealsTab() {
               
               <div className="space-y-3">
                 {formData.combo_items.map((item, index) => (
-                  <div key={index} className="flex flex-wrap gap-4 items-end bg-white/30 p-4 rounded-xl border border-soot-100">
+                  <div key={index} className="space-y-4 bg-white/30 p-4 rounded-xl border border-soot-100">
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => updateComboItem(index, 'selection_type', 'product')}
+                        className={`rounded-full px-3 py-1.5 text-xs font-bold transition-colors ${
+                          (item.selection_type || 'product') === 'product'
+                            ? 'bg-brand-600 text-white shadow-sm'
+                            : 'bg-white text-soot-600 border border-soot-200 hover:border-brand-300'
+                        }`}
+                      >
+                        Fixed menu item
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setFormData(prev => {
+                            const nextItems = [...prev.combo_items];
+                            nextItems[index] = {
+                              ...nextItems[index],
+                              selection_type: 'category',
+                              product_id: undefined,
+                            };
+                            return { ...prev, combo_items: nextItems };
+                          })
+                        }
+                        className={`rounded-full px-3 py-1.5 text-xs font-bold transition-colors ${
+                          (item.selection_type || 'product') === 'category'
+                            ? 'bg-brand-600 text-white shadow-sm'
+                            : 'bg-white text-soot-600 border border-soot-200 hover:border-brand-300'
+                        }`}
+                      >
+                        Category choice
+                      </button>
+                    </div>
+
+                    <div className="flex flex-wrap gap-4 items-end">
                     <div className="flex-1 min-w-[200px]">
-                      <label className="block text-xs font-semibold text-soot-600 mb-1">Menu Item</label>
-                      <SearchableSelect
-                        value={item.product_id ? String(item.product_id) : ''}
-                        onChange={(value) => updateComboItem(index, 'product_id', parseInt(value, 10))}
-                        placeholder="Select product…"
-                        searchPlaceholder="Search menu items…"
-                        options={products.map((product) => ({
-                          value: String(product.id),
-                          label: `${product.title} (${formatCurrency(product.base_price)})`,
-                          searchText: `${product.sku} ${product.title}`,
-                        }))}
-                        className="border-soot-200 bg-white px-3 py-2 font-medium"
-                      />
+                      <label className="block text-xs font-semibold text-soot-600 mb-1">
+                        {(item.selection_type || 'product') === 'category' ? 'Category' : 'Menu Item'}
+                      </label>
+                      {(item.selection_type || 'product') === 'category' ? (
+                        <SearchableSelect
+                          value={item.category_name || ''}
+                          onChange={(value) => updateComboItem(index, 'category_name', value)}
+                          placeholder="Select category…"
+                          searchPlaceholder="Search categories…"
+                          options={categoryOptions}
+                          className="border-soot-200 bg-white px-3 py-2 font-medium"
+                        />
+                      ) : (
+                        <SearchableSelect
+                          value={item.product_id ? String(item.product_id) : ''}
+                          onChange={(value) => updateComboItem(index, 'product_id', parseInt(value, 10))}
+                          placeholder="Select product…"
+                          searchPlaceholder="Search menu items…"
+                          options={products.map((product) => ({
+                            value: String(product.id),
+                            label: `${product.title} (${formatCurrency(product.base_price)})`,
+                            searchText: `${product.sku} ${product.title} ${(product.section || '').trim()}`,
+                          }))}
+                          className="border-soot-200 bg-white px-3 py-2 font-medium"
+                        />
+                      )}
                     </div>
                     <div className="w-24 shrink-0">
                       <label className="block text-xs font-semibold text-soot-600 mb-1">Quantity</label>
@@ -321,6 +414,12 @@ export default function DealsTab() {
                     >
                       <Trash2 className="w-5 h-5" />
                     </button>
+                    </div>
+                    {(item.selection_type || 'product') === 'category' && (
+                      <p className="text-xs text-soot-500">
+                        Cashier will choose any menu item from this category on the dashboard before adding the deal.
+                      </p>
+                    )}
                   </div>
                 ))}
                 {formData.combo_items.length === 0 && (
@@ -392,7 +491,9 @@ export default function DealsTab() {
                     <li key={idx} className="flex justify-between items-center text-sm gap-2">
                       <span className="text-soot-600 font-medium pb-1 border-b border-dashed border-soot-200 flex-1 mr-4">
                         <span className="font-bold text-soot-900 mr-2">{item.quantity}x</span>
-                        {item.product_title}
+                        {(item.selection_type || 'product') === 'category'
+                          ? `Choose any from ${item.category_name || 'category'}`
+                          : item.product_title}
                         {item.variant_key ? (
                           <span className="text-[10px] font-bold text-brand-700 ml-2">({item.variant_key})</span>
                         ) : null}

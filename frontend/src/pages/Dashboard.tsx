@@ -19,6 +19,31 @@ type Product = {
   is_deal?: boolean;
 };
 
+type DealComboItem = {
+  id: number;
+  product_id?: number | null;
+  product_title?: string | null;
+  quantity: number;
+  selection_type?: 'product' | 'category';
+  category_name?: string;
+  variant_key?: string;
+};
+
+type Deal = {
+  id: number;
+  title: string;
+  variants: string[];
+  combo_items: DealComboItem[];
+};
+
+type DealSelection = {
+  combo_item_id: number;
+  product_id: number;
+  product_title: string;
+  category_name: string;
+  variant?: string;
+};
+
 type CartItem = {
   uniqueId: string;
   id: number;
@@ -27,6 +52,7 @@ type CartItem = {
   quantity: number;
   image: string;
   variant?: string;
+  dealSelections?: DealSelection[];
   modifiers?: { id: number; name: string; price: number | null }[];
 };
 
@@ -51,12 +77,15 @@ function getProductImageUrl(product: Product): string {
 }
 
 type OrderDetailLine = {
+  id?: number;
   product_id: number;
   product_title?: string;
   variant_sku_suffix?: string;
   quantity: number;
   unit_price: number;
+  is_deal?: boolean;
   modifiers?: { id: number; name: string; price: number | null }[];
+  children?: OrderDetailLine[];
 };
 
 type OrderDetailResponse = {
@@ -71,12 +100,60 @@ type OrderDetailResponse = {
     customer_name?: string;
     phone?: string;
     address?: string;
+    rider_name?: string;
   } | null;
   items?: OrderDetailLine[];
 };
 
 type Modifier = { id: number; name: string; price: number | null; ingredient_id?: number | null; depletion_quantity?: number | null };
-type ActiveSale = { id: number; order_snapshot?: { table_name?: string } | null; table_name?: string | null; status: string; order_type?: string | null };
+type ActiveSale = {
+  id: number;
+  order_snapshot?: { table_name?: string; customer_name?: string; rider_name?: string } | null;
+  table_name?: string | null;
+  status: string;
+  order_type?: string | null;
+};
+type DeliveryCustomerLookupResponse = {
+  found?: boolean;
+  customer_name?: string;
+  address?: string;
+  phone?: string;
+  matches?: { customer_name?: string; address?: string; phone?: string }[];
+};
+type DeliveryDistanceResponse = {
+  found?: boolean;
+  distance_km?: number | null;
+  duration_min?: number | null;
+  source?: 'google_route' | 'cached' | 'haversine_fallback' | 'unavailable' | string;
+  message?: string | null;
+};
+
+function normalizeDealVariantKey(value?: string | null): string {
+  return (value || '').trim();
+}
+
+function getDealComboItemsForVariant(deal: Deal | undefined, variant?: string): DealComboItem[] {
+  if (!deal) return [];
+  const rows = deal.combo_items || [];
+  const normalizedVariant = normalizeDealVariantKey(variant);
+  const baseRows = rows.filter(row => normalizeDealVariantKey(row.variant_key) === '');
+  if (!normalizedVariant) return baseRows;
+  const specificRows = rows.filter(row => normalizeDealVariantKey(row.variant_key) === normalizedVariant);
+  return specificRows.length > 0 ? specificRows : baseRows;
+}
+
+function isCategoryChoiceRow(row: DealComboItem): boolean {
+  return (row.selection_type || 'product') === 'category';
+}
+
+function buildCartItemUniqueId(productId: number, variant?: string, dealSelections?: DealSelection[]): string {
+  const normalizedVariant = (variant || '').trim();
+  const selectionKey = [...(dealSelections || [])]
+    .sort((left, right) => left.combo_item_id - right.combo_item_id)
+    .map(selection => `${selection.combo_item_id}:${selection.product_id}:${(selection.variant || '').trim()}`)
+    .join('|');
+  return [String(productId), normalizedVariant, selectionKey].filter(Boolean).join('::');
+}
 
 export default function Dashboard() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -88,6 +165,7 @@ export default function Dashboard() {
   const [searchQuery, setSearchQuery] = useState('');
   const [layoutView, setLayoutView] = useState<'grid' | 'list'>('list');
   const [products, setProducts] = useState<Product[]>([]);
+  const [deals, setDeals] = useState<Deal[]>([]);
   const [sections, setSections] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [isRightPanelOpen, setIsRightPanelOpen] = useState(false);
@@ -105,6 +183,7 @@ export default function Dashboard() {
   const [paymentMethodSectionExpanded, setPaymentMethodSectionExpanded] = useState(true);
   const [orderType, setOrderType] = useState<OrderType>('dine_in');
   const [tables, setTables] = useState<string[]>([]);
+  const [riders, setRiders] = useState<string[]>([]);
   const [activeDineInSales, setActiveDineInSales] = useState<ActiveSale[]>([]);
   const [modifiers, setModifiers] = useState<Modifier[]>([]);
   const [activeModifierRowId, setActiveModifierRowId] = useState<string | null>(null);
@@ -112,9 +191,24 @@ export default function Dashboard() {
   const [deliveryCustomerName, setDeliveryCustomerName] = useState('');
   const [deliveryPhone, setDeliveryPhone] = useState('');
   const [deliveryAddress, setDeliveryAddress] = useState('');
+  const [deliveryRiderName, setDeliveryRiderName] = useState('');
+  const [deliveryLookupState, setDeliveryLookupState] = useState<'idle' | 'loading' | 'found' | 'not_found'>('idle');
+  const [deliveryLookupMatches, setDeliveryLookupMatches] = useState<{ customer_name: string; address: string; phone: string }[]>([]);
+  const [deliveryDistance, setDeliveryDistance] = useState<{ km: number | null; minutes: number | null; source: string | null; state: 'idle' | 'loading' | 'ready' | 'unavailable'; message: string | null }>({
+    km: null,
+    minutes: null,
+    source: null,
+    state: 'idle',
+    message: null,
+  });
   const [serviceChargePkr, setServiceChargePkr] = useState(0);
   const [deliveryChargePkr, setDeliveryChargePkr] = useState(DEFAULT_DELIVERY_CHARGE_PKR);
   const [checkoutSubmitting, setCheckoutSubmitting] = useState(false);
+  const [dealConfigurator, setDealConfigurator] = useState<{
+    product: Product;
+    variant: string;
+    selections: Record<number, { productId: string; variant: string }>;
+  } | null>(null);
   /** Set when resuming an open dine-in sale from Active Dine-in → Modify */
   const [editingOpenSaleId, setEditingOpenSaleId] = useState<number | null>(null);
   const [orderReadyAlerts, setOrderReadyAlerts] = useState<{ id: string; sale_id: number; table_name?: string | null }[]>([]);
@@ -127,8 +221,9 @@ export default function Dashboard() {
     setLoading(true);
     const activeBranchId = terminalBranchKey;
     try {
-      const [prodResult, settingsResult, activeSalesResult, modsResult] = await Promise.allSettled([
+      const [prodResult, dealsResult, settingsResult, activeSalesResult, modsResult] = await Promise.allSettled([
         get<{ products?: Product[] }>(`/menu-items/`),
+        get<{ deals?: Deal[] }>(`/menu/deals/`),
         get<{ config?: Record<string, unknown> }>(`/settings/?branch_id=${activeBranchId}`),
         get<{ sales?: ActiveSale[] }>(`/orders/active?branch_id=${activeBranchId}`),
         get<{ modifiers?: Modifier[] }>(`/modifiers/`),
@@ -139,6 +234,7 @@ export default function Dashboard() {
       }
 
       setProducts(prodResult.value?.products ?? []);
+      setDeals(dealsResult.status === 'fulfilled' ? dealsResult.value?.deals ?? [] : []);
 
       const settingsData = settingsResult.status === 'fulfilled' ? settingsResult.value : null;
       const activeSalesData = activeSalesResult.status === 'fulfilled' ? activeSalesResult.value : null;
@@ -158,6 +254,8 @@ export default function Dashboard() {
       setDiscounts(rawDiscounts.filter(d => !d.archived));
       const tablesList = config?.tables;
       setTables(Array.isArray(tablesList) ? (tablesList as string[]) : []);
+      const ridersList = config?.riders;
+      setRiders(Array.isArray(ridersList) ? (ridersList as string[]) : []);
       setActiveDineInSales(activeSalesData?.sales ?? []);
       setModifiers(modsData?.modifiers ?? []);
 
@@ -200,6 +298,10 @@ export default function Dashboard() {
     setDeliveryCustomerName('');
     setDeliveryPhone('');
     setDeliveryAddress('');
+    setDeliveryRiderName('');
+    setDeliveryLookupMatches([]);
+    setDeliveryLookupState('idle');
+    setDeliveryDistance({ km: null, minutes: null, source: null, state: 'idle', message: null });
     setServiceChargePkr(0);
     setDeliveryChargePkr(DEFAULT_DELIVERY_CHARGE_PKR);
   }, [orderType]);
@@ -239,10 +341,12 @@ export default function Dashboard() {
           setDeliveryCustomerName(d.order_snapshot.customer_name ?? '');
           setDeliveryPhone(d.order_snapshot.phone ?? '');
           setDeliveryAddress(d.order_snapshot.address ?? '');
+          setDeliveryRiderName(d.order_snapshot.rider_name ?? '');
         } else {
           setDeliveryCustomerName('');
           setDeliveryPhone('');
           setDeliveryAddress('');
+          setDeliveryRiderName('');
         }
         setServiceChargePkr(typeof d.service_charge === 'number' ? d.service_charge : 0);
         setDeliveryChargePkr(
@@ -253,10 +357,48 @@ export default function Dashboard() {
             const pid = line.product_id;
             const prod = products.find(p => p.id === pid);
             const v = (line.variant_sku_suffix || '').trim();
-            const uniqueId = v ? `${pid}-${v}` : `${pid}`;
             const mods = (line.modifiers || []).filter(
               (m: { id?: number }) => m && typeof m.id === 'number' && m.id > 0
             ) as { id: number; name: string; price: number | null }[];
+            const deal = deals.find(candidate => candidate.id === pid);
+            const activeRows = getDealComboItemsForVariant(deal, v);
+            let dealSelections: DealSelection[] | undefined;
+            if (line.is_deal && activeRows.some(isCategoryChoiceRow)) {
+              const remainingChildren = [...(line.children || [])];
+              activeRows
+                .filter(row => !isCategoryChoiceRow(row))
+                .forEach(row => {
+                  const expectedQty = row.quantity * line.quantity;
+                  const matchIndex = remainingChildren.findIndex(child => child.product_id === row.product_id && child.quantity === expectedQty);
+                  if (matchIndex >= 0) {
+                    remainingChildren.splice(matchIndex, 1);
+                  }
+                });
+              const reconstructed = activeRows
+                .filter(isCategoryChoiceRow)
+                .map(row => {
+                  const expectedCategory = (row.category_name || '').trim().toLowerCase();
+                  const matchIndex = remainingChildren.findIndex(child => {
+                    const childProduct = products.find(product => product.id === child.product_id);
+                    return ((childProduct?.section || '').trim().toLowerCase()) === expectedCategory;
+                  });
+                  if (matchIndex < 0) return null;
+                  const child = remainingChildren.splice(matchIndex, 1)[0];
+                  const childVariant = (child.variant_sku_suffix || '').trim();
+                  return {
+                    combo_item_id: row.id,
+                    product_id: child.product_id,
+                    product_title: child.product_title || 'Item',
+                    category_name: row.category_name || '',
+                    ...(childVariant ? { variant: childVariant } : {}),
+                  };
+                })
+                .filter(Boolean) as DealSelection[];
+              if (reconstructed.length > 0) {
+                dealSelections = reconstructed;
+              }
+            }
+            const uniqueId = buildCartItemUniqueId(pid, v, dealSelections);
             return {
               uniqueId,
               id: pid,
@@ -265,6 +407,7 @@ export default function Dashboard() {
               quantity: line.quantity,
               image: prod ? getProductImageUrl(prod) : PRODUCT_PLACEHOLDER_IMAGE,
               modifiers: mods,
+              ...(dealSelections?.length ? { dealSelections } : {}),
               ...(v ? { variant: v } : {}),
             };
           })
@@ -279,7 +422,7 @@ export default function Dashboard() {
     return () => {
       cancelled = true;
     };
-  }, [loading, searchParams, products, setSearchParams, editingOpenSaleId]);
+  }, [loading, searchParams, products, deals, setSearchParams, editingOpenSaleId]);
 
   useEffect(() => {
     if (!editingOpenSaleId || products.length === 0) return;
@@ -293,6 +436,25 @@ export default function Dashboard() {
       })
     );
   }, [products, editingOpenSaleId]);
+
+  const availableRiderOptions = useMemo(() => {
+    const busy = new Set(
+      activeDineInSales
+        .filter(sale => sale.order_type === 'delivery')
+        .filter(sale => editingOpenSaleId == null || sale.id !== editingOpenSaleId)
+        .map(sale => (sale.order_snapshot?.rider_name || '').trim())
+        .filter(Boolean)
+    );
+    const base = riders.filter(name => {
+      const trimmed = name.trim();
+      return trimmed && !busy.has(trimmed);
+    });
+    const selected = deliveryRiderName.trim();
+    if (selected && !base.includes(selected)) {
+      return [selected, ...base];
+    }
+    return base;
+  }, [activeDineInSales, deliveryRiderName, editingOpenSaleId, riders]);
 
   // Fetch products + sections on mount
   useEffect(() => {
@@ -326,6 +488,150 @@ export default function Dashboard() {
     s.on('order_ready', handler);
     return () => { s.off('order_ready', handler); };
   }, []);
+  useEffect(() => {
+    if (orderType !== 'delivery') {
+      setDeliveryLookupState('idle');
+      setDeliveryLookupMatches([]);
+      return;
+    }
+
+    const normalizedPhone = deliveryPhone.replace(/\D/g, '');
+    if (normalizedPhone.length < 7) {
+      setDeliveryLookupState('idle');
+      setDeliveryLookupMatches([]);
+      return;
+    }
+
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        setDeliveryLookupState('loading');
+        try {
+          const data = await get<DeliveryCustomerLookupResponse>(`/orders/delivery-customer?phone=${encodeURIComponent(deliveryPhone.trim())}`);
+          if (cancelled) return;
+          if (data?.found) {
+            setDeliveryCustomerName(data.customer_name ?? '');
+            setDeliveryAddress(data.address ?? '');
+            const matches = (data.matches || [])
+              .map(match => ({
+                customer_name: (match.customer_name || '').trim(),
+                address: (match.address || '').trim(),
+                phone: (match.phone || '').trim(),
+              }))
+              .filter(match => match.customer_name && match.address);
+            setDeliveryLookupMatches(matches);
+            setDeliveryLookupState('found');
+            return;
+          }
+          setDeliveryLookupMatches([]);
+          setDeliveryLookupState('not_found');
+        } catch {
+          if (cancelled) return;
+          setDeliveryLookupMatches([]);
+          setDeliveryLookupState('idle');
+        }
+      })();
+    }, 350);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [deliveryPhone, orderType]);
+
+  useEffect(() => {
+    if (orderType !== 'delivery') {
+      setDeliveryDistance({ km: null, minutes: null, source: null, state: 'idle', message: null });
+      return;
+    }
+    const trimmedAddress = deliveryAddress.trim();
+    if (trimmedAddress.length < 8) {
+      setDeliveryDistance({ km: null, minutes: null, source: null, state: 'idle', message: null });
+      return;
+    }
+
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        setDeliveryDistance(prev => ({ ...prev, state: 'loading', message: null }));
+        try {
+          const data = await get<DeliveryDistanceResponse>(`/orders/delivery-distance?address=${encodeURIComponent(trimmedAddress)}`);
+          if (cancelled) return;
+          if (data?.found && typeof data.distance_km === 'number') {
+            setDeliveryDistance({
+              km: data.distance_km,
+              minutes: typeof data.duration_min === 'number' ? data.duration_min : null,
+              source: data.source ?? null,
+              state: 'ready',
+              message: data.message ?? null,
+            });
+            return;
+          }
+          setDeliveryDistance({
+            km: null,
+            minutes: null,
+            source: data?.source ?? 'unavailable',
+            state: 'unavailable',
+            message: data?.message ?? 'Distance unavailable.',
+          });
+        } catch {
+          if (cancelled) return;
+          setDeliveryDistance({
+            km: null,
+            minutes: null,
+            source: 'unavailable',
+            state: 'unavailable',
+            message: 'Distance lookup failed.',
+          });
+        }
+      })();
+    }, 500);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [deliveryAddress, orderType]);
+
+  const dealsById = useMemo(() => {
+    const next = new Map<number, Deal>();
+    deals.forEach(deal => {
+      next.set(deal.id, deal);
+    });
+    return next;
+  }, [deals]);
+
+  const menuProductsBySection = useMemo(() => {
+    const next = new Map<string, Product[]>();
+    products
+      .filter(product => !product.is_deal)
+      .forEach(product => {
+        const section = (product.section || '').trim();
+        if (!section) return;
+        const current = next.get(section) || [];
+        current.push(product);
+        next.set(section, current);
+      });
+    next.forEach((sectionProducts, section) => {
+      next.set(
+        section,
+        [...sectionProducts].sort((left, right) =>
+          left.title.localeCompare(right.title, undefined, { sensitivity: 'base' })
+        )
+      );
+    });
+    return next;
+  }, [products]);
+
+  const activeDealConfigRows = useMemo(
+    () => (dealConfigurator ? getDealComboItemsForVariant(dealsById.get(dealConfigurator.product.id), dealConfigurator.variant) : []),
+    [dealConfigurator, dealsById]
+  );
+
+  const hasCategoryChoiceRows = useCallback(
+    (product: Product) => (dealsById.get(product.id)?.combo_items || []).some(isCategoryChoiceRow),
+    [dealsById]
+  );
 
   // Categories: settings sections, plus "Deals" when any deal product exists (section may be missing from settings JSON).
   const categories = useMemo(() => {
@@ -357,6 +663,14 @@ export default function Dashboard() {
 
   const handleProductClick = (product: Product) => {
     const defaultVariant = product.variants?.length ? product.variants[0] : undefined;
+    if (product.is_deal && hasCategoryChoiceRows(product)) {
+      setDealConfigurator({
+        product,
+        variant: defaultVariant || '',
+        selections: {},
+      });
+      return;
+    }
     handleAddToCart({
       id: product.id,
       title: product.title,
@@ -366,10 +680,10 @@ export default function Dashboard() {
     });
   };
 
-  const handleAddToCart = (product: { id: number; title: string; price: number; image: string; variant?: string }) => {
+  const handleAddToCart = (product: { id: number; title: string; price: number; image: string; variant?: string; dealSelections?: DealSelection[] }) => {
     setCart(prev => {
       const variant = product.variant?.trim() || undefined;
-      const uniqueId = variant ? `${product.id}-${variant}` : `${product.id}`;
+      const uniqueId = buildCartItemUniqueId(product.id, variant, product.dealSelections);
       const existing = prev.find(i => i.uniqueId === uniqueId);
       if (existing) {
         return prev.map(i => i.uniqueId === uniqueId ? { ...i, quantity: i.quantity + 1 } : i);
@@ -382,7 +696,7 @@ export default function Dashboard() {
     setCart(prev => {
       const target = prev.find(i => i.uniqueId === uniqueId);
       if (!target) return prev;
-      const newUniqueId = `${target.id}-${newVariant}`;
+      const newUniqueId = buildCartItemUniqueId(target.id, newVariant, target.dealSelections);
       const existing = prev.find(i => i.uniqueId === newUniqueId);
       if (existing && existing.uniqueId !== uniqueId) {
         // Merge quantities
@@ -394,6 +708,51 @@ export default function Dashboard() {
         return prev.map(i => i.uniqueId === uniqueId ? { ...i, variant: newVariant, uniqueId: newUniqueId } : i);
       }
     });
+  };
+
+  const handleConfirmDealConfiguration = () => {
+    if (!dealConfigurator) return;
+    const selectionRows = activeDealConfigRows.filter(isCategoryChoiceRow);
+    const nextSelections: DealSelection[] = [];
+
+    for (const row of selectionRows) {
+      const rawSelection = dealConfigurator.selections[row.id];
+      const selectedProductId = parseInt(rawSelection?.productId || '', 10);
+      if (!selectedProductId) {
+        setNotification({ type: 'error', msg: `Choose an item from ${row.category_name || 'this category'}.` });
+        setTimeout(() => setNotification(null), 3000);
+        return;
+      }
+      const selectedProduct = products.find(product => product.id === selectedProductId);
+      if (!selectedProduct) {
+        setNotification({ type: 'error', msg: 'One of the chosen deal items is no longer available.' });
+        setTimeout(() => setNotification(null), 3000);
+        return;
+      }
+      const variant = (rawSelection?.variant || '').trim();
+      if (selectedProduct.variants?.length && !variant) {
+        setNotification({ type: 'error', msg: `Choose a variant for ${selectedProduct.title}.` });
+        setTimeout(() => setNotification(null), 3000);
+        return;
+      }
+      nextSelections.push({
+        combo_item_id: row.id,
+        product_id: selectedProduct.id,
+        product_title: selectedProduct.title,
+        category_name: row.category_name || '',
+        ...(variant ? { variant } : {}),
+      });
+    }
+
+    handleAddToCart({
+      id: dealConfigurator.product.id,
+      title: dealConfigurator.product.title,
+      price: dealConfigurator.product.base_price,
+      image: getProductImageUrl(dealConfigurator.product),
+      variant: dealConfigurator.variant || undefined,
+      dealSelections: nextSelections,
+    });
+    setDealConfigurator(null);
   };
 
   const handleUpdateQuantity = (uniqueId: string, delta: number) => {
@@ -410,7 +769,7 @@ export default function Dashboard() {
 
   type OrderSnapshotPayload =
     | { table_name: string }
-    | { customer_name: string; phone: string; address: string };
+    | { customer_name: string; phone: string; address: string; distance_km?: number; distance_source?: string };
 
   const submitCheckout = async (orderSnapshot: OrderSnapshotPayload | null) => {
     const items = cart.map(item => ({
@@ -418,6 +777,15 @@ export default function Dashboard() {
       quantity: item.quantity,
       modifier_ids: (item.modifiers || []).map(m => m.id),
       ...(item.variant ? { variant_sku_suffix: item.variant } : {}),
+      ...(item.dealSelections?.length
+        ? {
+            deal_selections: item.dealSelections.map(selection => ({
+              combo_item_id: selection.combo_item_id,
+              product_id: selection.product_id,
+              ...(selection.variant ? { variant_sku_suffix: selection.variant } : {}),
+            })),
+          }
+        : {}),
     }));
 
     setCheckoutSubmitting(true);
@@ -455,6 +823,7 @@ export default function Dashboard() {
       setDeliveryCustomerName('');
       setDeliveryPhone('');
       setDeliveryAddress('');
+      setDeliveryRiderName('');
       setServiceChargePkr(0);
       setDeliveryChargePkr(DEFAULT_DELIVERY_CHARGE_PKR);
     } catch (e) {
@@ -472,10 +841,36 @@ export default function Dashboard() {
       quantity: item.quantity,
       modifier_ids: (item.modifiers || []).map(m => m.id),
       ...(item.variant ? { variant_sku_suffix: item.variant } : {}),
+      ...(item.dealSelections?.length
+        ? {
+            deal_selections: item.dealSelections.map(selection => ({
+              combo_item_id: selection.combo_item_id,
+              product_id: selection.product_id,
+              ...(selection.variant ? { variant_sku_suffix: selection.variant } : {}),
+            })),
+          }
+        : {}),
     }));
     setCheckoutSubmitting(true);
     try {
-      await patch(`/orders/${editingOpenSaleId}/items`, { items });
+      const orderSnapshot =
+        orderType === 'delivery'
+          ? {
+              customer_name: deliveryCustomerName.trim(),
+              phone: deliveryPhone.trim(),
+              address: deliveryAddress.trim(),
+              ...(deliveryRiderName.trim() ? { rider_name: deliveryRiderName.trim() } : {}),
+              ...(deliveryDistance.km != null ? { distance_km: deliveryDistance.km } : {}),
+              ...(deliveryDistance.source ? { distance_source: deliveryDistance.source } : {}),
+            }
+          : orderType === 'dine_in' && dineInTable
+            ? { table_name: dineInTable }
+            : undefined;
+      await patch(`/orders/${editingOpenSaleId}/items`, {
+        items,
+        order_type: orderType,
+        ...(orderSnapshot ? { order_snapshot: orderSnapshot } : {}),
+      });
       const finalizeBody: Record<string, unknown> = {
         payment_method: paymentMethod,
         discount: appliedDiscount
@@ -506,6 +901,7 @@ export default function Dashboard() {
       setDeliveryCustomerName('');
       setDeliveryPhone('');
       setDeliveryAddress('');
+      setDeliveryRiderName('');
       setServiceChargePkr(0);
       setDeliveryChargePkr(DEFAULT_DELIVERY_CHARGE_PKR);
     } catch (e) {
@@ -523,10 +919,36 @@ export default function Dashboard() {
       quantity: item.quantity,
       modifier_ids: (item.modifiers || []).map(m => m.id),
       ...(item.variant ? { variant_sku_suffix: item.variant } : {}),
+      ...(item.dealSelections?.length
+        ? {
+            deal_selections: item.dealSelections.map(selection => ({
+              combo_item_id: selection.combo_item_id,
+              product_id: selection.product_id,
+              ...(selection.variant ? { variant_sku_suffix: selection.variant } : {}),
+            })),
+          }
+        : {}),
     }));
     setCheckoutSubmitting(true);
     try {
-      await patch(`/orders/${editingOpenSaleId}/items`, { items });
+      const orderSnapshot =
+        orderType === 'delivery'
+          ? {
+              customer_name: deliveryCustomerName.trim(),
+              phone: deliveryPhone.trim(),
+              address: deliveryAddress.trim(),
+              ...(deliveryRiderName.trim() ? { rider_name: deliveryRiderName.trim() } : {}),
+              ...(deliveryDistance.km != null ? { distance_km: deliveryDistance.km } : {}),
+              ...(deliveryDistance.source ? { distance_source: deliveryDistance.source } : {}),
+            }
+          : orderType === 'dine_in' && dineInTable
+            ? { table_name: dineInTable }
+            : undefined;
+      await patch(`/orders/${editingOpenSaleId}/items`, {
+        items,
+        order_type: orderType,
+        ...(orderSnapshot ? { order_snapshot: orderSnapshot } : {}),
+      });
       setNotification({ type: 'ok', msg: `Order #${editingOpenSaleId} updated — sent to kitchen` });
       setTimeout(() => setNotification(null), 4000);
       setCart([]);
@@ -534,6 +956,10 @@ export default function Dashboard() {
       editOrderLoadedRef.current = null;
       fetchData();
       setDineInTable(null);
+      setDeliveryCustomerName('');
+      setDeliveryPhone('');
+      setDeliveryAddress('');
+      setDeliveryRiderName('');
     } catch (e) {
       setNotification({ type: 'error', msg: getUserMessage(e) });
       setTimeout(() => setNotification(null), 4000);
@@ -570,6 +996,15 @@ export default function Dashboard() {
       quantity: item.quantity,
       modifier_ids: (item.modifiers || []).map(m => m.id),
       ...(item.variant ? { variant_sku_suffix: item.variant } : {}),
+      ...(item.dealSelections?.length
+        ? {
+            deal_selections: item.dealSelections.map(selection => ({
+              combo_item_id: selection.combo_item_id,
+              product_id: selection.product_id,
+              ...(selection.variant ? { variant_sku_suffix: selection.variant } : {}),
+            })),
+          }
+        : {}),
     }));
     setCheckoutSubmitting(true);
     try {
@@ -628,15 +1063,27 @@ export default function Dashboard() {
       quantity: item.quantity,
       modifier_ids: (item.modifiers || []).map(m => m.id),
       ...(item.variant ? { variant_sku_suffix: item.variant } : {}),
+      ...(item.dealSelections?.length
+        ? {
+            deal_selections: item.dealSelections.map(selection => ({
+              combo_item_id: selection.combo_item_id,
+              product_id: selection.product_id,
+              ...(selection.variant ? { variant_sku_suffix: selection.variant } : {}),
+            })),
+          }
+        : {}),
     }));
     setCheckoutSubmitting(true);
     try {
-      let order_snapshot: Record<string, string> | undefined;
+      let order_snapshot: Record<string, string | number> | undefined;
       if (orderType === 'delivery') {
         order_snapshot = {
           customer_name: deliveryCustomerName.trim(),
           phone: deliveryPhone.trim(),
           address: deliveryAddress.trim(),
+          ...(deliveryRiderName.trim() ? { rider_name: deliveryRiderName.trim() } : {}),
+          ...(deliveryDistance.km != null ? { distance_km: deliveryDistance.km } : {}),
+          ...(deliveryDistance.source ? { distance_source: deliveryDistance.source } : {}),
         };
       } else if (orderType === 'takeaway') {
         order_snapshot = undefined;
@@ -644,6 +1091,7 @@ export default function Dashboard() {
       const data = await post<{ sale_id?: number; print_success?: boolean; message?: string }>('/orders/kot', {
         items,
         order_type: orderType,
+        skip_kot_print: true,
         ...(order_snapshot ? { order_snapshot } : {}),
       });
       const saleId = data?.sale_id ?? 0;
@@ -667,6 +1115,7 @@ export default function Dashboard() {
       setDeliveryCustomerName('');
       setDeliveryPhone('');
       setDeliveryAddress('');
+      setDeliveryRiderName('');
       setDeliveryChargePkr(DEFAULT_DELIVERY_CHARGE_PKR);
     } catch (e) {
       setNotification({ type: 'error', msg: getUserMessage(e) });
@@ -717,7 +1166,14 @@ export default function Dashboard() {
         setTimeout(() => setNotification(null), 5000);
         return;
       }
-      void submitCheckout({ customer_name: name, phone, address });
+      void submitCheckout({
+        customer_name: name,
+        phone,
+        address,
+        ...(deliveryRiderName.trim() ? { rider_name: deliveryRiderName.trim() } : {}),
+        ...(deliveryDistance.km != null ? { distance_km: deliveryDistance.km } : {}),
+        ...(deliveryDistance.source ? { distance_source: deliveryDistance.source } : {}),
+      });
       return;
     }
 
@@ -867,6 +1323,155 @@ export default function Dashboard() {
         </div>
       )}
 
+      {dealConfigurator && (
+        <div className="fixed inset-0 z-[210] flex items-center justify-center bg-neutral-900/55 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-2xl rounded-3xl border border-white/30 bg-white/90 p-5 shadow-2xl backdrop-blur-xl">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-black uppercase tracking-[0.18em] text-brand-700">Configure Deal</p>
+                <h2 className="mt-1 text-2xl font-black text-neutral-900">{dealConfigurator.product.title}</h2>
+                <p className="mt-1 text-sm font-medium text-neutral-600">
+                  Choose the category items before adding this deal to the order.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDealConfigurator(null)}
+                className="rounded-full bg-white p-2 text-neutral-500 shadow-sm transition-colors hover:bg-neutral-100 hover:text-neutral-800"
+                aria-label="Close deal configuration"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {dealConfigurator.product.variants?.length > 0 && (
+              <div className="mt-5">
+                <label className="mb-2 block text-xs font-bold uppercase tracking-wide text-neutral-600">Deal variant</label>
+                <SearchableSelect
+                  value={dealConfigurator.variant}
+                  onChange={(value) => setDealConfigurator(current => (current ? { ...current, variant: value } : current))}
+                  options={dealConfigurator.product.variants.map(variant => ({ value: variant, label: variant }))}
+                  placeholder="Select variant…"
+                  searchPlaceholder="Search variants…"
+                  className="border-white/70 bg-white px-3 py-3 font-semibold"
+                />
+              </div>
+            )}
+
+            <div className="mt-5 space-y-3">
+              {activeDealConfigRows.map(row => {
+                if (!isCategoryChoiceRow(row)) {
+                  return (
+                    <div key={row.id} className="flex items-center justify-between rounded-2xl border border-white/60 bg-white/70 px-4 py-3">
+                      <div>
+                        <p className="text-sm font-bold text-neutral-900">{row.product_title || 'Menu item'}</p>
+                        <p className="text-xs font-medium text-neutral-500">Included automatically</p>
+                      </div>
+                      <span className="rounded-full bg-neutral-100 px-3 py-1 text-xs font-black text-neutral-700">
+                        {row.quantity}x
+                      </span>
+                    </div>
+                  );
+                }
+
+                const categoryName = row.category_name || 'Category';
+                const categoryProducts = menuProductsBySection.get(categoryName) || [];
+                const selectedState = dealConfigurator.selections[row.id] || { productId: '', variant: '' };
+                const selectedProduct = categoryProducts.find(product => String(product.id) === selectedState.productId);
+                return (
+                  <div key={row.id} className="rounded-2xl border border-white/60 bg-white/70 p-4 shadow-sm">
+                    <div className="mb-3 flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-bold text-neutral-900">{categoryName}</p>
+                        <p className="text-xs font-medium text-neutral-500">Pick {row.quantity}x item from this category</p>
+                      </div>
+                      <span className="rounded-full bg-brand-50 px-3 py-1 text-xs font-black text-brand-700">
+                        Required
+                      </span>
+                    </div>
+                    <SearchableSelect
+                      value={selectedState.productId}
+                      onChange={(value) =>
+                        setDealConfigurator(current =>
+                          current
+                            ? {
+                                ...current,
+                                selections: {
+                                  ...current.selections,
+                                  [row.id]: { productId: value, variant: '' },
+                                },
+                              }
+                            : current
+                        )
+                      }
+                      options={categoryProducts.map(product => ({
+                        value: String(product.id),
+                        label: `${product.title} (${formatCurrency(product.base_price)})`,
+                        searchText: `${product.sku} ${product.title}`,
+                      }))}
+                      placeholder={`Choose from ${categoryName}…`}
+                      searchPlaceholder={`Search ${categoryName.toLowerCase()}…`}
+                      emptyMessage={`No menu items found in ${categoryName}.`}
+                      className="border-white/70 bg-white px-3 py-3 font-semibold"
+                    />
+                    {selectedProduct?.variants?.length ? (
+                      <div className="mt-3">
+                        <label className="mb-2 block text-xs font-bold uppercase tracking-wide text-neutral-600">
+                          {selectedProduct.title} variant
+                        </label>
+                        <SearchableSelect
+                          value={selectedState.variant}
+                          onChange={(value) =>
+                            setDealConfigurator(current =>
+                              current
+                                ? {
+                                    ...current,
+                                    selections: {
+                                      ...current.selections,
+                                      [row.id]: { productId: selectedState.productId, variant: value },
+                                    },
+                                  }
+                                : current
+                            )
+                          }
+                          options={selectedProduct.variants.map(variant => ({ value: variant, label: variant }))}
+                          placeholder="Choose variant…"
+                          searchPlaceholder="Search variants…"
+                          className="border-white/70 bg-white px-3 py-3 font-semibold"
+                        />
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="mt-5 flex items-center justify-between gap-3 border-t border-black/5 pt-4">
+              <div>
+                <p className="text-sm font-bold text-neutral-900">{formatCurrency(dealConfigurator.product.base_price)}</p>
+                <p className="text-xs font-medium text-neutral-500">Deal price</p>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setDealConfigurator(null)}
+                  className="rounded-xl border border-neutral-200 bg-white px-4 py-2.5 text-sm font-bold text-neutral-700 transition-colors hover:bg-neutral-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmDealConfiguration}
+                  className="rounded-xl bg-brand-600 px-5 py-2.5 text-sm font-black text-white shadow-lg shadow-brand-500/20 transition-colors hover:bg-brand-700"
+                >
+                  Add Deal
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* =========================================
           LEFT PANEL: CART (25-30% width on lg)
           ========================================= */}
@@ -896,6 +1501,8 @@ export default function Dashboard() {
             cart.map((item, index) => {
               const baseProd = products.find(p => p.id === item.id);
               const hasVariants = baseProd && baseProd.variants && baseProd.variants.length > 0;
+              const hasDealSelections = (item.dealSelections || []).length > 0;
+              const showVariantSelector = Boolean(hasVariants && !hasDealSelections);
               return (
               <div key={item.uniqueId + "-" + index} className="flex flex-col gap-2 p-3 glass-card relative group shadow-sm transition-shadow bg-white/60 hover:bg-white/80 border border-white/50">
                 
@@ -914,7 +1521,7 @@ export default function Dashboard() {
                     </div>
 
                     {/* Variant selector — compact but still reads as a control */}
-                    {hasVariants ? (
+                    {showVariantSelector ? (
                       <div className="mt-1.5 w-full max-w-[min(100%,8.5rem)]">
                         <label htmlFor={`cart-variant-${item.uniqueId.replace(/\W/g, '-')}`} className="sr-only">
                           Variant
@@ -933,6 +1540,20 @@ export default function Dashboard() {
                         {item.variant}
                       </span>
                     ) : null}
+
+                    {hasDealSelections && (
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {(item.dealSelections || []).map(selection => (
+                          <span
+                            key={`${item.uniqueId}-${selection.combo_item_id}`}
+                            className="inline-flex items-center rounded-full border border-brand-200 bg-brand-50 px-2 py-1 text-[10px] font-bold text-brand-800"
+                          >
+                            {selection.category_name}: {selection.product_title}
+                            {selection.variant ? ` (${selection.variant})` : ''}
+                          </span>
+                        ))}
+                      </div>
+                    )}
 
                     {/* Price & Add Modifier Button */}
                     <div className="flex items-center gap-2 mt-1.5">
@@ -1090,6 +1711,7 @@ export default function Dashboard() {
           ) : (
             <div className={layoutView === 'grid' ? "grid grid-cols-2 md:grid-cols-[repeat(auto-fill,minmax(170px,1fr))] xl:grid-cols-[repeat(auto-fill,minmax(180px,1fr))] tap-highlight-transparent gap-2.5 lg:gap-3 pb-20 lg:pb-6 w-full" : "flex flex-col gap-2.5 pb-20 lg:pb-6 w-full"}>
               {filteredProducts.map(product => {
+                const needsChoice = product.is_deal && hasCategoryChoiceRows(product);
                 return (
                 <button
                   key={product.id}
@@ -1101,7 +1723,14 @@ export default function Dashboard() {
                     <div className="absolute inset-0 bg-brand-900/0 group-hover:bg-brand-900/5 transition-colors duration-300" />
                   </div>
                   <div className="flex min-w-0 flex-1 items-center justify-between gap-3">
-                    <p className={`${layoutView === 'grid' ? 'text-sm line-clamp-3 whitespace-normal' : 'text-sm lg:text-base truncate'} min-w-0 font-semibold text-neutral-800 leading-tight`}>{product.title}</p>
+                    <div className="min-w-0">
+                      <p className={`${layoutView === 'grid' ? 'text-sm line-clamp-3 whitespace-normal' : 'text-sm lg:text-base truncate'} min-w-0 font-semibold text-neutral-800 leading-tight`}>{product.title}</p>
+                      {needsChoice ? (
+                        <span className="mt-1 inline-flex rounded-full border border-brand-200 bg-brand-50 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-brand-700">
+                          Pick items
+                        </span>
+                      ) : null}
+                    </div>
                     <p className={`${layoutView === 'grid' ? 'text-sm' : 'text-base'} shrink-0 font-bold text-brand-700 whitespace-nowrap`}>{formatCurrency(product.base_price)}</p>
                   </div>
                 </button>
@@ -1241,7 +1870,69 @@ export default function Dashboard() {
                   <div className="space-y-2.5">
                     <input type="text" value={deliveryCustomerName} onChange={e => setDeliveryCustomerName(e.target.value)} placeholder="Customer name" className="w-full px-3.5 py-3 rounded-xl border border-white/80 bg-white text-sm font-semibold text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-brand-500 transition-all shadow-sm" />
                     <input type="tel" value={deliveryPhone} onChange={e => setDeliveryPhone(e.target.value)} placeholder="Phone number" className="w-full px-3.5 py-3 rounded-xl border border-white/80 bg-white text-sm font-semibold text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-brand-500 transition-all shadow-sm" />
+                    {deliveryLookupState === 'loading' && (
+                      <p className="text-[11px] font-semibold text-neutral-500">Looking up customer details...</p>
+                    )}
+                    {deliveryLookupState === 'found' && (
+                      <p className="text-[11px] font-semibold text-brand-700">Returning customer found. Name and address auto-filled.</p>
+                    )}
+                    {deliveryLookupState === 'not_found' && (
+                      <p className="text-[11px] font-semibold text-neutral-500">No previous delivery found for this number.</p>
+                    )}
+                    {deliveryDistance.state === 'loading' && (
+                      <p className="text-[11px] font-semibold text-neutral-500">Calculating route distance...</p>
+                    )}
+                    {deliveryDistance.state === 'ready' && (
+                      <p className="text-[11px] font-semibold text-brand-700">
+                        Distance: {deliveryDistance.km?.toFixed(2)} km
+                        {deliveryDistance.minutes != null ? ` (${Math.round(deliveryDistance.minutes)} min)` : ''}
+                        {deliveryDistance.source ? ` - ${deliveryDistance.source.replace(/_/g, ' ')}` : ''}
+                      </p>
+                    )}
+                    {deliveryDistance.state === 'unavailable' && (
+                      <p className="text-[11px] font-semibold text-amber-700">
+                        {deliveryDistance.message || 'Distance currently unavailable. You can still continue checkout.'}
+                      </p>
+                    )}
+                    {deliveryLookupMatches.length > 1 && (
+                      <label className="block">
+                        <span className="text-[11px] font-bold text-neutral-600 uppercase tracking-wide">Saved customer/address</span>
+                        <select
+                          value={`${deliveryCustomerName}|||${deliveryAddress}`}
+                          onChange={e => {
+                            const [name, address] = e.target.value.split('|||');
+                            setDeliveryCustomerName(name || '');
+                            setDeliveryAddress(address || '');
+                          }}
+                          className="mt-1.5 w-full px-3.5 py-3 rounded-xl border border-white/80 bg-white text-sm font-semibold text-neutral-900 focus:outline-none focus:ring-2 focus:ring-brand-500 transition-all shadow-sm"
+                        >
+                          {deliveryLookupMatches.map((match, idx) => (
+                            <option key={`${match.customer_name}-${match.address}-${idx}`} value={`${match.customer_name}|||${match.address}`}>
+                              {match.customer_name} - {match.address}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    )}
                     <textarea value={deliveryAddress} onChange={e => setDeliveryAddress(e.target.value)} placeholder="Delivery address" rows={2} className="w-full px-3.5 py-3 rounded-xl border border-white/80 bg-white text-sm font-semibold text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-brand-500 resize-y min-h-[80px] transition-all shadow-sm" />
+                    <label className="block">
+                      <span className="text-[11px] font-bold text-neutral-600 uppercase tracking-wide">Assign rider</span>
+                      <select
+                        value={deliveryRiderName}
+                        onChange={e => setDeliveryRiderName(e.target.value)}
+                        className="mt-1.5 w-full px-3.5 py-3 rounded-xl border border-white/80 bg-white text-sm font-semibold text-neutral-900 focus:outline-none focus:ring-2 focus:ring-brand-500 transition-all shadow-sm"
+                      >
+                        <option value="">Unassigned</option>
+                        {availableRiderOptions.map(rider => (
+                          <option key={rider} value={rider}>
+                            {rider}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    {riders.length > 0 && !availableRiderOptions.length && !deliveryRiderName.trim() && (
+                      <p className="text-[11px] font-semibold text-amber-700">No rider available right now.</p>
+                    )}
                     <label className="block">
                       <span className="text-[11px] font-bold text-neutral-600 uppercase tracking-wide">Delivery charge (PKR)</span>
                       <input

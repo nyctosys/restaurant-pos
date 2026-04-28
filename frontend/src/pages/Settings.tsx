@@ -5,6 +5,7 @@ import ReceiptSettings from '../components/settings/ReceiptSettings';
 import BranchesSettings from '../components/settings/BranchesSettings';
 import TablesSettings from '../components/settings/TablesSettings';
 import ModifiersSettings from '../components/settings/ModifiersSettings';
+import RidersSettings from '../components/settings/RidersSettings';
 import appLogger, { type LogEntry } from '../utils/logger';
 import { get, put, post, getUserMessage, getUserMessageWithRef } from '../api';
 import { getTerminalBranchIdString, parseUserFromStorage } from '../utils/branchContext';
@@ -102,7 +103,7 @@ export default function Settings() {
   const isOwner = user?.role === 'owner';
   const activeBranchId = getTerminalBranchIdString(user);
 
-  const tabs = ['General', 'Receipt', 'Hardware', 'Categories', 'Variants', 'Tables', 'Modifiers', 'Tax & Rates', 'Discounts'];
+  const tabs = ['General', 'Receipt', 'Hardware', 'Categories', 'Variants', 'Tables', 'Riders', 'Modifiers', 'Tax & Rates', 'Discounts'];
   if (isOwner) {
     tabs.push('Users');
   }
@@ -633,6 +634,7 @@ export default function Settings() {
         {activeTab === 'users' && <UsersSettings />}
         {activeTab === 'branches' && <BranchesSettings />}
         {activeTab === 'tables' && <TablesSettings />}
+        {activeTab === 'riders' && <RidersSettings />}
         {activeTab === 'modifiers' && <ModifiersSettings />}
 
         {activeTab === 'hardware' && (

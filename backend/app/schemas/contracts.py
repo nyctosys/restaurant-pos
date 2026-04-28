@@ -42,13 +42,14 @@ class DiscountPayload(BaseModel):
 
 
 class OrderSnapshotPayload(BaseModel):
-    """Dine-in: table_name. Delivery: customer_name, phone, address."""
+    """Dine-in: table_name. Delivery: customer_name, phone, address, rider_name."""
 
     model_config = ConfigDict(extra="ignore")
     table_name: str | None = None
     customer_name: str | None = None
     phone: str | None = None
     address: str | None = None
+    rider_name: str | None = None
 
 
 class CheckoutRequest(BaseModel):

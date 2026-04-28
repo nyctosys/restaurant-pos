@@ -2,7 +2,7 @@
  * API request(): logging, error handling, bad scenarios.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { request, get, post } from '../api/client';
+import { request, get, post, resetApiClientStateForTests } from '../api/client';
 
 vi.mock('../utils/logger', () => ({
   default: {
@@ -19,6 +19,7 @@ beforeEach(() => {
     getItem: vi.fn((key: string) => (key === 'auth_token' ? 'fake-token' : null)),
   });
   mockFetch.mockReset();
+  resetApiClientStateForTests();
 });
 
 describe('request', () => {

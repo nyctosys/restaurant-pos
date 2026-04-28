@@ -256,6 +256,179 @@ def test_deal_soft_delete_hides_from_list_blocks_new_sales(client, app):
     assert r_checkout.status_code == 400
 
 
+def test_deal_with_category_choices_lists_and_checks_out_selected_items(client, app):
+    h = _auth_headers(client, app)
+
+    bun_res = client.post(
+        "/api/menu-items/",
+        headers=h,
+        json={"sku": "BUN-1", "title": "Zinger Bun", "base_price": 12.0, "section": "Buns"},
+    )
+    bun_id = bun_res.get_json()["id"]
+    wrap_res = client.post(
+        "/api/menu-items/",
+        headers=h,
+        json={"sku": "WRAP-1", "title": "Chicken Wrap", "base_price": 11.0, "section": "Wraps"},
+    )
+    wrap_id = wrap_res.get_json()["id"]
+    coke_res = client.post(
+        "/api/menu-items/",
+        headers=h,
+        json={"sku": "COKE-1", "title": "Coke", "base_price": 4.0, "section": "Drinks"},
+    )
+    coke_id = coke_res.get_json()["id"]
+    fries_res = client.post(
+        "/api/menu-items/",
+        headers=h,
+        json={"sku": "FRIES-1", "title": "Fries", "base_price": 5.0, "section": "Sides"},
+    )
+    fries_id = fries_res.get_json()["id"]
+
+    with app.app_context():
+        br = Branch.query.filter_by(name="DealsBranch").first()
+        for pid, ing_name in [
+            (bun_id, "bun_roll"),
+            (wrap_id, "wrap_bread"),
+            (coke_id, "soft_drink"),
+            (fries_id, "fries_potato"),
+        ]:
+            ing = Ingredient(name=ing_name, unit="piece", current_stock=0.0)
+            db.session.add(ing)
+            db.session.flush()
+            seed_branch_stocks_for_new_ingredient(ing.id, 0.0)
+            _set_branch_stock(ing.id, br.id, 100.0)
+            ing.current_stock = 100.0
+            db.session.add(RecipeItem(product_id=pid, ingredient_id=ing.id, quantity=1.0, unit="piece"))
+        db.session.commit()
+
+    create_res = client.post(
+        "/api/menu/deals/",
+        headers=h,
+        json={
+            "title": "Pick Bun & Wrap Combo",
+            "sku": "PICK-1",
+            "base_price": 25.0,
+            "combo_items": [
+                {"selection_type": "category", "category_name": "Buns", "quantity": 1},
+                {"selection_type": "category", "category_name": "Wraps", "quantity": 1},
+                {"product_id": coke_id, "quantity": 1},
+                {"product_id": fries_id, "quantity": 1},
+            ],
+        },
+    )
+    assert create_res.status_code == 200
+    deal_id = create_res.get_json()["id"]
+
+    list_res = client.get("/api/menu/deals/", headers=h)
+    assert list_res.status_code == 200
+    created_deal = next(d for d in list_res.get_json()["deals"] if d["id"] == deal_id)
+    assert any(ci["selection_type"] == "category" and ci["category_name"] == "Buns" for ci in created_deal["combo_items"])
+    assert any(ci["selection_type"] == "category" and ci["category_name"] == "Wraps" for ci in created_deal["combo_items"])
+    assert any(ci["product_id"] == coke_id for ci in created_deal["combo_items"])
+
+    with app.app_context():
+        br = Branch.query.filter_by(name="DealsBranch").first()
+
+    missing_selection_res = client.post(
+        "/api/orders/checkout",
+        headers=h,
+        json={
+            "branch_id": br.id,
+            "payment_method": "Cash",
+            "items": [{"product_id": deal_id, "quantity": 1}],
+        },
+    )
+    assert missing_selection_res.status_code == 400
+
+    choice_rows = [ci for ci in created_deal["combo_items"] if ci["selection_type"] == "category"]
+    checkout_res = client.post(
+        "/api/orders/checkout",
+        headers=h,
+        json={
+            "branch_id": br.id,
+            "payment_method": "Cash",
+            "items": [
+                {
+                    "product_id": deal_id,
+                    "quantity": 1,
+                    "deal_selections": [
+                        {"combo_item_id": next(ci["id"] for ci in choice_rows if ci["category_name"] == "Buns"), "product_id": bun_id},
+                        {"combo_item_id": next(ci["id"] for ci in choice_rows if ci["category_name"] == "Wraps"), "product_id": wrap_id},
+                    ],
+                }
+            ],
+        },
+    )
+    assert checkout_res.status_code == 201
+
+    with app.app_context():
+        br = Branch.query.filter_by(name="DealsBranch").first()
+        ingredient_rows = Ingredient.query.filter(
+            Ingredient.name.in_(["bun_roll", "wrap_bread", "soft_drink", "fries_potato"])
+        ).all()
+        by_name = {row.name: row for row in ingredient_rows}
+        for name in ["bun_roll", "wrap_bread", "soft_drink", "fries_potato"]:
+            stock_row = IngredientBranchStock.query.filter_by(ingredient_id=by_name[name].id, branch_id=br.id).first()
+            assert stock_row is not None
+            assert abs(float(stock_row.current_stock) - 99.0) < 1e-6
+
+
+def test_deal_category_choice_rejects_product_from_wrong_category(client, app):
+    h = _auth_headers(client, app)
+
+    bun_res = client.post(
+        "/api/menu-items/",
+        headers=h,
+        json={"sku": "BUN-WRONG", "title": "Crispy Bun", "base_price": 12.0, "section": "Buns"},
+    )
+    bun_id = bun_res.get_json()["id"]
+    coke_res = client.post(
+        "/api/menu-items/",
+        headers=h,
+        json={"sku": "COKE-WRONG", "title": "Coke", "base_price": 4.0, "section": "Drinks"},
+    )
+    coke_id = coke_res.get_json()["id"]
+
+    create_res = client.post(
+        "/api/menu/deals/",
+        headers=h,
+        json={
+            "title": "Pick a Bun",
+            "sku": "PICK-BUN",
+            "base_price": 15.0,
+            "combo_items": [
+                {"selection_type": "category", "category_name": "Buns", "quantity": 1},
+            ],
+        },
+    )
+    assert create_res.status_code == 200
+    deal_id = create_res.get_json()["id"]
+
+    list_res = client.get("/api/menu/deals/", headers=h)
+    created_deal = next(d for d in list_res.get_json()["deals"] if d["id"] == deal_id)
+    choice_row = created_deal["combo_items"][0]
+
+    with app.app_context():
+        br = Branch.query.filter_by(name="DealsBranch").first()
+
+    bad_checkout = client.post(
+        "/api/orders/checkout",
+        headers=h,
+        json={
+            "branch_id": br.id,
+            "payment_method": "Cash",
+            "items": [
+                {
+                    "product_id": deal_id,
+                    "quantity": 1,
+                    "deal_selections": [{"combo_item_id": choice_row["id"], "product_id": coke_id}],
+                }
+            ],
+        },
+    )
+    assert bad_checkout.status_code == 400
+
+
 @pytest.mark.parametrize("path", ["/api/menu/deals/", "/api/inventory-advanced/deals/"])
 def test_deal_create_requires_owner(client, app, path):
     owner_headers = _auth_headers(client, app)

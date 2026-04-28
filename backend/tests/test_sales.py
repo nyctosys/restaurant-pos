@@ -558,6 +558,75 @@ def test_kitchen_lists_kot_and_legacy_null_order_type(client, app):
     assert len(kds2.get_json()["orders"]) == 1
 
 
+def test_kitchen_shows_selected_deal_choices_under_deal_line(client, app):
+    client.post(
+        "/api/auth/setup",
+        json={"username": "owner1", "password": "pass", "branch_name": "Main"},
+    )
+    token = _get_token(client)
+    with app.app_context():
+        branch = Branch.query.filter_by(name="Main").first()
+        bid = branch.id
+
+        bun_ing = Ingredient(name="bun-ing", unit="piece", current_stock=0.0)
+        wrap_ing = Ingredient(name="wrap-ing", unit="piece", current_stock=0.0)
+        fries_ing = Ingredient(name="fries-ing", unit="piece", current_stock=0.0)
+        burger = Product(sku="BUN-1", title="Zinger Bun", base_price=12, section="Buns")
+        wrap = Product(sku="WRAP-1", title="Chicken Wrap", base_price=11, section="Wraps")
+        fries = Product(sku="FRIES-1", title="Fries", base_price=4, section="Sides")
+        deal = Product(sku="DEAL-CHOICE-1", title="Lunch Deal", base_price=18, is_deal=True)
+        db.session.add_all([bun_ing, wrap_ing, fries_ing, burger, wrap, fries, deal])
+        db.session.flush()
+
+        for ing in (bun_ing, wrap_ing, fries_ing):
+            seed_branch_stocks_for_new_ingredient(ing.id, 0.0)
+            _set_branch_ingredient_stock(ing.id, bid, 50.0)
+            ing.current_stock = 50.0
+
+        db.session.add(RecipeItem(product_id=burger.id, ingredient_id=bun_ing.id, quantity=1.0, unit="piece"))
+        db.session.add(RecipeItem(product_id=wrap.id, ingredient_id=wrap_ing.id, quantity=1.0, unit="piece"))
+        db.session.add(RecipeItem(product_id=fries.id, ingredient_id=fries_ing.id, quantity=1.0, unit="piece"))
+
+        bun_choice = ComboItem(combo_id=deal.id, product_id=None, quantity=1, selection_type="category", category_name="Buns")
+        wrap_choice = ComboItem(combo_id=deal.id, product_id=None, quantity=1, selection_type="category", category_name="Wraps")
+        fixed_fries = ComboItem(combo_id=deal.id, product_id=fries.id, quantity=1)
+        db.session.add_all([bun_choice, wrap_choice, fixed_fries])
+        db.session.commit()
+
+        deal_id = deal.id
+        bun_choice_id = bun_choice.id
+        wrap_choice_id = wrap_choice.id
+        burger_id = burger.id
+        wrap_id = wrap.id
+
+    create_res = client.post(
+        "/api/orders/dine-in/kot",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "order_snapshot": {"table_name": "T9"},
+            "items": [
+                {
+                    "product_id": deal_id,
+                    "quantity": 1,
+                    "deal_selections": [
+                        {"combo_item_id": bun_choice_id, "product_id": burger_id},
+                        {"combo_item_id": wrap_choice_id, "product_id": wrap_id},
+                    ],
+                }
+            ],
+        },
+    )
+    assert create_res.status_code == 201
+
+    kds = client.get("/api/orders/kitchen", headers={"Authorization": f"Bearer {token}"})
+    assert kds.status_code == 200
+    order = kds.get_json()["orders"][0]
+    assert len(order["items"]) == 1
+    assert order["items"][0]["product_title"] == "Lunch Deal"
+    child_titles = [child["product_title"] for child in order["items"][0]["children"]]
+    assert child_titles == ["Zinger Bun", "Chicken Wrap", "Fries"]
+
+
 def test_kitchen_drops_ready_after_one_day(client, app):
     """READY tickets disappear from KDS 24h after being marked ready."""
     client.post(
@@ -668,3 +737,185 @@ def test_checkout_variant_uses_variant_specific_bom(client, app):
         row_l = IngredientBranchStock.query.filter_by(ingredient_id=i_large, branch_id=bid).first()
         assert row_b is not None and abs(float(row_b.current_stock) - 100.0) < 1e-6
         assert row_l is not None and abs(float(row_l.current_stock) - 97.0) < 1e-6
+
+
+def test_delivery_distance_endpoint_success(client, app, monkeypatch):
+    client.post(
+        "/api/auth/setup",
+        json={"username": "owner1", "password": "pass", "branch_name": "Main"},
+    )
+    token = _get_token(client)
+    with app.app_context():
+        branch = Branch.query.filter_by(name="Main").first()
+        assert branch is not None
+        branch.address = "Main Blvd, Karachi"
+        db.session.commit()
+
+    def _fake_distance(_branch: str, _customer: str):
+        return {
+            "found": True,
+            "distance_km": 7.25,
+            "duration_min": 18.0,
+            "source": "google_route",
+            "message": None,
+        }
+
+    monkeypatch.setattr("app.routers.orders.compute_delivery_distance", _fake_distance)
+    res = client.get(
+        "/api/orders/delivery-distance?address=Customer%20Area%20Karachi",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert res.status_code == 200
+    body = res.get_json()
+    assert body["found"] is True
+    assert body["distance_km"] == 7.25
+    assert body["source"] == "google_route"
+
+
+def test_delivery_distance_endpoint_missing_branch_address(client, app):
+    client.post(
+        "/api/auth/setup",
+        json={"username": "owner1", "password": "pass", "branch_name": "Main"},
+    )
+    token = _get_token(client)
+    res = client.get(
+        "/api/orders/delivery-distance?address=Customer%20Area%20Karachi",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert res.status_code == 200
+    body = res.get_json()
+    assert body["found"] is False
+    assert body["source"] == "unavailable"
+    assert "Branch address is missing" in (body.get("message") or "")
+
+
+def test_delivery_order_snapshot_keeps_distance_metadata(client, app):
+    client.post(
+        "/api/auth/setup",
+        json={"username": "owner1", "password": "pass", "branch_name": "Main"},
+    )
+    token = _get_token(client)
+    with app.app_context():
+        b = Branch.query.filter_by(name="Main").first()
+        bid = b.id
+    pid, _ = _create_menu_item_with_recipe(app, bid, "Distance Burger", stock=50.0)
+
+    res = client.post(
+        "/api/orders/checkout",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "items": [{"product_id": pid, "quantity": 1}],
+            "payment_method": "Cash",
+            "branch_id": bid,
+            "order_type": "delivery",
+            "order_snapshot": {
+                "customer_name": "Ali",
+                "phone": "03001234567",
+                "address": "Street 1",
+                "distance_km": 8.91,
+                "distance_source": "google_route",
+            },
+        },
+    )
+    assert res.status_code == 201
+    sale_id = res.get_json()["sale_id"]
+    details = client.get(
+        f"/api/orders/{sale_id}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert details.status_code == 200
+    snapshot = details.get_json().get("order_snapshot") or {}
+    assert snapshot.get("distance_km") == 8.91
+    assert snapshot.get("distance_source") == "google_route"
+
+
+def test_delivery_order_snapshot_keeps_rider_name(client, app):
+    client.post(
+        "/api/auth/setup",
+        json={"username": "owner1", "password": "pass", "branch_name": "Main"},
+    )
+    token = _get_token(client)
+    with app.app_context():
+        b = Branch.query.filter_by(name="Main").first()
+        bid = b.id
+    pid, _ = _create_menu_item_with_recipe(app, bid, "Rider Burger", stock=50.0)
+
+    res = client.post(
+        "/api/orders/kot",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "items": [{"product_id": pid, "quantity": 1}],
+            "order_type": "delivery",
+            "skip_kot_print": True,
+            "order_snapshot": {
+                "customer_name": "Ali",
+                "phone": "03001234567",
+                "address": "Street 1",
+                "rider_name": "Hamza",
+            },
+        },
+    )
+    assert res.status_code == 201
+    sale_id = res.get_json()["sale_id"]
+
+    details = client.get(
+        f"/api/orders/{sale_id}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert details.status_code == 200
+    snapshot = details.get_json().get("order_snapshot") or {}
+    assert snapshot.get("rider_name") == "Hamza"
+
+
+def test_update_open_delivery_order_can_change_rider_name(client, app):
+    client.post(
+        "/api/auth/setup",
+        json={"username": "owner1", "password": "pass", "branch_name": "Main"},
+    )
+    token = _get_token(client)
+    with app.app_context():
+        b = Branch.query.filter_by(name="Main").first()
+        bid = b.id
+    pid, _ = _create_menu_item_with_recipe(app, bid, "Busy Rider Burger", stock=50.0)
+
+    res = client.post(
+        "/api/orders/kot",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "items": [{"product_id": pid, "quantity": 1}],
+            "order_type": "delivery",
+            "skip_kot_print": True,
+            "order_snapshot": {
+                "customer_name": "Ali",
+                "phone": "03001234567",
+                "address": "Street 1",
+                "rider_name": "Hamza",
+            },
+        },
+    )
+    assert res.status_code == 201
+    sale_id = res.get_json()["sale_id"]
+
+    update_res = client.patch(
+        f"/api/orders/{sale_id}/items",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "items": [{"product_id": pid, "quantity": 1}],
+            "order_type": "delivery",
+            "order_snapshot": {
+                "customer_name": "Ali",
+                "phone": "03001234567",
+                "address": "Street 1",
+                "rider_name": "Bilal",
+            },
+        },
+    )
+    assert update_res.status_code == 200
+
+    active = client.get(
+        "/api/orders/active",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert active.status_code == 200
+    snapshot = active.get_json()["sales"][0]["order_snapshot"]
+    assert snapshot["rider_name"] == "Bilal"

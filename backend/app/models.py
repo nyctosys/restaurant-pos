@@ -81,8 +81,11 @@ class ComboItem(db.Model):
     __tablename__ = 'combo_items'
     id = db.Column(db.Integer, primary_key=True)
     combo_id = db.Column(db.Integer, db.ForeignKey('products.id'), nullable=False)
-    product_id = db.Column(db.Integer, db.ForeignKey('products.id'), nullable=False)
+    product_id = db.Column(db.Integer, db.ForeignKey('products.id'), nullable=True)
     quantity = db.Column(db.Integer, nullable=False, default=1)
+    # "product" = fixed bundled menu item, "category" = cashier picks a product from the category at sale time.
+    selection_type = db.Column(db.String(20), nullable=False, default='product')
+    category_name = db.Column(db.String(100), nullable=True)
     # When set, this line applies only to deal lines sold with this variant label (empty = base / all).
     variant_key = db.Column(db.String(100), nullable=False, default='')
 
@@ -244,6 +247,7 @@ class Ingredient(db.Model):
     reorder_quantity = db.Column(db.Float, default=0.0)
     last_purchase_price = db.Column(db.Float, default=0.0) # Price per PURCHASE unit
     average_cost = db.Column(db.Float, default=0.0)    # Moving average (Price per BASE unit)
+    brand_name = db.Column(db.String(120), nullable=True)
     preferred_supplier_id = db.Column(db.Integer, db.ForeignKey("suppliers.id"), nullable=True)
     category = db.Column(db.String(100))
     notes = db.Column(db.Text)

@@ -153,6 +153,14 @@ def _ensure_prepared_item_tables(dialect: str) -> None:
         print(f"  + Created {table}")
 
 
+def _ensure_combo_product_id_nullable(dialect: str) -> None:
+    if dialect != "postgresql":
+        print("  - Skipping combo_items.product_id nullability change on non-PostgreSQL DB")
+        return
+    db.session.execute(text("ALTER TABLE combo_items ALTER COLUMN product_id DROP NOT NULL"))
+    print("  + combo_items.product_id now allows NULL for category-choice deal rows")
+
+
 def main() -> None:
     app = create_app()
     with app.app_context():
@@ -189,6 +197,16 @@ def main() -> None:
                 column="variant_key",
                 ddl="ALTER TABLE combo_items ADD COLUMN variant_key VARCHAR(100) NOT NULL DEFAULT ''",
             ),
+            ColumnMigration(
+                table="combo_items",
+                column="selection_type",
+                ddl="ALTER TABLE combo_items ADD COLUMN selection_type VARCHAR(20) NOT NULL DEFAULT 'product'",
+            ),
+            ColumnMigration(
+                table="combo_items",
+                column="category_name",
+                ddl="ALTER TABLE combo_items ADD COLUMN category_name VARCHAR(100)",
+            ),
         ]
 
         print("migrate_latest_schema_changes: starting ...")
@@ -197,6 +215,7 @@ def main() -> None:
             _ensure_prepared_item_tables(dialect)
             for migration in migrations:
                 _apply_column_migration(migration)
+            _ensure_combo_product_id_nullable(dialect)
             db.session.commit()
             print("migrate_latest_schema_changes: complete.")
         except Exception:

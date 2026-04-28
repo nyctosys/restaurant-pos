@@ -26,7 +26,7 @@ type ActiveSale = {
   order_type: string | null;
   kitchen_status: 'placed' | 'preparing' | 'ready' | null;
   table_name?: string | null;
-  order_snapshot?: { table_name?: string } | null;
+  order_snapshot?: { table_name?: string; customer_name?: string; rider_name?: string } | null;
   items?: ActiveSaleLine[];
 };
 
@@ -94,7 +94,6 @@ export default function ActiveDineIn() {
     };
     const onOrderReady = (payload: { sale_id?: number; table_name?: string | null }) => {
       if (!payload?.sale_id) return;
-      const sale = sales.find(s => s.id === payload.sale_id);
       const label = payload.table_name
         ? `Table ${payload.table_name} · #${payload.sale_id}`
         : `Order #${payload.sale_id}`;
@@ -129,6 +128,11 @@ export default function ActiveDineIn() {
     if (ot === 'takeaway') return 'Takeaway';
     if (ot === 'delivery') return 'Delivery';
     return 'Table';
+  };
+
+  const deliveryRiderLabel = (s: ActiveSale) => {
+    if ((s.order_type || '') !== 'delivery') return '';
+    return (s.order_snapshot?.rider_name || '').trim();
   };
 
   const openPay = (s: ActiveSale) => {
@@ -278,6 +282,9 @@ export default function ActiveDineIn() {
                   </div>
                 </div>
                 <div className="text-sm text-neutral-600">
+                  {deliveryRiderLabel(s) && (
+                    <p className="mb-1 text-xs font-semibold text-brand-700">Rider: {deliveryRiderLabel(s)}</p>
+                  )}
                   <span className="text-neutral-500">Subtotal </span>
                   <span className="font-semibold text-neutral-900">{formatCurrency(s.total_amount)}</span>
                 </div>

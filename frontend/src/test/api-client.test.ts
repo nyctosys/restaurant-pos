@@ -24,6 +24,14 @@ describe('getUserMessage', () => {
     expect(getUserMessage(err)).toBe('Server error');
   });
 
+  it('formats first backend validation error for 422', () => {
+    const err = new ApiError(422, {
+      message: 'Validation failed',
+      details: [{ loc: ['body', 'combo_items', 0, 'quantity'], msg: 'Input should be a valid integer' }],
+    });
+    expect(getUserMessage(err)).toBe('combo_items.0.quantity: Input should be a valid integer');
+  });
+
   it('returns message for Error', () => {
     expect(getUserMessage(new Error('Network failed'))).toBe('Network failed');
   });

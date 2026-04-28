@@ -119,6 +119,11 @@ function clearApiCache(): void {
   responseCache.clear();
 }
 
+export function resetApiClientStateForTests(): void {
+  clearApiCache();
+  inflightRequests.clear();
+}
+
 /**
  * Fetch with base URL, auth, logging, and consistent error handling.
  * Throws ApiError on non-2xx; logs request + response (status, duration, X-Request-ID).

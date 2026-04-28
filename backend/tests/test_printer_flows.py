@@ -127,3 +127,66 @@ def test_printer_status_probe_releases_connection(client, app, monkeypatch):
     assert body.get("status") == "connected"
     assert calls["connect"] == 1
     assert calls["disconnect"] == 1
+
+
+def test_kot_creation_can_skip_immediate_print(client, app, monkeypatch):
+    branch_id, product_id = _setup_owner_and_menu_item(app)
+    token = _login_token(client)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    calls = {"kot": 0}
+
+    def _fake_print_kot(self, kot_data):
+        calls["kot"] += 1
+        return True
+
+    monkeypatch.setattr("app.services.printer_service.PrinterService.print_kot", _fake_print_kot)
+
+    create = client.post(
+        "/api/orders/kot",
+        headers=headers,
+        json={
+            "order_type": "takeaway",
+            "skip_kot_print": True,
+            "items": [{"product_id": product_id, "quantity": 1}],
+        },
+    )
+    assert create.status_code == 201
+    body = create.get_json()
+    assert body["sale_id"] > 0
+    assert body.get("print_success") is None
+    assert calls["kot"] == 0
+
+
+def test_print_kot_endpoint_prints_existing_sale(client, app, monkeypatch):
+    branch_id, product_id = _setup_owner_and_menu_item(app)
+    token = _login_token(client)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    calls: list[dict] = []
+
+    def _fake_print_kot(self, kot_data):
+        calls.append(kot_data)
+        return True
+
+    monkeypatch.setattr("app.services.printer_service.PrinterService.print_kot", _fake_print_kot)
+
+    create = client.post(
+        "/api/orders/kot",
+        headers=headers,
+        json={
+            "order_type": "takeaway",
+            "skip_kot_print": True,
+            "items": [{"product_id": product_id, "quantity": 1}],
+        },
+    )
+    assert create.status_code == 201
+    sale_id = create.get_json()["sale_id"]
+
+    printed = client.post(f"/api/orders/{sale_id}/print-kot", headers=headers)
+    assert printed.status_code == 200
+    body = printed.get_json()
+    assert body.get("print_success") is True
+    assert len(calls) == 1
+    assert calls[0].get("sale_id") == sale_id
+    assert calls[0].get("order_type") == "takeaway"

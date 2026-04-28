@@ -6,7 +6,11 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
 from app.models import db, User, Product, ComboItem
-from app.services.recipe_variants import normalize_variant_key
+from app.services.recipe_variants import (
+    normalize_combo_category_name,
+    normalize_combo_selection_type,
+    normalize_variant_key,
+)
 from app.deps import get_current_user, require_owner
 from app.routers.menu import _normalize_variants_list
 
@@ -15,9 +19,11 @@ menu_deals_router = APIRouter(prefix="/api/menu/deals", tags=["menu-deals"])
 
 
 class ComboItemCreate(BaseModel):
-    product_id: int
+    product_id: int | None = None
     quantity: int
     variant_key: str = ""
+    selection_type: str = "product"
+    category_name: str = ""
 
 
 class DealCreate(BaseModel):
@@ -39,8 +45,10 @@ def _list_deals_impl(current_user: User) -> dict[str, list[dict]]:
                 {
                     "id": ci.id,
                     "product_id": ci.product_id,
-                    "product_title": ci.child_product.title if ci.child_product else "Unknown",
+                    "product_title": ci.child_product.title if ci.child_product else None,
                     "quantity": ci.quantity,
+                    "selection_type": normalize_combo_selection_type(getattr(ci, "selection_type", None)),
+                    "category_name": normalize_combo_category_name(getattr(ci, "category_name", None)),
                     "variant_key": normalize_variant_key(getattr(ci, "variant_key", None)),
                 }
             )
@@ -86,6 +94,61 @@ def _create_deal_impl(payload: DealCreate, current_user: User) -> dict[str, obje
                     },
                 )
 
+    normalized_combo_items: list[dict[str, object]] = []
+    for index, ci in enumerate(payload.combo_items):
+        selection_type = normalize_combo_selection_type(ci.selection_type)
+        quantity = int(ci.quantity)
+        if quantity <= 0:
+            return JSONResponse(
+                status_code=400,
+                content={"message": f"Combo line {index + 1} quantity must be positive."},
+            )
+        category_name = normalize_combo_category_name(ci.category_name)
+        product_id = int(ci.product_id) if ci.product_id is not None else None
+
+        if selection_type == "category":
+            if not category_name:
+                return JSONResponse(
+                    status_code=400,
+                    content={"message": f"Combo line {index + 1} needs a category for pick-any selection."},
+                )
+            normalized_combo_items.append(
+                {
+                    "selection_type": selection_type,
+                    "category_name": category_name,
+                    "product_id": None,
+                    "quantity": quantity,
+                    "variant_key": normalize_variant_key(ci.variant_key),
+                }
+            )
+            continue
+
+        if product_id is None:
+            return JSONResponse(
+                status_code=400,
+                content={"message": f"Combo line {index + 1} needs a menu item."},
+            )
+        product = db.session.get(Product, product_id)
+        if product is None or getattr(product, "archived_at", None) is not None:
+            return JSONResponse(
+                status_code=400,
+                content={"message": f"Combo line {index + 1} references a menu item that is unavailable."},
+            )
+        if getattr(product, "is_deal", False):
+            return JSONResponse(
+                status_code=400,
+                content={"message": "Deals cannot include another deal as a combo line."},
+            )
+        normalized_combo_items.append(
+            {
+                "selection_type": selection_type,
+                "category_name": "",
+                "product_id": product_id,
+                "quantity": quantity,
+                "variant_key": normalize_variant_key(ci.variant_key),
+            }
+        )
+
     combo = Product(
         sku=payload.sku,
         title=payload.title,
@@ -97,12 +160,14 @@ def _create_deal_impl(payload: DealCreate, current_user: User) -> dict[str, obje
     db.session.add(combo)
     db.session.flush()
 
-    for ci_data in payload.combo_items:
+    for ci_data in normalized_combo_items:
         ci = ComboItem(
             combo_id=combo.id,
-            product_id=ci_data.product_id,
-            quantity=ci_data.quantity,
-            variant_key=normalize_variant_key(ci_data.variant_key),
+            product_id=ci_data["product_id"],
+            quantity=ci_data["quantity"],
+            selection_type=ci_data["selection_type"],
+            category_name=ci_data["category_name"] or None,
+            variant_key=ci_data["variant_key"],
         )
         db.session.add(ci)
 

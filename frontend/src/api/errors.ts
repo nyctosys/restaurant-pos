@@ -16,6 +16,24 @@ export interface ApiErrorBody {
   debug?: unknown;
 }
 
+type ValidationDetail = {
+  loc?: Array<string | number>;
+  msg?: string;
+};
+
+function formatValidationMessage(details: unknown): string | null {
+  if (!Array.isArray(details) || details.length === 0) return null;
+  const first = details[0] as ValidationDetail | undefined;
+  if (!first || typeof first.msg !== 'string' || !first.msg.trim()) return null;
+  const loc = Array.isArray(first.loc)
+    ? first.loc
+        .filter(part => part !== 'body')
+        .map(part => String(part))
+        .join('.')
+    : '';
+  return loc ? `${loc}: ${first.msg}` : first.msg;
+}
+
 export class ApiError extends Error {
   status: number;
   body: ApiErrorBody;
@@ -27,6 +45,10 @@ export class ApiError extends Error {
   }
 
   get userMessage(): string {
+    if (this.status === 422) {
+      const validationMessage = formatValidationMessage(this.body.details);
+      if (validationMessage) return validationMessage;
+    }
     return this.body.message ?? this.body.error ?? this.message;
   }
 

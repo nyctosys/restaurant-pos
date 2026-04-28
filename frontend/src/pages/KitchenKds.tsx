@@ -9,7 +9,13 @@ import {
 } from 'lucide-react';
 
 /* ── types ── */
-type KdsLine = { product_title: string; variant_sku_suffix?: string; quantity: number; modifiers?: string[] };
+type KdsLine = {
+  product_title: string;
+  variant_sku_suffix?: string;
+  quantity: number;
+  modifiers?: string[];
+  children?: KdsLine[];
+};
 type KitchenStatus = 'placed' | 'preparing' | 'ready';
 type KdsOrder = {
   id: number;
@@ -266,6 +272,21 @@ const OrderCard = memo(function OrderCard({
                     <span key={mi} className="text-[11px] font-bold px-2 py-0.5 rounded flex items-center bg-white/60 border border-white text-neutral-700 shadow-sm">
                       {m}
                     </span>
+                  ))}
+                </div>
+              )}
+              {line.children && line.children.length > 0 && (
+                <div className="mt-2 space-y-1.5 rounded-xl bg-black/5 px-3 py-2">
+                  {line.children.map((child, childIndex) => (
+                    <div key={`${idx}-${childIndex}`} className="flex items-start gap-2 text-[12px] font-semibold text-neutral-700">
+                      <span className="shrink-0 text-neutral-500">{child.quantity}×</span>
+                      <div className="min-w-0">
+                        <span className="block truncate">{child.product_title}</span>
+                        {child.variant_sku_suffix && (
+                          <span className="block text-[11px] text-neutral-500">{child.variant_sku_suffix}</span>
+                        )}
+                      </div>
+                    </div>
                   ))}
                 </div>
               )}
