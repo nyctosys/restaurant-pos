@@ -10,6 +10,7 @@ type Product = {
   title: string;
   sku: string;
   base_price: number;
+  sale_price?: number;
   variants?: string[];
 };
 
@@ -50,6 +51,14 @@ type RecipePreparedItem = {
   variant_key?: string;
 };
 
+type RecipeExtraCost = {
+  id: number;
+  product_id: number;
+  name: string;
+  amount: number;
+  variant_key?: string;
+};
+
 export default function RecipesTab() {
   const [products, setProducts] = useState<Product[]>([]);
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
@@ -61,6 +70,7 @@ export default function RecipesTab() {
   const [recipeVariantScope, setRecipeVariantScope] = useState('');
   const [recipeItems, setRecipeItems] = useState<RecipeItem[]>([]);
   const [recipePreparedItems, setRecipePreparedItems] = useState<RecipePreparedItem[]>([]);
+  const [recipeExtraCosts, setRecipeExtraCosts] = useState<RecipeExtraCost[]>([]);
   const [loadingRecipe, setLoadingRecipe] = useState(false);
 
   // Form
@@ -72,6 +82,9 @@ export default function RecipesTab() {
   const [formUsePurchaseUnit, setFormUsePurchaseUnit] = useState(false);
   const [formNotes, setFormNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [showExtraCostForm, setShowExtraCostForm] = useState(false);
+  const [extraCostName, setExtraCostName] = useState('');
+  const [extraCostAmount, setExtraCostAmount] = useState('');
 
   useEffect(() => {
     fetchBaseData();
@@ -101,10 +114,12 @@ export default function RecipesTab() {
     setRecipeVariantScope('');
     setLoadingRecipe(true);
     setShowAddForm(false);
+    setShowExtraCostForm(false);
     try {
-      const res = await get<{ recipe_items: RecipeItem[]; recipe_prepared_items: RecipePreparedItem[] }>(`/inventory-advanced/recipes/${productId}`);
+      const res = await get<{ recipe_items: RecipeItem[]; recipe_prepared_items: RecipePreparedItem[]; recipe_extra_costs?: RecipeExtraCost[] }>(`/inventory-advanced/recipes/${productId}`);
       setRecipeItems(res.recipe_items || []);
       setRecipePreparedItems(res.recipe_prepared_items || []);
+      setRecipeExtraCosts(res.recipe_extra_costs || []);
     } catch (e) {
       showToast(getUserMessage(e), 'error');
     } finally {
@@ -200,6 +215,11 @@ export default function RecipesTab() {
     if (!recipeVariantScope) return vk === '';
     return vk === recipeVariantScope;
   });
+  const displayedExtraCosts = recipeExtraCosts.filter(ec => {
+    const vk = (ec.variant_key || '').trim();
+    if (!recipeVariantScope) return vk === '';
+    return vk === recipeVariantScope;
+  });
 
   // Calculate recipe cost for the selected scope only
   let totalCost = 0;
@@ -215,6 +235,52 @@ export default function RecipesTab() {
       totalCost += (prepared.average_cost * ri.quantity);
     }
   });
+  displayedExtraCosts.forEach((ec) => {
+    totalCost += Number(ec.amount || 0);
+  });
+
+  const handleAddExtraCost = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedProductId) return;
+    const name = extraCostName.trim();
+    const amount = Number(extraCostAmount);
+    if (!name) {
+      showToast('Enter cost name', 'error');
+      return;
+    }
+    if (!Number.isFinite(amount) || amount < 0) {
+      showToast('Enter a valid non-negative cost amount', 'error');
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await post('/inventory-advanced/recipes/extra-costs', {
+        product_id: selectedProductId,
+        name,
+        amount,
+        variant_key: recipeVariantScope || '',
+      });
+      showToast('Extra cost added', 'success');
+      setExtraCostName('');
+      setExtraCostAmount('');
+      setShowExtraCostForm(false);
+      await loadRecipe(selectedProductId);
+    } catch (e) {
+      showToast(getUserMessage(e), 'error');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleDeleteExtraCost = async (extraCostId: number) => {
+    try {
+      await del(`/inventory-advanced/recipes/extra-costs/${extraCostId}`);
+      showToast('Extra cost removed', 'success');
+      if (selectedProductId) await loadRecipe(selectedProductId);
+    } catch (e) {
+      showToast(getUserMessage(e), 'error');
+    }
+  };
 
   return (
     <div className="flex flex-col lg:flex-row h-full min-h-0 bg-transparent py-4 gap-4 px-4 lg:px-6">
@@ -271,7 +337,7 @@ export default function RecipesTab() {
                 <div className="flex gap-3 text-sm mt-1 flex-wrap">
                   <span className="text-soot-500 font-mono">{selectedProduct.sku}</span>
                   <span className="text-soot-300">|</span>
-                  <span className="text-soot-600 font-medium">Sell Price: {formatCurrency(selectedProduct.base_price)}</span>
+                  <span className="text-soot-600 font-medium">Sell Price: {formatCurrency(selectedProduct.sale_price ?? selectedProduct.base_price)}</span>
                 </div>
                 {(selectedProduct.variants && selectedProduct.variants.length > 0) && (
                   <div className="mt-3 max-w-full">
@@ -304,9 +370,9 @@ export default function RecipesTab() {
                 <span className="text-lg font-bold text-brand-700 leading-none mt-1">
                   {formatCurrency(totalCost)}
                 </span>
-                {selectedProduct.base_price > 0 && (
+                {(selectedProduct.sale_price ?? selectedProduct.base_price) > 0 && (
                   <span className="text-xs text-brand-600/80 font-medium mt-1">
-                    Margin: {Math.max(0, 100 - (totalCost / selectedProduct.base_price * 100)).toFixed(1)}%
+                    Margin: {Math.max(0, (((selectedProduct.sale_price ?? selectedProduct.base_price) - totalCost) / (selectedProduct.sale_price ?? selectedProduct.base_price)) * 100).toFixed(1)}%
                   </span>
                 )}
               </div>
@@ -318,7 +384,7 @@ export default function RecipesTab() {
                  <div className="flex items-center justify-center py-10 text-soot-400 gap-2">
                    <Loader2 className="w-5 h-5 animate-spin" /> Loading recipe...
                  </div>
-              ) : displayedRecipeItems.length === 0 && displayedPreparedRecipeItems.length === 0 ? (
+              ) : displayedRecipeItems.length === 0 && displayedPreparedRecipeItems.length === 0 && displayedExtraCosts.length === 0 ? (
                  <div className="text-center py-10 text-soot-400">
                    <div className="w-12 h-12 rounded-full bg-soot-100 flex items-center justify-center mx-auto mb-3">
                      <PackageSearch className="w-6 h-6 text-soot-300" />
@@ -388,28 +454,88 @@ export default function RecipesTab() {
                       </div>
                     );
                   })}
+                  {displayedExtraCosts.map((ec) => (
+                    <div key={`extra-${ec.id}`} className="flex items-center justify-between p-3 rounded-lg border border-orange-200 bg-orange-50/50 hover:bg-orange-50/80 transition-colors">
+                      <div>
+                        <p className="font-bold text-soot-900">{ec.name}</p>
+                        <p className="text-xs text-soot-500 mt-0.5">
+                          Operational cost
+                          {(ec.variant_key || '').trim() ? (
+                            <span className="ml-2 text-brand-700 font-semibold">({(ec.variant_key || '').trim()})</span>
+                          ) : null}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-6">
+                        <div className="text-right">
+                          <span className="font-bold text-lg text-soot-800">{formatCurrency(ec.amount)}</span>
+                        </div>
+                        <button
+                          onClick={() => handleDeleteExtraCost(ec.id)}
+                          className="p-1.5 text-soot-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors"
+                          title="Remove extra cost"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
 
             {/* Bottom Add Bar */}
             <div className="p-5 border-t border-white/20 bg-white/20 shrink-0">
-              {!showAddForm ? (
-                <button
-                  onClick={() => setShowAddForm(true)}
-                  className="w-full flex items-center justify-center gap-2 py-3 rounded-lg border-2 border-dashed border-brand-300 text-brand-700 font-semibold hover:bg-brand-50 hover:border-brand-400 transition-colors touch-target"
-                >
-                  <Plus className="w-5 h-5" /> Add Ingredient or Sauce to Recipe
-                </button>
+              {!showAddForm && !showExtraCostForm ? (
+                <div className="space-y-2">
+                  <button
+                    onClick={() => setShowExtraCostForm(true)}
+                    className="w-full flex items-center justify-center gap-2 py-3 rounded-lg border-2 border-dashed border-orange-300 text-orange-700 font-semibold hover:bg-orange-50 hover:border-orange-400 transition-colors touch-target"
+                  >
+                    <Plus className="w-5 h-5" /> Add Extra Cost
+                  </button>
+                  <button
+                    onClick={() => setShowAddForm(true)}
+                    className="w-full flex items-center justify-center gap-2 py-3 rounded-lg border-2 border-dashed border-brand-300 text-brand-700 font-semibold hover:bg-brand-50 hover:border-brand-400 transition-colors touch-target"
+                  >
+                    <Plus className="w-5 h-5" /> Add Ingredient or Sauce to Recipe
+                  </button>
+                </div>
               ) : (
-                <form onSubmit={handleAddSubmit} className="glass-card p-4 space-y-4 shadow-sm border border-brand-200 bg-white/50">
+                <form onSubmit={showExtraCostForm ? handleAddExtraCost : handleAddSubmit} className="glass-card p-4 space-y-4 shadow-sm border border-brand-200 bg-white/50">
                   <div className="flex justify-between items-center mb-1">
-                    <h4 className="font-bold text-soot-900 text-sm">Add Material</h4>
-                    <button type="button" onClick={() => setShowAddForm(false)} className="text-soot-400 hover:text-soot-700 p-1">
+                    <h4 className="font-bold text-soot-900 text-sm">{showExtraCostForm ? 'Add Extra Cost' : 'Add Material'}</h4>
+                    <button type="button" onClick={() => { setShowAddForm(false); setShowExtraCostForm(false); }} className="text-soot-400 hover:text-soot-700 p-1">
                       <X className="w-4 h-4" />
                     </button>
                   </div>
-                  
+                  {showExtraCostForm ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-semibold text-soot-600 uppercase tracking-wider mb-1">Cost Name</label>
+                        <input
+                          type="text"
+                          required
+                          value={extraCostName}
+                          onChange={(e) => setExtraCostName(e.target.value)}
+                          placeholder="Gas / Electricity / Packaging / Labour"
+                          className="w-full px-3 py-2 glass-card text-sm focus:ring-2 focus:ring-brand-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-soot-600 uppercase tracking-wider mb-1">Cost Amount (PKR)</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          required
+                          value={extraCostAmount}
+                          onChange={(e) => setExtraCostAmount(e.target.value)}
+                          placeholder="e.g. 50"
+                          className="w-full px-3 py-2 glass-card text-sm focus:ring-2 focus:ring-brand-500"
+                        />
+                      </div>
+                    </div>
+                  ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-xs font-semibold text-soot-600 uppercase tracking-wider mb-1">Material type</label>
@@ -506,6 +632,7 @@ export default function RecipesTab() {
                       )}
                     </div>
                   </div>
+                  )}
                   
                   <div className="flex justify-end gap-2 pt-2">
                     <button 
@@ -513,7 +640,7 @@ export default function RecipesTab() {
                       disabled={submitting}
                       className="px-4 py-2 bg-brand-700 text-white rounded-lg text-sm font-semibold hover:bg-brand-600 disabled:opacity-50 touch-target"
                     >
-                      {submitting ? 'Adding...' : 'Save mapping'}
+                      {submitting ? 'Adding...' : (showExtraCostForm ? 'Save extra cost' : 'Save mapping')}
                     </button>
                   </div>
                 </form>

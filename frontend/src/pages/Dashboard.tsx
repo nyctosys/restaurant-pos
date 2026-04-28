@@ -13,6 +13,7 @@ type Product = {
   sku: string;
   title: string;
   base_price: number;
+  sale_price?: number;
   section: string;
   variants: string[];
   image_url?: string;
@@ -360,7 +361,7 @@ export default function Dashboard() {
     handleAddToCart({
       id: product.id,
       title: product.title,
-      price: product.base_price,
+      price: product.sale_price ?? product.base_price,
       image: getProductImageUrl(product),
       variant: defaultVariant,
     });
@@ -1102,7 +1103,7 @@ export default function Dashboard() {
                   </div>
                   <div className="flex min-w-0 flex-1 items-center justify-between gap-3">
                     <p className={`${layoutView === 'grid' ? 'text-sm line-clamp-3 whitespace-normal' : 'text-sm lg:text-base truncate'} min-w-0 font-semibold text-neutral-800 leading-tight`}>{product.title}</p>
-                    <p className={`${layoutView === 'grid' ? 'text-sm' : 'text-base'} shrink-0 font-bold text-brand-700 whitespace-nowrap`}>{formatCurrency(product.base_price)}</p>
+                    <p className={`${layoutView === 'grid' ? 'text-sm' : 'text-base'} shrink-0 font-bold text-brand-700 whitespace-nowrap`}>{formatCurrency(product.sale_price ?? product.base_price)}</p>
                   </div>
                 </button>
                 );

@@ -202,6 +202,20 @@ class RecipePreparedItemCreate(RecipePreparedItemBase):
     product_id: int
 
 
+class RecipeExtraCostBase(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    name: str
+    amount: float = Field(ge=0)
+    variant_key: str = ""
+
+    _normalize_name = field_validator("name")(lambda cls, value: _clean_required_text(value)[:120])
+    _normalize_variant_key = field_validator("variant_key")(lambda cls, value: str(value or "").strip()[:100])
+
+
+class RecipeExtraCostCreate(RecipeExtraCostBase):
+    product_id: int
+
+
 class PurchaseOrderItemBase(BaseModel):
     model_config = ConfigDict(extra="ignore")
     ingredient_id: int

@@ -94,7 +94,6 @@ export default function ActiveDineIn() {
     };
     const onOrderReady = (payload: { sale_id?: number; table_name?: string | null }) => {
       if (!payload?.sale_id) return;
-      const sale = sales.find(s => s.id === payload.sale_id);
       const label = payload.table_name
         ? `Table ${payload.table_name} · #${payload.sale_id}`
         : `Order #${payload.sale_id}`;

@@ -598,6 +598,73 @@ class PrinterService:
             self._disconnect()
             return False
 
+    def print_kot_modification(self, payload: dict) -> bool:
+        """Print an order modification slip on KOT printer."""
+        if not self._ensure_connected("kot", fresh=True):
+            return False
+        from datetime import datetime, timezone
+
+        sep = "=" * self.RECEIPT_WIDTH
+        thin = "-" * self.RECEIPT_WIDTH
+        now = datetime.now(timezone.utc)
+        dt_line = f"{now.strftime('%m/%d/%Y')}  {now.strftime('%I:%M %p').lstrip('0')}"
+        changes = payload.get("changes") or []
+        if not isinstance(changes, list):
+            changes = []
+        try:
+            self._set_font_scale(2)
+            self.printer.set(align="center", bold=True)
+            self.printer.text("MODIFIED ORDER\n")
+            self.printer.set(bold=False)
+            self._set_font_scale(1)
+            self.printer.text(sep + "\n")
+            self.printer.set(align="left")
+            self.printer.text(f"Order #{payload.get('sale_id', '')}\n")
+            order_type = (payload.get("order_type") or "").strip().lower()
+            if order_type == "takeaway":
+                self.printer.text("Type: Takeaway\n")
+            elif order_type == "delivery":
+                self.printer.text("Type: Delivery\n")
+            elif order_type == "dine_in":
+                self.printer.text("Type: Dine-in\n")
+            table_name = (payload.get("table_name") or "").strip()
+            if table_name:
+                self.printer.text(f"Table: {table_name}\n")
+            operator = (payload.get("operator") or "").strip()
+            if operator:
+                self.printer.text(f"Operator: {operator}\n")
+            self.printer.text(dt_line.rjust(self.RECEIPT_WIDTH) + "\n")
+            self.printer.text(thin + "\n")
+            self.printer.set(bold=True)
+            self.printer.text("CHANGES\n")
+            self.printer.set(bold=False)
+            self.printer.text(thin + "\n")
+            if not changes:
+                self.printer.text("No item differences captured\n")
+            for change in changes:
+                marker = "+"
+                ctype = str(change.get("type") or "").lower()
+                if ctype == "remove":
+                    marker = "-"
+                elif ctype == "change":
+                    marker = "~"
+                line = f"{marker} {str(change.get('description') or '').strip()}"
+                while len(line) > self.RECEIPT_WIDTH:
+                    self.printer.text(line[: self.RECEIPT_WIDTH] + "\n")
+                    line = line[self.RECEIPT_WIDTH :]
+                self.printer.text(line + "\n")
+            self.printer.text(thin + "\n")
+            self.printer.set(align="center")
+            self.printer.text("— Modified Order —\n\n")
+            self._kot_printer_buzz()
+            self.printer.cut()
+            self._disconnect()
+            return True
+        except Exception as e:
+            print(f"KOT modification printing failed: {e}")
+            self._disconnect()
+            return False
+
     def print_barcode_label(self, sku: str, title: str = '') -> bool:
         """Print a barcode label (product name + CODE128) on the configured receipt printer."""
         if not sku or not sku.strip():

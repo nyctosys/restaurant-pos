@@ -42,11 +42,15 @@ class Setting(db.Model):
 
 class Product(db.Model):
     __tablename__ = 'products'
-    __table_args__ = (CheckConstraint('base_price >= 0', name='ck_product_base_price_non_neg'),)
+    __table_args__ = (
+        CheckConstraint('base_price >= 0', name='ck_product_base_price_non_neg'),
+        CheckConstraint('sale_price >= 0', name='ck_product_sale_price_non_neg'),
+    )
     id = db.Column(db.Integer, primary_key=True)
     sku = db.Column(db.String(100), unique=True, nullable=False)
     title = db.Column(db.String(255), nullable=False)
     base_price = db.Column(db.Numeric(12, 2), nullable=False)
+    sale_price = db.Column(db.Numeric(12, 2), nullable=False, default=0)
     section = db.Column(db.String(100), nullable=True, default='')
     variants = db.Column(db.JSON, nullable=False, default=[])
     image_url = db.Column(db.Text, nullable=True, default='')  # URL or data URL for product image (base64 can be large)
@@ -144,6 +148,11 @@ class Sale(db.Model):
     # Kitchen display workflow (open dine-in / KOT tickets)
     kitchen_status = db.Column(db.String(20), nullable=True)  # placed | preparing | ready
     kitchen_ready_at = db.Column(db.DateTime(timezone=True), nullable=True)  # set when status → ready; KDS drops after 24h
+    # Idempotency marker for auto KDS ticket printing.
+    kds_ticket_printed_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    modified_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    # Latest order edit diff for KDS badge + modification print ticket.
+    modification_snapshot = db.Column(db.JSON, nullable=True)
 
     items = db.relationship('SaleItem', backref='sale', lazy=True, cascade="all, delete-orphan")
 
@@ -297,6 +306,23 @@ class RecipeItem(db.Model):
 
     product = db.relationship("Product", back_populates="recipe_items")
     ingredient = db.relationship("Ingredient", back_populates="recipe_items")
+
+
+class RecipeExtraCost(db.Model):
+    __tablename__ = "recipe_extra_costs"
+    __table_args__ = (
+        CheckConstraint("amount >= 0", name="ck_recipe_extra_cost_amount_nonneg"),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    product_id = db.Column(db.Integer, db.ForeignKey("products.id"), nullable=False)
+    name = db.Column(db.String(120), nullable=False)
+    amount = db.Column(db.Float, nullable=False, default=0.0)
+    # Empty = base BOM cost; non-empty = variant-specific cost override/addition scope.
+    variant_key = db.Column(db.String(100), nullable=False, default="")
+    created_at = db.Column(db.DateTime(timezone=True), default=utc_now)
+
+    product = db.relationship("Product", backref=db.backref("recipe_extra_costs", cascade="all, delete-orphan"))
 
 
 class PreparedItem(db.Model):
