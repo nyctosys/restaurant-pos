@@ -161,3 +161,91 @@ def test_purchase_order_flow(client, app):
     tom = next(i for i in ings if i["id"] == ing_id)
     assert tom["current_stock"] == 20
     assert tom["last_purchase_price"] == 2.50
+
+
+def test_prepared_item_batch_deducts_ingredients(client, app):
+    h = _auth_headers(client, app)
+    r_ing = client.post("/api/inventory-advanced/ingredients", headers=h, json={
+        "name": "Yogurt",
+        "sku": "ING-YOG",
+        "unit": "kg",
+        "current_stock": 10,
+        "average_cost": 300,
+    })
+    ing_id = r_ing.get_json()["id"]
+
+    r_prepared = client.post("/api/inventory-advanced/prepared-items", headers=h, json={
+        "name": "Garlic Sauce",
+        "sku": "SAUCE-GARLIC",
+        "kind": "sauce",
+        "unit": "kg",
+        "components": [{"ingredient_id": ing_id, "quantity": 0.5, "unit": "kg"}],
+    })
+    assert r_prepared.status_code == 200
+    prepared_id = r_prepared.get_json()["id"]
+
+    r_batch = client.post(
+        f"/api/inventory-advanced/prepared-items/{prepared_id}/batches",
+        headers=h,
+        json={"quantity": 4},
+    )
+    assert r_batch.status_code == 200
+
+    ingredients = client.get("/api/inventory-advanced/ingredients", headers=h).get_json()["ingredients"]
+    yogurt = next(i for i in ingredients if i["id"] == ing_id)
+    assert yogurt["current_stock"] == 8
+
+    prepared_items = client.get("/api/inventory-advanced/prepared-items", headers=h).get_json()["prepared_items"]
+    garlic = next(i for i in prepared_items if i["id"] == prepared_id)
+    assert garlic["current_stock"] == 4
+
+
+def test_recipe_can_deduct_prepared_sauce_on_sale(client, app):
+    h = _auth_headers(client, app)
+    r_ing = client.post("/api/inventory-advanced/ingredients", headers=h, json={
+        "name": "Chilli Paste",
+        "sku": "ING-CHILLI-PASTE",
+        "unit": "kg",
+        "current_stock": 5,
+        "average_cost": 500,
+    })
+    ing_id = r_ing.get_json()["id"]
+    r_prepared = client.post("/api/inventory-advanced/prepared-items", headers=h, json={
+        "name": "Hot Sauce",
+        "sku": "SAUCE-HOT",
+        "kind": "sauce",
+        "unit": "kg",
+        "components": [{"ingredient_id": ing_id, "quantity": 0.25, "unit": "kg"}],
+    })
+    prepared_id = r_prepared.get_json()["id"]
+    assert client.post(
+        f"/api/inventory-advanced/prepared-items/{prepared_id}/batches",
+        headers=h,
+        json={"quantity": 2},
+    ).status_code == 200
+
+    r_product = client.post("/api/menu-items/", headers=h, json={
+        "sku": "PROD-WINGS",
+        "title": "Hot Wings",
+        "base_price": 900,
+        "section": "Mains",
+    })
+    assert r_product.status_code == 201
+    product_id = r_product.get_json()["id"]
+    r_map = client.post("/api/inventory-advanced/recipes/prepared-items", headers=h, json={
+        "product_id": product_id,
+        "prepared_item_id": prepared_id,
+        "quantity": 0.2,
+        "unit": "kg",
+    })
+    assert r_map.status_code == 200
+
+    r_sale = client.post("/api/orders/checkout", headers=h, json={
+        "items": [{"product_id": product_id, "quantity": 3}],
+        "payment_method": "cash",
+    })
+    assert r_sale.status_code == 201
+
+    prepared_items = client.get("/api/inventory-advanced/prepared-items", headers=h).get_json()["prepared_items"]
+    hot_sauce = next(i for i in prepared_items if i["id"] == prepared_id)
+    assert hot_sauce["current_stock"] == pytest.approx(1.4)

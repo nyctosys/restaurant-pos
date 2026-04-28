@@ -7,7 +7,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from 'react';
 import { createPortal } from 'react-dom';
-import { Check, ChevronDown } from 'lucide-react';
+import { Check, ChevronDown, Search, X } from 'lucide-react';
 
 export type SearchableSelectOption = {
   value: string;
@@ -37,6 +37,7 @@ export default function SearchableSelect({
   onChange,
   options,
   placeholder = 'Select an option',
+  searchPlaceholder = 'Search...',
   emptyMessage = 'No results found.',
   disabled = false,
   className,
@@ -44,24 +45,39 @@ export default function SearchableSelect({
 }: SearchableSelectProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const [open, setOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
   const [menuStyle, setMenuStyle] = useState<{ top: number; left: number; width: number } | null>(null);
+
+  const filteredOptions = useMemo(() => {
+    const query = searchQuery.toLowerCase().trim();
+    if (!query) return options;
+    return options.filter(option => 
+      option.label.toLowerCase().includes(query) || 
+      option.searchText?.toLowerCase().includes(query)
+    );
+  }, [options, searchQuery]);
 
   const sortedOptions = useMemo(
     () =>
-      [...options].sort((left, right) =>
+      [...filteredOptions].sort((left, right) =>
         left.label.localeCompare(right.label, undefined, { numeric: true, sensitivity: 'base' })
       ),
-    [options]
+    [filteredOptions]
   );
 
-  const selectedOption = sortedOptions.find((option) => option.value === value);
+  const selectedOption = options.find((option) => option.value === value);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      setSearchQuery('');
+      return;
+    }
 
     const handlePointerDown = (event: MouseEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) {
+      if (!rootRef.current?.contains(event.target as Node) && 
+          !(event.target as HTMLElement).closest('.searchable-select-dropdown')) {
         setOpen(false);
       }
     };
@@ -74,6 +90,11 @@ export default function SearchableSelect({
 
     document.addEventListener('mousedown', handlePointerDown);
     document.addEventListener('keydown', handleEscape);
+
+    // Focus search input when opened
+    setTimeout(() => {
+        searchInputRef.current?.focus();
+    }, 50);
 
     return () => {
       document.removeEventListener('mousedown', handlePointerDown);
@@ -88,11 +109,25 @@ export default function SearchableSelect({
       const trigger = triggerRef.current;
       if (!trigger) return;
       const rect = trigger.getBoundingClientRect();
-      setMenuStyle({
-        top: rect.bottom + 8,
-        left: rect.left,
-        width: rect.width,
-      });
+      
+      // Determine if it should open upwards or downwards
+      const spaceBelow = window.innerHeight - rect.bottom;
+      const spaceAbove = rect.top;
+      const menuHeight = 320; // estimate
+
+      if (spaceBelow < menuHeight && spaceAbove > spaceBelow) {
+          setMenuStyle({
+            top: rect.top - 8, // logic to handle transform-translate-y would be better
+            left: rect.left,
+            width: rect.width,
+          });
+      } else {
+          setMenuStyle({
+            top: rect.bottom + 8,
+            left: rect.left,
+            width: rect.width,
+          });
+      }
     };
 
     updateMenuPosition();
@@ -146,14 +181,41 @@ export default function SearchableSelect({
         ? createPortal(
             <div
               className={cx(
-                'fixed z-[120] min-w-[12rem] overflow-hidden rounded-xl border border-soot-200 bg-white/95 shadow-xl backdrop-blur-md',
+                'fixed z-[120] min-w-[12rem] overflow-hidden rounded-xl border border-soot-200 bg-white/95 shadow-xl backdrop-blur-md searchable-select-dropdown',
                 dropdownClassName
               )}
-              style={{ top: menuStyle.top, left: menuStyle.left, width: menuStyle.width }}
+              style={{ 
+                top: menuStyle.top, 
+                left: menuStyle.left, 
+                width: menuStyle.width,
+                transform: menuStyle.top < (triggerRef.current?.getBoundingClientRect().top ?? 0) ? 'translateY(-100%)' : 'none'
+              }}
             >
+              <div className="p-2 border-b border-soot-100 flex items-center gap-2">
+                <Search className="w-4 h-4 text-soot-400 ml-1" />
+                <input
+                  ref={searchInputRef}
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                      if (e.key === 'Enter' && sortedOptions.length > 0) {
+                          onChange(sortedOptions[0].value);
+                          setOpen(false);
+                      }
+                  }}
+                  placeholder={searchPlaceholder}
+                  className="w-full bg-transparent border-0 text-sm focus:ring-0 p-1"
+                />
+                {searchQuery && (
+                    <button onClick={() => setSearchQuery('')} className="p-1 hover:bg-soot-100 rounded">
+                        <X className="w-3 h-3 text-soot-400" />
+                    </button>
+                )}
+              </div>
               <div className="max-h-64 overflow-y-auto p-1.5" role="listbox">
                 {sortedOptions.length === 0 ? (
-                  <div className="px-3 py-2 text-sm text-soot-400">{emptyMessage}</div>
+                  <div className="px-3 py-2 text-sm text-soot-400 text-center py-4">{emptyMessage}</div>
                 ) : (
                   sortedOptions.map((option) => {
                     const selected = option.value === value;

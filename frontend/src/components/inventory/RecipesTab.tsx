@@ -18,6 +18,16 @@ type Ingredient = {
   name: string;
   unit: string;
   average_cost: number;
+  purchase_unit?: string;
+  conversion_factor?: number;
+};
+
+type PreparedItem = {
+  id: number;
+  name: string;
+  kind: 'sauce' | 'marination';
+  unit: string;
+  average_cost: number;
 };
 
 type RecipeItem = {
@@ -30,21 +40,36 @@ type RecipeItem = {
   variant_key?: string;
 };
 
+type RecipePreparedItem = {
+  id: number;
+  product_id: number;
+  prepared_item_id: number;
+  quantity: number;
+  unit: string;
+  notes?: string;
+  variant_key?: string;
+};
+
 export default function RecipesTab() {
   const [products, setProducts] = useState<Product[]>([]);
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
+  const [preparedItems, setPreparedItems] = useState<PreparedItem[]>([]);
   const [loadingInitial, setLoadingInitial] = useState(true);
   
   const [selectedProductId, setSelectedProductId] = useState<number | null>(null);
   /** '' = base BOM (all variants unless a variant-specific BOM exists); else exact variant label */
   const [recipeVariantScope, setRecipeVariantScope] = useState('');
   const [recipeItems, setRecipeItems] = useState<RecipeItem[]>([]);
+  const [recipePreparedItems, setRecipePreparedItems] = useState<RecipePreparedItem[]>([]);
   const [loadingRecipe, setLoadingRecipe] = useState(false);
 
   // Form
   const [showAddForm, setShowAddForm] = useState(false);
+  const [formMaterialType, setFormMaterialType] = useState<'ingredient' | 'prepared'>('ingredient');
   const [formIngredientId, setFormIngredientId] = useState('');
+  const [formPreparedItemId, setFormPreparedItemId] = useState('');
   const [formQuantity, setFormQuantity] = useState('');
+  const [formUsePurchaseUnit, setFormUsePurchaseUnit] = useState(false);
   const [formNotes, setFormNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -56,12 +81,14 @@ export default function RecipesTab() {
     setLoadingInitial(true);
     try {
       // Need all menu items and all ingredients
-      const [prodRes, ingRes] = await Promise.all([
+      const [prodRes, ingRes, preparedRes] = await Promise.all([
         get<{ products: Product[] }>('/menu-items/'),
-        get<{ ingredients: Ingredient[] }>('/inventory-advanced/ingredients')
+        get<{ ingredients: Ingredient[] }>('/inventory-advanced/ingredients'),
+        get<{ prepared_items: PreparedItem[] }>('/inventory-advanced/prepared-items')
       ]);
       setProducts(prodRes.products || []);
       setIngredients(ingRes.ingredients || []);
+      setPreparedItems(preparedRes.prepared_items || []);
     } catch (e) {
       showToast(getUserMessage(e), 'error');
     } finally {
@@ -75,8 +102,9 @@ export default function RecipesTab() {
     setLoadingRecipe(true);
     setShowAddForm(false);
     try {
-      const res = await get<{ recipe_items: RecipeItem[] }>(`/inventory-advanced/recipes/${productId}`);
+      const res = await get<{ recipe_items: RecipeItem[]; recipe_prepared_items: RecipePreparedItem[] }>(`/inventory-advanced/recipes/${productId}`);
       setRecipeItems(res.recipe_items || []);
+      setRecipePreparedItems(res.recipe_prepared_items || []);
     } catch (e) {
       showToast(getUserMessage(e), 'error');
     } finally {
@@ -86,7 +114,7 @@ export default function RecipesTab() {
 
   const handleAddSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedProductId || !formIngredientId || !formQuantity) return;
+    if (!selectedProductId || !formQuantity) return;
     
     const qty = parseFloat(formQuantity);
     if (isNaN(qty) || qty <= 0) {
@@ -95,23 +123,43 @@ export default function RecipesTab() {
     }
 
     const ing = ingredients.find(i => i.id.toString() === formIngredientId);
-    if (!ing) return;
+    const prepared = preparedItems.find(i => i.id.toString() === formPreparedItemId);
+    if (formMaterialType === 'ingredient' && !ing) return;
+    if (formMaterialType === 'prepared' && !prepared) return;
 
     setSubmitting(true);
     try {
-      await post('/inventory-advanced/recipes', {
-        product_id: selectedProductId,
-        ingredient_id: parseInt(formIngredientId, 10),
-        quantity: qty,
-        unit: ing.unit,
-        notes: formNotes || undefined,
-        variant_key: recipeVariantScope || '',
-      });
-      showToast('Ingredient added to recipe', 'success');
+      if (formMaterialType === 'ingredient' && ing) {
+        let finalQty = qty;
+        if (formUsePurchaseUnit && ing.conversion_factor) {
+          finalQty = qty * ing.conversion_factor;
+        }
+
+        await post('/inventory-advanced/recipes', {
+          product_id: selectedProductId,
+          ingredient_id: parseInt(formIngredientId, 10),
+          quantity: finalQty,
+          unit: ing.unit,
+          notes: formNotes || undefined,
+          variant_key: recipeVariantScope || '',
+        });
+      } else if (prepared) {
+        await post('/inventory-advanced/recipes/prepared-items', {
+          product_id: selectedProductId,
+          prepared_item_id: parseInt(formPreparedItemId, 10),
+          quantity: qty,
+          unit: prepared.unit,
+          notes: formNotes || undefined,
+          variant_key: recipeVariantScope || '',
+        });
+      }
+      showToast('Material added to recipe', 'success');
       
       // Reset and reload
       setFormIngredientId('');
+      setFormPreparedItemId('');
       setFormQuantity('');
+      setFormUsePurchaseUnit(false);
       setFormNotes('');
       setShowAddForm(false);
       loadRecipe(selectedProductId);
@@ -122,9 +170,9 @@ export default function RecipesTab() {
     }
   };
 
-  const handleDelete = async (itemId: number) => {
+  const handleDelete = async (itemId: number, materialType: 'ingredient' | 'prepared' = 'ingredient') => {
     try {
-      await del(`/inventory-advanced/recipes/${itemId}`);
+      await del(materialType === 'ingredient' ? `/inventory-advanced/recipes/${itemId}` : `/inventory-advanced/recipes/prepared-items/${itemId}`);
       showToast('Removed from recipe', 'success');
       if (selectedProductId) loadRecipe(selectedProductId);
     } catch (e) {
@@ -147,6 +195,11 @@ export default function RecipesTab() {
     if (!recipeVariantScope) return vk === '';
     return vk === recipeVariantScope;
   });
+  const displayedPreparedRecipeItems = recipePreparedItems.filter(ri => {
+    const vk = (ri.variant_key || '').trim();
+    if (!recipeVariantScope) return vk === '';
+    return vk === recipeVariantScope;
+  });
 
   // Calculate recipe cost for the selected scope only
   let totalCost = 0;
@@ -154,6 +207,12 @@ export default function RecipesTab() {
     const ing = ingredients.find(i => i.id === ri.ingredient_id);
     if (ing) {
       totalCost += (ing.average_cost * ri.quantity);
+    }
+  });
+  displayedPreparedRecipeItems.forEach(ri => {
+    const prepared = preparedItems.find(i => i.id === ri.prepared_item_id);
+    if (prepared) {
+      totalCost += (prepared.average_cost * ri.quantity);
     }
   });
 
@@ -259,7 +318,7 @@ export default function RecipesTab() {
                  <div className="flex items-center justify-center py-10 text-soot-400 gap-2">
                    <Loader2 className="w-5 h-5 animate-spin" /> Loading recipe...
                  </div>
-              ) : displayedRecipeItems.length === 0 ? (
+              ) : displayedRecipeItems.length === 0 && displayedPreparedRecipeItems.length === 0 ? (
                  <div className="text-center py-10 text-soot-400">
                    <div className="w-12 h-12 rounded-full bg-soot-100 flex items-center justify-center mx-auto mb-3">
                      <PackageSearch className="w-6 h-6 text-soot-300" />
@@ -299,6 +358,36 @@ export default function RecipesTab() {
                       </div>
                     );
                   })}
+                  {displayedPreparedRecipeItems.map(ri => {
+                    const prepared = preparedItems.find(i => i.id === ri.prepared_item_id);
+                    if (!prepared) return null;
+                    return (
+                      <div key={`prepared-${ri.id}`} className="flex items-center justify-between p-3 rounded-lg border border-brand-200 bg-brand-50/40 hover:bg-brand-50/70 transition-colors">
+                        <div>
+                          <p className="font-bold text-soot-900">{prepared.name}</p>
+                          <p className="text-xs text-soot-500 mt-0.5">
+                            {prepared.kind === 'marination' ? 'Marination' : 'Sauce'} cost: {formatCurrency(prepared.average_cost)} / {prepared.unit}
+                            {(ri.variant_key || '').trim() ? (
+                              <span className="ml-2 text-brand-700 font-semibold">({(ri.variant_key || '').trim()})</span>
+                            ) : null}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-6">
+                          <div className="text-right">
+                            <span className="font-bold text-lg text-soot-800">{ri.quantity}</span>
+                            <span className="text-sm text-soot-500 ml-1 font-medium">{ri.unit}</span>
+                          </div>
+                          <button 
+                            onClick={() => handleDelete(ri.id, 'prepared')}
+                            className="p-1.5 text-soot-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors"
+                            title="Remove sauce/marination"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -310,7 +399,7 @@ export default function RecipesTab() {
                   onClick={() => setShowAddForm(true)}
                   className="w-full flex items-center justify-center gap-2 py-3 rounded-lg border-2 border-dashed border-brand-300 text-brand-700 font-semibold hover:bg-brand-50 hover:border-brand-400 transition-colors touch-target"
                 >
-                  <Plus className="w-5 h-5" /> Add Ingredient to Recipe
+                  <Plus className="w-5 h-5" /> Add Ingredient or Sauce to Recipe
                 </button>
               ) : (
                 <form onSubmit={handleAddSubmit} className="glass-card p-4 space-y-4 shadow-sm border border-brand-200 bg-white/50">
@@ -322,6 +411,21 @@ export default function RecipesTab() {
                   </div>
                   
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-soot-600 uppercase tracking-wider mb-1">Material type</label>
+                      <select
+                        value={formMaterialType}
+                        onChange={(e) => {
+                          setFormMaterialType(e.target.value as 'ingredient' | 'prepared');
+                          setFormIngredientId('');
+                          setFormPreparedItemId('');
+                        }}
+                        className="w-full px-3 py-2 glass-card text-sm focus:ring-2 focus:ring-brand-500"
+                      >
+                        <option value="ingredient">Ingredient</option>
+                        <option value="prepared">Sauce/Marination</option>
+                      </select>
+                    </div>
                     <div>
                       <label className="block text-xs font-semibold text-soot-600 uppercase tracking-wider mb-1">Ingredient</label>
                       <SearchableSelect
@@ -338,14 +442,49 @@ export default function RecipesTab() {
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-semibold text-soot-600 uppercase tracking-wider mb-1">
-                        Quantity per portion
+                      <label className="block text-xs font-semibold text-soot-600 uppercase tracking-wider mb-1">Sauce / Marination</label>
+                      <SearchableSelect
+                        value={formPreparedItemId}
+                        onChange={setFormPreparedItemId}
+                        placeholder="Select sauce/marination"
+                        searchPlaceholder="Search sauces..."
+                        options={preparedItems.map((item) => ({
+                          value: String(item.id),
+                          label: `${item.name} (${item.unit})`,
+                          searchText: item.name,
+                        }))}
+                        disabled={formMaterialType !== 'prepared'}
+                        className="glass-card border-0 px-3 py-2"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-soot-600 uppercase tracking-wider mb-1 flex justify-between items-center">
+                        <span>Quantity per portion</span>
+                        {formMaterialType === 'ingredient' && formIngredientId && (
+                          (() => {
+                            const ing = ingredients.find(i => i.id.toString() === formIngredientId);
+                            if (ing?.purchase_unit && (ing.conversion_factor ?? 0) > 1) {
+                              return (
+                                <button
+                                  type="button"
+                                  onClick={() => setFormUsePurchaseUnit(!formUsePurchaseUnit)}
+                                  className={`text-[10px] uppercase font-bold px-1.5 py-0.5 rounded border ${
+                                    formUsePurchaseUnit ? 'bg-brand-100 text-brand-700 border-brand-200' : 'bg-neutral-100 text-neutral-500 border-neutral-200'
+                                  }`}
+                                >
+                                  {formUsePurchaseUnit ? `In ${ing.purchase_unit}` : `Use ${ing.purchase_unit}?`}
+                                </button>
+                              );
+                            }
+                            return null;
+                          })()
+                        )}
                       </label>
                       <div className="relative">
                         <input 
                           type="number" 
                           step="any" 
-                          min="0.01"
+                          min="0.000001"
                           required
                           value={formQuantity} 
                           onChange={e => setFormQuantity(e.target.value)} 
@@ -353,9 +492,18 @@ export default function RecipesTab() {
                           placeholder="e.g. 0.15"
                         />
                         <div className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-medium text-soot-400 pointer-events-none">
-                          {formIngredientId && ingredients.find(i => i.id.toString() === formIngredientId)?.unit}
+                          {formMaterialType === 'ingredient'
+                            ? (formUsePurchaseUnit 
+                                ? ingredients.find(i => i.id.toString() === formIngredientId)?.purchase_unit 
+                                : ingredients.find(i => i.id.toString() === formIngredientId)?.unit)
+                            : formPreparedItemId && preparedItems.find(i => i.id.toString() === formPreparedItemId)?.unit}
                         </div>
                       </div>
+                      {formUsePurchaseUnit && formQuantity && (
+                        <div className="mt-1 text-[10px] text-brand-600 font-medium italic">
+                          = {(parseFloat(formQuantity) * (ingredients.find(i => i.id.toString() === formIngredientId)?.conversion_factor || 1)).toFixed(4)} {ingredients.find(i => i.id.toString() === formIngredientId)?.unit}
+                        </div>
+                      )}
                     </div>
                   </div>
                   

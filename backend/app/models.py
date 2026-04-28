@@ -186,6 +186,7 @@ class PurchaseOrderStatus(str, enum.Enum):
 class StockMovementType(str, enum.Enum):
     PURCHASE = "purchase"
     SALE_DEDUCTION = "sale_deduction"
+    PREPARATION = "preparation"
     WASTAGE = "wastage"
     ADJUSTMENT = "adjustment"
     STOCK_TAKE = "stock_take"
@@ -234,11 +235,13 @@ class Ingredient(db.Model):
     name = db.Column(db.String(200), nullable=False)
     sku = db.Column(db.String(100), unique=True)
     unit = db.Column(db.Enum(UnitOfMeasure), nullable=False, default=UnitOfMeasure.KG)
+    purchase_unit = db.Column(db.String(50), nullable=True) # e.g. "carton", "packet"
+    conversion_factor = db.Column(db.Float, default=1.0)    # e.g. 1 carton = 10 KG
     current_stock = db.Column(db.Float, default=0.0)
     minimum_stock = db.Column(db.Float, default=0.0)   # Low-stock threshold
     reorder_quantity = db.Column(db.Float, default=0.0)
-    last_purchase_price = db.Column(db.Float, default=0.0)
-    average_cost = db.Column(db.Float, default=0.0)    # Moving average
+    last_purchase_price = db.Column(db.Float, default=0.0) # Price per PURCHASE unit
+    average_cost = db.Column(db.Float, default=0.0)    # Moving average (Price per BASE unit)
     preferred_supplier_id = db.Column(db.Integer, db.ForeignKey("suppliers.id"), nullable=True)
     category = db.Column(db.String(100))
     notes = db.Column(db.Text)
@@ -248,6 +251,7 @@ class Ingredient(db.Model):
 
     preferred_supplier = db.relationship("Supplier", back_populates="ingredients")
     recipe_items = db.relationship("RecipeItem", back_populates="ingredient")
+    prepared_item_components = db.relationship("PreparedItemComponent", back_populates="ingredient")
     stock_movements = db.relationship("StockMovement", back_populates="ingredient")
     purchase_order_items = db.relationship("PurchaseOrderItem", back_populates="ingredient")
     stock_take_items = db.relationship("StockTakeItem", back_populates="ingredient")
@@ -291,6 +295,108 @@ class RecipeItem(db.Model):
 
     product = db.relationship("Product", back_populates="recipe_items")
     ingredient = db.relationship("Ingredient", back_populates="recipe_items")
+
+
+class PreparedItem(db.Model):
+    """Batch-made sauce or marination built from raw ingredients."""
+
+    __tablename__ = "prepared_items"
+    __table_args__ = (
+        CheckConstraint("current_stock >= 0", name="ck_prepared_item_stock_nonneg"),
+        CheckConstraint("average_cost >= 0", name="ck_prepared_item_average_cost_nonneg"),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(200), nullable=False)
+    sku = db.Column(db.String(100), unique=True)
+    kind = db.Column(db.String(50), nullable=False, default="sauce")
+    unit = db.Column(db.Enum(UnitOfMeasure), nullable=False, default=UnitOfMeasure.KG)
+    current_stock = db.Column(db.Float, nullable=False, default=0.0)
+    average_cost = db.Column(db.Float, nullable=False, default=0.0)
+    notes = db.Column(db.Text)
+    is_active = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime(timezone=True), default=utc_now)
+    updated_at = db.Column(db.DateTime(timezone=True), onupdate=utc_now)
+
+    components = db.relationship(
+        "PreparedItemComponent", back_populates="prepared_item", cascade="all, delete-orphan"
+    )
+    branch_stocks = db.relationship(
+        "PreparedItemBranchStock", back_populates="prepared_item", cascade="all, delete-orphan"
+    )
+    recipe_items = db.relationship("RecipePreparedItem", back_populates="prepared_item")
+    stock_movements = db.relationship("PreparedItemStockMovement", back_populates="prepared_item")
+
+
+class PreparedItemComponent(db.Model):
+    """Raw ingredient quantity needed for one unit of a prepared sauce/marination."""
+
+    __tablename__ = "prepared_item_components"
+
+    id = db.Column(db.Integer, primary_key=True)
+    prepared_item_id = db.Column(db.Integer, db.ForeignKey("prepared_items.id"), nullable=False)
+    ingredient_id = db.Column(db.Integer, db.ForeignKey("ingredients.id"), nullable=False)
+    quantity = db.Column(db.Float, nullable=False)
+    unit = db.Column(db.Enum(UnitOfMeasure), nullable=False)
+    notes = db.Column(db.String(500))
+
+    prepared_item = db.relationship("PreparedItem", back_populates="components")
+    ingredient = db.relationship("Ingredient", back_populates="prepared_item_components")
+
+
+class PreparedItemBranchStock(db.Model):
+    """Per-branch on-hand quantity for batch-made sauces/marinations."""
+
+    __tablename__ = "prepared_item_branch_stocks"
+    __table_args__ = (
+        db.UniqueConstraint("prepared_item_id", "branch_id", name="uq_prepared_item_branch_stock"),
+        CheckConstraint("current_stock >= 0", name="ck_prepared_item_branch_stock_nonneg"),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    prepared_item_id = db.Column(db.Integer, db.ForeignKey("prepared_items.id"), nullable=False)
+    branch_id = db.Column(db.Integer, db.ForeignKey("branches.id"), nullable=False)
+    current_stock = db.Column(db.Float, nullable=False, default=0.0)
+
+    prepared_item = db.relationship("PreparedItem", back_populates="branch_stocks")
+    branch = db.relationship("Branch", lazy=True)
+
+
+class RecipePreparedItem(db.Model):
+    """Prepared sauce/marination quantity used by one unit of a menu item."""
+
+    __tablename__ = "recipe_prepared_items"
+
+    id = db.Column(db.Integer, primary_key=True)
+    product_id = db.Column(db.Integer, db.ForeignKey("products.id"), nullable=False)
+    prepared_item_id = db.Column(db.Integer, db.ForeignKey("prepared_items.id"), nullable=False)
+    quantity = db.Column(db.Float, nullable=False)
+    unit = db.Column(db.Enum(UnitOfMeasure), nullable=False)
+    notes = db.Column(db.String(500))
+    variant_key = db.Column(db.String(100), nullable=False, default="")
+    created_at = db.Column(db.DateTime(timezone=True), default=utc_now)
+
+    product = db.relationship("Product", backref=db.backref("prepared_recipe_items", cascade="all, delete-orphan"))
+    prepared_item = db.relationship("PreparedItem", back_populates="recipe_items")
+
+
+class PreparedItemStockMovement(db.Model):
+    __tablename__ = "prepared_item_stock_movements"
+
+    id = db.Column(db.Integer, primary_key=True)
+    prepared_item_id = db.Column(db.Integer, db.ForeignKey("prepared_items.id"), nullable=False)
+    movement_type = db.Column(db.String(50), nullable=False)
+    quantity_change = db.Column(db.Float, nullable=False)
+    quantity_before = db.Column(db.Float, nullable=False)
+    quantity_after = db.Column(db.Float, nullable=False)
+    reference_id = db.Column(db.Integer, nullable=True)
+    reference_type = db.Column(db.String(50), nullable=True)
+    reason = db.Column(db.String(500))
+    created_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    branch_id = db.Column(db.Integer, db.ForeignKey("branches.id"), nullable=True)
+    created_at = db.Column(db.DateTime(timezone=True), default=utc_now)
+
+    prepared_item = db.relationship("PreparedItem", back_populates="stock_movements")
 
 
 # --- Purchase Order ---

@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from app.models import Product, RecipeItem
+    from app.models import Product, RecipeItem, RecipePreparedItem
 
 
 def normalize_variant_key(raw: str | None) -> str:
@@ -46,6 +46,24 @@ def recipe_rows_for_variant(product: "Product", variant_key: str | None) -> list
     rows = list(getattr(product, "recipe_items", None) or [])
 
     def row_vk(r: "RecipeItem") -> str:
+        return normalize_variant_key(getattr(r, "variant_key", None))
+
+    base = [r for r in rows if row_vk(r) == ""]
+    if not vk:
+        return base
+
+    specific = [r for r in rows if row_vk(r) == vk]
+    return specific if specific else base
+
+
+def prepared_recipe_rows_for_variant(
+    product: "Product", variant_key: str | None
+) -> list["RecipePreparedItem"]:
+    """Variant fallback for prepared sauce/marination recipe rows."""
+    vk = normalize_variant_key(variant_key)
+    rows = list(getattr(product, "prepared_recipe_items", None) or [])
+
+    def row_vk(r: "RecipePreparedItem") -> str:
         return normalize_variant_key(getattr(r, "variant_key", None))
 
     base = [r for r in rows if row_vk(r) == ""]

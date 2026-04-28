@@ -1,0 +1,333 @@
+INFO:     Started server process [24492]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:5001 (Press CTRL+C to quit)
+INFO:     ('127.0.0.1', 56835) - "WebSocket /api/scanner/ws" [accepted]
+INFO:     connection open
+Database tables created successfully.
+INFO:     127.0.0.1:56832 - "GET /api/auth/status HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/auth/status status=200 duration_ms=313.33 request_id=323f0d24-d23c-4680-88a5-c9d9c2b07abc
+INFO:     127.0.0.1:56839 - "GET /api/auth/status HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/auth/status status=200 duration_ms=16.60 request_id=b205f0bd-ee8a-4838-8d85-edf269b494f9
+INFO:     127.0.0.1:56834 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=419.73 request_id=6046e24b-4337-4a7d-a7b6-a34284ca7140
+INFO:     127.0.0.1:56841 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=73.76 request_id=d4380380-3eac-4e2c-af00-63f33a090756
+INFO:     127.0.0.1:56843 - "GET /api/menu-items/ HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/menu-items/ status=200 duration_ms=44.73 request_id=6f6c0461-8ecd-4787-a4a6-531c2b5a7b8f
+Printer hardware not configured in settings.
+INFO:     127.0.0.1:58884 - "GET /api/printer/status HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/printer/status status=200 duration_ms=27.17 request_id=85f054ed-1f1c-4cae-8168-42d8a9429175
+INFO:     127.0.0.1:58882 - "GET /api/modifiers/ HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/modifiers/ status=200 duration_ms=60.57 request_id=5cd105a2-dd0d-4b49-832a-8f5480ca6fcf
+Printer hardware not configured in settings.
+INFO:     127.0.0.1:58643 - "GET /api/settings/?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/settings/ status=200 duration_ms=80.64 request_id=e49be7d9-54fc-4918-a9ed-0ddc4bb2f9b5
+INFO:     127.0.0.1:49984 - "GET /api/printer/status HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/printer/status status=200 duration_ms=25.13 request_id=eef3be78-5b85-45dd-ac1a-ffcfaa50f4a1
+INFO:     127.0.0.1:58641 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=101.38 request_id=a776527b-45dc-41c5-b31b-bfb7482fc64c
+INFO:     127.0.0.1:50264 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=54.42 request_id=5e428f71-73ac-4d33-b2ee-a8ee19c8248e
+INFO:     127.0.0.1:54310 - "GET /api/orders/?limit=1&branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/ status=200 duration_ms=65.66 request_id=664be59b-35c1-4726-b3b5-89fd28509361
+INFO:     127.0.0.1:49784 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=49.68 request_id=86884523-543f-4de3-8f9c-6a2d262d80bc
+INFO:     127.0.0.1:63473 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=48.65 request_id=f513d889-7b3c-419a-8da7-347c2f087c51
+INFO:     127.0.0.1:61597 - "GET /api/orders/?limit=1&branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/ status=200 duration_ms=52.69 request_id=076fccc1-7874-4d93-be3a-5d345a15b78a
+INFO:     127.0.0.1:49336 - "GET /api/inventory-advanced/suppliers HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/inventory-advanced/suppliers status=200 duration_ms=30.09 request_id=bdf4eee1-9233-414e-a3e7-df7a1a687791
+INFO:     127.0.0.1:49334 - "GET /api/inventory-advanced/ingredients?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/inventory-advanced/ingredients status=200 duration_ms=49.10 request_id=d0873c26-1123-401b-9b3f-8409771e53b4
+INFO:     127.0.0.1:49338 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=103.48 request_id=b8221dce-7f9d-4f8f-bd9c-49148d41116d
+INFO:     127.0.0.1:53384 - "GET /api/inventory-advanced/prepared-items HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/inventory-advanced/prepared-items status=200 duration_ms=47.90 request_id=4f225449-0936-44e1-9f77-4951c5292635
+INFO:     127.0.0.1:53385 - "GET /api/inventory-advanced/ingredients HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/inventory-advanced/ingredients status=200 duration_ms=52.57 request_id=93c8b1b8-6b35-482e-ae42-550136d85c33
+INFO:     127.0.0.1:58658 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=47.74 request_id=cc2df5dd-5700-4d18-8ce2-590d57b5e1c2
+INFO:     127.0.0.1:56451 - "GET /api/menu-items/ HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/menu-items/ status=200 duration_ms=39.98 request_id=07b207a2-5c04-4285-8197-094b519e4d23
+INFO:     127.0.0.1:61606 - "GET /api/inventory-advanced/ingredients HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/inventory-advanced/ingredients status=200 duration_ms=39.11 request_id=a61ed03a-d7f8-41d8-9bce-1259d081bea0
+INFO:     127.0.0.1:61608 - "GET /api/inventory-advanced/prepared-items HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/inventory-advanced/prepared-items status=200 duration_ms=48.35 request_id=f04ce469-11d9-4105-ad24-805c7eeb7cff
+INFO:     127.0.0.1:53245 - "GET /api/inventory-advanced/recipes/1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/inventory-advanced/recipes/1 status=200 duration_ms=49.17 request_id=0decdcf2-2dee-4776-b9b3-ec092ec17c17
+INFO:     127.0.0.1:49395 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=78.56 request_id=b743b93f-aa82-4d2b-8f6f-0fccf618e29f
+INFO:     127.0.0.1:56386 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=82.01 request_id=40785fb5-cbcf-4245-b5ab-8fbef35776a7
+INFO:     127.0.0.1:51711 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=85.74 request_id=6a108972-09ce-480d-9b01-e15f1a29dc04
+INFO:     127.0.0.1:65124 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=75.83 request_id=4ef56660-9d31-4246-95b0-558609149d84
+INFO:     127.0.0.1:56272 - "GET /api/inventory-advanced/recipes/3 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/inventory-advanced/recipes/3 status=200 duration_ms=25.65 request_id=ff51c737-bed5-4271-b413-b2a80781e2ca
+INFO:     127.0.0.1:58799 - "GET /api/inventory-advanced/recipes/1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/inventory-advanced/recipes/1 status=200 duration_ms=35.98 request_id=d3fde095-5e9e-4801-ab3c-3d65d93fe7f7
+INFO:     127.0.0.1:65523 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=85.76 request_id=70d01d83-04cf-4c33-a82f-fc51bc943892
+INFO:     127.0.0.1:52792 - "GET /api/inventory-advanced/suppliers HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/inventory-advanced/suppliers status=200 duration_ms=34.01 request_id=98ec497a-0b20-4b4c-9cd5-ad0c185f0a5f
+INFO:     127.0.0.1:52791 - "GET /api/inventory-advanced/ingredients?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/inventory-advanced/ingredients status=200 duration_ms=43.40 request_id=521bf46d-8174-4fc5-93d3-35c1235606dc
+INFO:     127.0.0.1:60498 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=400.61 request_id=25986e8a-bda0-4c26-9936-00c62897c8c3
+INFO:     127.0.0.1:51653 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=133.43 request_id=4c2bdfd5-8af6-4f90-b8dd-79aeccbf49a1
+INFO:     127.0.0.1:62395 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=21.92 request_id=435db91c-ce34-481e-b298-bb7ebe6667c9
+INFO:     127.0.0.1:54825 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=28.78 request_id=90fc66e1-ce9f-48cf-8108-5570e1a0089b
+INFO:     127.0.0.1:57906 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=43.84 request_id=e57a9336-f4a3-4153-87ec-49e79adbb7c2
+INFO:     127.0.0.1:63119 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=79.88 request_id=10729c23-730a-4428-80db-509cfb6ca1ba
+INFO:     127.0.0.1:60501 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=25.71 request_id=a02d5775-39f9-49c3-b8df-a8c954239421
+INFO:     127.0.0.1:56479 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=91.05 request_id=e735b77f-ef7c-4e06-ab40-d6272879ae1a
+INFO:     127.0.0.1:50780 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=85.34 request_id=dd6ceea7-9f6e-4e43-845e-41a50385d1e7
+INFO:     127.0.0.1:54758 - "GET /api/inventory-advanced/suppliers HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/inventory-advanced/suppliers status=200 duration_ms=16.80 request_id=1706152d-b783-4241-8220-7a81db549889
+INFO:     127.0.0.1:54756 - "GET /api/inventory-advanced/ingredients?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/inventory-advanced/ingredients status=200 duration_ms=22.37 request_id=0cf324d8-6e47-4989-acf7-945f905f241b
+INFO:     127.0.0.1:60266 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=64.71 request_id=221dfd0e-9dd3-44ec-a653-ad1c36eb46b5
+INFO:     127.0.0.1:65092 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=43.38 request_id=87172825-8adf-492d-b96a-63afcbab74df
+INFO:     127.0.0.1:60430 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=40.41 request_id=50e32e8b-9a7d-4642-814b-7f7ffd80afb4
+INFO:     127.0.0.1:60186 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=69.62 request_id=93e02b2c-7c20-4377-b653-6cade10bd87a
+INFO:     127.0.0.1:63590 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=50.61 request_id=57612f78-bcb8-4c42-9e95-27e2a859f65b
+INFO:     127.0.0.1:56165 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=61.11 request_id=14984852-7be8-4e2f-acfd-4b26edb87aaa
+INFO:     127.0.0.1:56727 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=85.78 request_id=08449620-5f3f-4e77-97d5-777e2336e4f5
+INFO:     127.0.0.1:59966 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=40.86 request_id=498ebbc3-d988-4315-bbb2-90d91f08f3ff
+INFO:     127.0.0.1:50296 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=85.80 request_id=ac36967e-5a20-4fa6-b9c1-c75b21e1a21f
+INFO:     127.0.0.1:65330 - "GET /api/inventory-advanced/ingredients?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/inventory-advanced/ingredients status=200 duration_ms=20.31 request_id=eaa58071-4fbe-4a0d-a1a0-20e3e9fcb91e
+INFO:     127.0.0.1:65332 - "GET /api/inventory-advanced/suppliers HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/inventory-advanced/suppliers status=200 duration_ms=29.44 request_id=f2637526-13a9-46fa-a09e-e7b760da2ccc
+INFO:     127.0.0.1:55143 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=57.39 request_id=6b99ce6b-9848-4314-889f-b1d603b4b842
+INFO:     127.0.0.1:51448 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=54.81 request_id=024cc370-601b-4eab-be50-6f6a2cfec9f7
+INFO:     127.0.0.1:51012 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=22.79 request_id=f13c6daa-db69-4cf2-b5df-2301bd76994a
+INFO:     127.0.0.1:65252 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=45.46 request_id=f6b359da-ada3-4f9f-8c23-e795197c7cc2
+INFO:     127.0.0.1:54122 - "GET /api/menu-items/ HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/menu-items/ status=200 duration_ms=25.38 request_id=6836e33c-9d83-4f54-aac3-db3fcae6b0a2
+INFO:     127.0.0.1:54123 - "GET /api/settings/?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/settings/ status=200 duration_ms=28.43 request_id=c439869b-cb9a-4420-a821-b585bc933d30
+INFO:     127.0.0.1:54125 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=59.39 request_id=28e2e80f-6602-4412-8d6a-4e95e99e3675
+INFO:     127.0.0.1:51006 - "GET /api/inventory-advanced/ingredients?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/inventory-advanced/ingredients status=200 duration_ms=29.32 request_id=fb15e454-d0bf-49e9-935b-d29dc150519f
+INFO:     127.0.0.1:51009 - "GET /api/inventory-advanced/suppliers HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/inventory-advanced/suppliers status=200 duration_ms=28.01 request_id=91c06fba-c874-4e3f-adcd-af68ca0a5151
+INFO:     127.0.0.1:51010 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=58.81 request_id=0572d178-9700-4e9a-9518-6ba71703d35e
+INFO:     127.0.0.1:58292 - "GET /api/orders/?time_filter=today&branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/ status=200 duration_ms=76.19 request_id=5caead91-b5dd-4e3c-b6b3-418fa255e1ca
+INFO:     127.0.0.1:62596 - "GET /api/stock/transactions?time_filter=today&branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/stock/transactions status=200 duration_ms=79.34 request_id=3c4aa632-87b1-4799-bc9a-f2d704c5fd95
+INFO:     127.0.0.1:62592 - "GET /api/orders/analytics?time_filter=today&branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/analytics status=200 duration_ms=110.02 request_id=aa169620-7d12-49fe-8a52-efab6bf53b94
+INFO:     127.0.0.1:62594 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=114.88 request_id=3feeed66-01cf-400a-a37a-a8fac3722851
+INFO:     127.0.0.1:51396 - "GET /api/orders/?time_filter=today&branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/ status=200 duration_ms=61.51 request_id=d647ea26-736c-408e-a8ea-4b4906722785
+INFO:     127.0.0.1:64089 - "GET /api/orders/analytics?time_filter=today&branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/analytics status=200 duration_ms=54.33 request_id=69c07c6e-c3ab-47d9-af0c-177882f5c401
+INFO:     127.0.0.1:57577 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=47.65 request_id=75b4ca8d-6eaf-40a5-b495-8cfa692a58f9
+INFO:     127.0.0.1:57576 - "GET /api/orders/active?branch_id=1&include_items=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=59.76 request_id=b9150fc3-4eb1-421d-bc53-33eff5ab1e12
+INFO:     127.0.0.1:55995 - "GET /api/orders/active?branch_id=1&include_items=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=45.28 request_id=621e206c-9547-4e84-8f9b-ada65dd79a4c
+INFO:     127.0.0.1:61162 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=40.92 request_id=868389db-3b4f-446b-8c72-9970b0241cf9
+INFO:     127.0.0.1:54863 - "GET /api/inventory-advanced/prepared-items HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/inventory-advanced/prepared-items status=200 duration_ms=30.66 request_id=a0fac2bb-2ac0-4118-88d4-6774ac4e8856
+INFO:     127.0.0.1:54861 - "GET /api/inventory-advanced/ingredients HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/inventory-advanced/ingredients status=200 duration_ms=42.54 request_id=b0b88e71-938d-4a91-95b4-a27a7dd57b71
+INFO:     127.0.0.1:64421 - "GET /api/inventory-advanced/suppliers HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/inventory-advanced/suppliers status=200 duration_ms=58.45 request_id=e3c8b6d9-c890-4b37-87d2-55c92f056c3c
+INFO:     127.0.0.1:61667 - "GET /api/inventory-advanced/ingredients?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/inventory-advanced/ingredients status=200 duration_ms=123.82 request_id=b555c103-5684-40e0-8ab9-1ddb41a787a4
+INFO:     127.0.0.1:59614 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=73.62 request_id=ecac10ce-e41f-4a76-88cc-cb21da3d10fd
+INFO:     127.0.0.1:58608 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=91.55 request_id=8d636847-9a5b-43ca-99d3-54bc159f7e9d
+INFO:     127.0.0.1:58430 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=37.99 request_id=52a519ce-5eb2-4f72-8b92-078876a6c264
+INFO:     127.0.0.1:50265 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=51.66 request_id=8eacca22-e861-4e3c-8fd2-8f453d12d905
+INFO:     127.0.0.1:49784 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=25.94 request_id=00b34b63-7362-490a-bb47-cf938a062e3a
+INFO:     127.0.0.1:50393 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=43.02 request_id=a4939343-5ad7-4f7e-9889-fb7ce6ce45a2
+INFO:     127.0.0.1:60804 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=51.91 request_id=5333cf91-f5a4-415e-ac99-86090026480e
+INFO:     127.0.0.1:61633 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=66.54 request_id=ba261ecb-1144-42da-91cd-4fe1ede47393
+INFO:     127.0.0.1:64364 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=25.75 request_id=53d250d9-b60d-420b-9575-221776895828
+INFO:     127.0.0.1:55945 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=62.15 request_id=bfd6061e-46a2-4789-b226-3bc2859022b9
+INFO:     127.0.0.1:63849 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=43.96 request_id=cee7e558-f250-416f-92f8-679030c61518
+INFO:     127.0.0.1:54491 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=42.78 request_id=5e006ff0-5869-4939-b47e-d637870596f1
+INFO:     127.0.0.1:65438 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=32.58 request_id=485ae7a7-23e0-44c7-a0be-982344443a5d
+INFO:     127.0.0.1:60881 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=30.17 request_id=5818303b-7d35-4e3b-af18-4cc0bf281eda
+INFO:     127.0.0.1:64751 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=152.24 request_id=b37508df-6c18-4190-a459-ac23dfe0a7ec
+INFO:     127.0.0.1:64749 - "GET /api/orders/active?branch_id=1&include_items=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=166.52 request_id=fb194363-52a9-4aba-92ce-cb7656a56294
+INFO:     127.0.0.1:61268 - "GET /api/orders/active?branch_id=1&include_items=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=49.14 request_id=bb892a01-7cb1-45ad-bed6-9746a626cb4d
+INFO:     127.0.0.1:56352 - "GET /api/settings/?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/settings/ status=200 duration_ms=68.03 request_id=64f0a130-6583-4fee-b056-a74c9eb91b65
+INFO:     127.0.0.1:63292 - "GET /api/menu-items/ HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/menu-items/ status=200 duration_ms=83.45 request_id=82ac99b5-e6ee-4251-b58c-4554e2f4b00b
+INFO:     127.0.0.1:56115 - "GET /api/modifiers/ HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/modifiers/ status=200 duration_ms=78.06 request_id=6ee918cd-810e-4125-83ed-1d2dd260999c
+Printer hardware not configured in settings.
+INFO:     127.0.0.1:56117 - "GET /api/printer/status HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/printer/status status=200 duration_ms=98.20 request_id=cc6bc22a-5618-4d1e-b5e3-c4876a422b67
+INFO:     127.0.0.1:56114 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=121.67 request_id=8cabe417-3bb6-48b3-b212-f77aff2915e7
+Printer hardware not configured in settings.
+INFO:     127.0.0.1:52948 - "GET /api/printer/status HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/printer/status status=200 duration_ms=14.63 request_id=b34c6dbd-e310-4767-b09e-e68a5111c61e
+INFO:     127.0.0.1:65392 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=55.36 request_id=7ef447ec-4db4-4fbd-876a-221b1d34b1c9
+INFO:     127.0.0.1:52907 - "GET /api/orders/?limit=1&branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/ status=200 duration_ms=47.44 request_id=236c82f4-997e-481a-b2ed-916264d6d8ec
+INFO:     127.0.0.1:64604 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=42.18 request_id=76ef2844-02c0-4ae3-bf75-2c73beac3080
+INFO:     127.0.0.1:50264 - "GET /api/orders/?limit=1&branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/ status=200 duration_ms=37.53 request_id=750d081d-cfa9-4c16-8547-c0f9c6fae63a
+INFO:     127.0.0.1:55778 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=58.97 request_id=5ebb1a67-8c13-490e-b3a7-fc8489e9966d
+INFO:     127.0.0.1:53035 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=99.19 request_id=b02f387a-d81c-4dde-9fd1-b5767000e8eb
+INFO:     127.0.0.1:54343 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=32.11 request_id=fdd5a314-1909-4d57-96c4-143109eb84cf
+INFO:     ('127.0.0.1', 57982) - "WebSocket /api/scanner/ws" [accepted]
+INFO:     connection open
+INFO:     127.0.0.1:57978 - "GET /api/auth/status HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/auth/status status=200 duration_ms=10.65 request_id=cc0be8f6-ca6e-4999-aaae-cc4160232fb3
+INFO:     127.0.0.1:57984 - "GET /api/auth/status HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/auth/status status=200 duration_ms=9.02 request_id=bdf6c0e8-090b-4ba7-9f22-ca3ebb949015
+INFO:     127.0.0.1:57981 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=37.18 request_id=8fde3c89-b868-4cb5-86c3-8a045d999fde
+INFO:     127.0.0.1:57986 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=34.13 request_id=4045ef0c-b76a-4c30-ae87-228bbf0f12ad
+INFO:     127.0.0.1:50265 - "GET /api/menu-items/ HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/menu-items/ status=200 duration_ms=39.67 request_id=1372e0d8-dee6-4261-a57e-15b0641e8180
+INFO:     127.0.0.1:54764 - "GET /api/modifiers/ HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/modifiers/ status=200 duration_ms=61.50 request_id=577bc313-756b-425b-a91c-1c7f85175329
+Printer hardware not configured in settings.
+INFO:     127.0.0.1:54766 - "GET /api/printer/status HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/printer/status status=200 duration_ms=86.83 request_id=af34b984-46c8-4146-9949-e89382c086d8
+INFO:     127.0.0.1:54760 - "GET /api/settings/?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/settings/ status=200 duration_ms=108.90 request_id=ea49247c-1c31-4365-b970-2d0e8bf0cc4d
+Printer hardware not configured in settings.
+INFO:     127.0.0.1:58402 - "GET /api/printer/status HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/printer/status status=200 duration_ms=34.41 request_id=0333ed83-38c7-45ed-8050-131bb124d338
+INFO:     127.0.0.1:54763 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=163.54 request_id=694bca28-2415-4452-9033-b505813a0dac
+INFO:     127.0.0.1:50939 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=140.81 request_id=f85bb81d-dd29-4aa4-9fd3-a8b53cfa8831
+INFO:     127.0.0.1:64667 - "GET /api/orders/?limit=1&branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/ status=200 duration_ms=87.22 request_id=12de1e15-7a05-4412-b090-4f29f3244aae
+INFO:     127.0.0.1:49225 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=28.31 request_id=1ffdbd7c-86e1-46f2-a2d7-da9e079bbb2d
+INFO:     127.0.0.1:53312 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=26.59 request_id=3aa8af8e-86cc-48c6-8ff6-b21e3d18de30
+INFO:     127.0.0.1:63713 - "GET /api/orders/?limit=1&branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/ status=200 duration_ms=62.57 request_id=99a8ab0c-fffc-4f92-b398-a9c30b0206e7
+INFO:     127.0.0.1:50374 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=48.40 request_id=933bdc2e-4f59-419e-8a57-3d312a94126c
+INFO:     127.0.0.1:52405 - "GET /api/inventory-advanced/ingredients?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/inventory-advanced/ingredients status=200 duration_ms=48.89 request_id=20b0c5c9-15c5-4497-85b4-071d69b71736
+INFO:     127.0.0.1:52600 - "GET /api/inventory-advanced/suppliers HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/inventory-advanced/suppliers status=200 duration_ms=38.37 request_id=279b51f0-5c1b-4988-a2fb-7a8dad4385cd
+INFO:     127.0.0.1:52602 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=143.18 request_id=eb1addab-c6c7-473a-80f8-cfa481f106e3
+INFO:     127.0.0.1:56597 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=51.30 request_id=e7cfbc2f-fa20-410b-8674-d8536099a5bc
+INFO:     127.0.0.1:53458 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=88.30 request_id=958fdccb-c290-456b-9734-ba7c1e58eca0
+INFO:     127.0.0.1:51273 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=56.46 request_id=d52df0e6-ad2a-4ec7-9a7a-f3c313661c0c
+INFO:     127.0.0.1:50333 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=212.99 request_id=a09fe433-7a11-4a0a-9c05-b0467cca6a76
+INFO:     127.0.0.1:55685 - "POST /api/inventory-advanced/ingredients/bulk HTTP/1.1" 405 Method Not Allowed
+INFO:app.request:method=POST path=/api/inventory-advanced/ingredients/bulk status=405 duration_ms=2.85 request_id=f4f2cbe6-5292-444f-90d2-49016c0e5022
+INFO:     127.0.0.1:58620 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=66.79 request_id=066c4d18-305f-425d-bd2b-a986b62dc6e8
+INFO:     127.0.0.1:59614 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=66.38 request_id=88128943-e83f-417f-aa87-433c2bc782cd
+INFO:     127.0.0.1:59966 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=195.45 request_id=b355d8d0-9645-40e8-b215-6dca75a1985e
+INFO:     127.0.0.1:52157 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=194.09 request_id=dca23edc-2b9b-422e-9cb1-5fb8bc802b6b
+INFO:     127.0.0.1:50780 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=57.35 request_id=82e9db8f-3732-4d05-9cd9-a812b9b17ef6
+INFO:     127.0.0.1:49196 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=229.83 request_id=4a8d333b-e6d1-4c6d-9586-f5ebd45fd0c4
+INFO:     127.0.0.1:50398 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=80.03 request_id=afdfb77e-ba2b-498b-976f-9a9d5fc145f7
+INFO:     127.0.0.1:60342 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=136.99 request_id=d6c644e2-0218-4ec8-b6ac-a0f6b0129897
+INFO:     127.0.0.1:51240 - "PUT /api/inventory-advanced/ingredients/1 HTTP/1.1" 200 OK
+INFO:app.request:method=PUT path=/api/inventory-advanced/ingredients/1 status=200 duration_ms=107.62 request_id=5fd6c87e-dbda-4e39-9efd-f1b14473ca22
+INFO:     127.0.0.1:53150 - "GET /api/inventory-advanced/suppliers HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/inventory-advanced/suppliers status=200 duration_ms=52.53 request_id=9071adb8-d734-4293-b127-b86a323e6f61
+INFO:     127.0.0.1:53148 - "GET /api/inventory-advanced/ingredients?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/inventory-advanced/ingredients status=200 duration_ms=69.24 request_id=44d949b3-d0ae-4f42-bf0a-62e32a995bd2
+INFO:     127.0.0.1:52598 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=142.17 request_id=44f4883b-9e1b-43d4-8b26-d850f74759f1
+INFO:     127.0.0.1:54613 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=87.79 request_id=04506ac4-ef4f-4d87-abbf-63448f033023
+INFO:     127.0.0.1:56001 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=94.75 request_id=554a2a1e-68ca-458b-a6a1-69f82dd98f30
+INFO:     127.0.0.1:58127 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=161.19 request_id=d11bd879-4558-449a-a021-1e15f5a127c5
+INFO:     127.0.0.1:54436 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=134.83 request_id=60f2d34d-2bca-42fd-a440-b8fc52e38098
+INFO:     127.0.0.1:49784 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=80.48 request_id=a13549a1-541b-49b9-a717-2c6be7203776
+INFO:     127.0.0.1:58017 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=366.97 request_id=de33c982-1aa1-495d-9ad8-fd813deb16db
+INFO:     127.0.0.1:60871 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=117.42 request_id=d40ea42a-c807-4e11-a485-f6286f913ec6
+INFO:     127.0.0.1:62936 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=54.97 request_id=019d1a6d-e206-4d5f-948b-371ff80d5f30
+INFO:     127.0.0.1:60373 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=57.95 request_id=d394a204-1fab-441b-920a-fb17d7b1e358
+INFO:     127.0.0.1:49640 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=57.11 request_id=56bc68fe-16ff-483a-aeab-a6fc783f4c2d
+INFO:     127.0.0.1:52946 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=71.26 request_id=f2539413-84c0-44da-bf01-e15cdecffbef
+INFO:     127.0.0.1:57042 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=86.88 request_id=a5ec341e-28c2-47d7-8d2b-247930805287
+INFO:     127.0.0.1:51654 - "GET /api/orders/active?branch_id=1 HTTP/1.1" 200 OK
+INFO:app.request:method=GET path=/api/orders/active status=200 duration_ms=61.51 request_id=ee23d102-2cbe-45e2-8d39-6cdaa420cbbf

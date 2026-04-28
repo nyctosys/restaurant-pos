@@ -31,6 +31,8 @@ class IngredientBase(BaseModel):
     name: str
     sku: str | None = None
     unit: str
+    purchase_unit: str | None = None
+    conversion_factor: float = 1.0
     current_stock: float = 0.0
     minimum_stock: float = 0.0
     reorder_quantity: float = 0.0
@@ -43,6 +45,10 @@ class IngredientBase(BaseModel):
 
 class IngredientCreate(IngredientBase):
     pass
+
+class IngredientBulkCreate(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    ingredients: list[IngredientCreate]
 
 class IngredientUpdate(IngredientBase):
     name: str | None = None
@@ -71,6 +77,55 @@ class RecipeItemResponse(RecipeItemBase):
     created_at: datetime
 
 
+class PreparedItemComponentBase(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    ingredient_id: int
+    quantity: float = Field(gt=0)
+    unit: str
+    notes: str | None = None
+
+
+class PreparedItemCreate(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    name: str
+    sku: str | None = None
+    kind: Literal["sauce", "marination"] = "sauce"
+    unit: str
+    notes: str | None = None
+    components: list[PreparedItemComponentBase] = Field(default_factory=list)
+
+
+class PreparedItemUpdate(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    name: str | None = None
+    sku: str | None = None
+    kind: Literal["sauce", "marination"] | None = None
+    unit: str | None = None
+    notes: str | None = None
+    is_active: bool | None = None
+    components: list[PreparedItemComponentBase] | None = None
+
+
+class PreparedItemBatchCreate(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    quantity: float = Field(gt=0)
+    reason: str | None = None
+    branch_id: int | None = None
+
+
+class RecipePreparedItemBase(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    prepared_item_id: int
+    quantity: float = Field(gt=0)
+    unit: str
+    notes: str | None = None
+    variant_key: str = ""
+
+
+class RecipePreparedItemCreate(RecipePreparedItemBase):
+    product_id: int
+
+
 class PurchaseOrderItemBase(BaseModel):
     model_config = ConfigDict(extra="ignore")
     ingredient_id: int
@@ -94,7 +149,7 @@ class PurchaseOrderReceive(BaseModel):
 class StockMovementCreate(BaseModel):
     model_config = ConfigDict(extra="ignore")
     ingredient_id: int
-    movement_type: Literal["purchase", "sale_deduction", "wastage", "adjustment", "stock_take", "transfer"]
+    movement_type: Literal["purchase", "sale_deduction", "preparation", "wastage", "adjustment", "stock_take", "transfer"]
     quantity_change: float
     unit_cost: float = 0.0
     reference_id: int | None = None
