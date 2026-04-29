@@ -29,7 +29,7 @@ describe('request', () => {
       text: () => Promise.resolve('{}'),
       headers: new Headers(),
     });
-    await get('/menu-items/');
+    await get('/menu-items/', { cacheTtlMs: 0, forceRefresh: true });
     expect(mockFetch).toHaveBeenCalledWith(
       expect.stringContaining('/api/menu-items/'),
       expect.objectContaining({
@@ -64,13 +64,13 @@ describe('request', () => {
       headers: new Headers(),
     });
     const { ApiError } = await import('../api/errors');
-    await expect(get('/menu-items/')).rejects.toThrow(ApiError);
+    await expect(get('/menu-items/', { cacheTtlMs: 0, forceRefresh: true })).rejects.toThrow(ApiError);
   });
 
   it('throws on network failure', async () => {
     mockFetch.mockRejectedValueOnce(new Error('Failed to fetch'));
     const { ApiError } = await import('../api/errors');
-    await expect(get('/menu-items/')).rejects.toThrow(ApiError);
+    await expect(get('/menu-items/', { cacheTtlMs: 0, forceRefresh: true })).rejects.toThrow(ApiError);
   });
 
   it('returns parsed JSON on success', async () => {
@@ -79,7 +79,7 @@ describe('request', () => {
       text: () => Promise.resolve(JSON.stringify({ products: [{ id: 1 }] })),
       headers: new Headers(),
     });
-    const data = await get<{ products: { id: number }[] }>('/menu-items/');
+    const data = await get<{ products: { id: number }[] }>('/menu-items/', { cacheTtlMs: 0, forceRefresh: true });
     expect(data.products).toHaveLength(1);
     expect(data.products[0].id).toBe(1);
   });

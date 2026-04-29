@@ -207,6 +207,8 @@ def list_ingredients(
 @inventory_advanced_router.post("/ingredients")
 def create_ingredient(payload: IngredientCreate, current_user: User = Depends(get_current_user)):
     data = payload.model_dump()
+    data.pop("brand_name", None)
+    data.pop("brandName", None)
     i = Ingredient(**data)
     db.session.add(i)
     db.session.flush()
@@ -221,6 +223,8 @@ def create_ingredients_bulk(payload: IngredientBulkCreate, current_user: User = 
     results = []
     for ing_data in payload.ingredients:
         data = ing_data.model_dump()
+        data.pop("brand_name", None)
+        data.pop("brandName", None)
         i = Ingredient(**data)
         db.session.add(i)
         db.session.flush()
@@ -239,6 +243,8 @@ def update_ingredient(ingredient_id: int, payload: IngredientUpdate, current_use
         return JSONResponse(status_code=404, content={"message": "Not found"})
     data = payload.model_dump(exclude_unset=True)
     data.pop("current_stock", None)
+    data.pop("brand_name", None)
+    data.pop("brandName", None)
     for k, v in data.items():
         setattr(i, k, v)
     db.session.commit()
@@ -277,6 +283,14 @@ def _replace_prepared_components(item: PreparedItem, components: list[Any]) -> N
     db.session.flush()
     for component in components:
         data = component.model_dump() if hasattr(component, "model_dump") else dict(component)
+        ingredient = db.session.get(Ingredient, int(data.get("ingredient_id", 0)))
+        if ingredient is None:
+            raise ValueError(f"Ingredient not found: {data.get('ingredient_id')}")
+        ingredient_unit = ingredient.unit.value if hasattr(ingredient.unit, "value") else str(ingredient.unit or "")
+        if str(data.get("unit", "")).strip().lower() != ingredient_unit:
+            raise ValueError(
+                f"Unit mismatch for ingredient '{ingredient.name}': expected '{ingredient_unit}'"
+            )
         item.components.append(PreparedItemComponent(**data))
 
 
@@ -301,7 +315,11 @@ def create_prepared_item(payload: PreparedItemCreate, current_user: User = Depen
     item = PreparedItem(**data)
     db.session.add(item)
     db.session.flush()
-    _replace_prepared_components(item, components)
+    try:
+        _replace_prepared_components(item, components)
+    except ValueError as exc:
+        db.session.rollback()
+        return JSONResponse(status_code=400, content={"message": str(exc)})
     seed_prepared_branch_stocks_for_new_item(item.id, 0.0)
     db.session.commit()
     return {"id": item.id, "message": "Prepared sauce/marination created"}
@@ -327,7 +345,11 @@ def update_prepared_item(
     for key, value in data.items():
         setattr(item, key, value)
     if components is not None:
-        _replace_prepared_components(item, components)
+        try:
+            _replace_prepared_components(item, components)
+        except ValueError as exc:
+            db.session.rollback()
+            return JSONResponse(status_code=400, content={"message": str(exc)})
     db.session.commit()
     return {"message": "Prepared sauce/marination updated"}
 
@@ -406,7 +428,10 @@ def get_recipe(product_id: int, current_user: User = Depends(get_current_user)):
         "ingredient_name": r.ingredient.name if r.ingredient else None,
         "brand_name": getattr(r.ingredient, "brand_name", None) if r.ingredient else None,
         "brandName": getattr(r.ingredient, "brand_name", None) if r.ingredient else None,
-        "quantity": r.quantity, "unit": r.unit, "unitOfMeasure": r.unit, "notes": r.notes,
+        "quantity": r.quantity,
+        "unit": r.unit.value if hasattr(r.unit, "value") else r.unit,
+        "unitOfMeasure": r.unit.value if hasattr(r.unit, "value") else r.unit,
+        "notes": r.notes,
         "variant_key": getattr(r, "variant_key", None) or "",
     } for r in items], "recipe_prepared_items": [{
         "id": r.id, "prepared_item_id": r.prepared_item_id,
@@ -417,6 +442,15 @@ def get_recipe(product_id: int, current_user: User = Depends(get_current_user)):
 @inventory_advanced_router.post("/recipes")
 def add_recipe_item(payload: RecipeItemCreate, current_user: User = Depends(get_current_user)):
     data = payload.model_dump()
+    ingredient = db.session.get(Ingredient, int(data.get("ingredient_id", 0)))
+    if ingredient is None:
+        return JSONResponse(status_code=404, content={"message": "Ingredient not found"})
+    ingredient_unit = ingredient.unit.value if hasattr(ingredient.unit, "value") else str(ingredient.unit or "")
+    if str(data.get("unit", "")).strip().lower() != ingredient_unit:
+        return JSONResponse(
+            status_code=400,
+            content={"message": f"Unit mismatch for ingredient '{ingredient.name}': expected '{ingredient_unit}'"},
+        )
     if "variant_key" not in data or data.get("variant_key") is None:
         data["variant_key"] = ""
     else:
@@ -438,6 +472,15 @@ def delete_recipe_item(recipe_item_id: int, current_user: User = Depends(get_cur
 @inventory_advanced_router.post("/recipes/prepared-items")
 def add_recipe_prepared_item(payload: RecipePreparedItemCreate, current_user: User = Depends(get_current_user)):
     data = payload.model_dump()
+    prepared_item = db.session.get(PreparedItem, int(data.get("prepared_item_id", 0)))
+    if prepared_item is None:
+        return JSONResponse(status_code=404, content={"message": "Prepared item not found"})
+    prepared_unit = prepared_item.unit.value if hasattr(prepared_item.unit, "value") else str(prepared_item.unit or "")
+    if str(data.get("unit", "")).strip().lower() != prepared_unit:
+        return JSONResponse(
+            status_code=400,
+            content={"message": f"Unit mismatch for prepared item '{prepared_item.name}': expected '{prepared_unit}'"},
+        )
     data["variant_key"] = str(data.get("variant_key") or "").strip()[:100]
     r = RecipePreparedItem(**data)
     db.session.add(r)

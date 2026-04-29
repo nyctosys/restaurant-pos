@@ -738,7 +738,6 @@ def test_checkout_variant_uses_variant_specific_bom(client, app):
         assert row_b is not None and abs(float(row_b.current_stock) - 100.0) < 1e-6
         assert row_l is not None and abs(float(row_l.current_stock) - 97.0) < 1e-6
 
-
 def test_delivery_distance_endpoint_success(client, app, monkeypatch):
     client.post(
         "/api/auth/setup",
@@ -919,3 +918,59 @@ def test_update_open_delivery_order_can_change_rider_name(client, app):
     assert active.status_code == 200
     snapshot = active.get_json()["sales"][0]["order_snapshot"]
     assert snapshot["rider_name"] == "Bilal"
+
+
+def test_checkout_accepts_object_variants_and_uses_variant_bom(client, app):
+    """Legacy object-shaped product variants should still validate and match BOM variant keys."""
+    client.post(
+        "/api/auth/setup",
+        json={"username": "owner1", "password": "pass", "branch_name": "Main"},
+    )
+    token = _get_token(client)
+    with app.app_context():
+        b = Branch.query.filter_by(name="Main").first()
+        bid = b.id
+        ing_base = Ingredient(name="obj-base", unit="piece", current_stock=0.0)
+        ing_large = Ingredient(name="obj-large", unit="piece", current_stock=0.0)
+        db.session.add_all([ing_base, ing_large])
+        db.session.flush()
+        for ing in (ing_base, ing_large):
+            seed_branch_stocks_for_new_ingredient(ing.id, 0.0)
+            _set_branch_ingredient_stock(ing.id, bid, 50.0)
+            ing.current_stock = 50.0
+
+        p = Product(
+            sku="OBJ-PIZZA",
+            title="Object Variant Pizza",
+            base_price=10.0,
+            variants=[{"label": "Regular"}, {"label": "Large"}],
+        )
+        db.session.add(p)
+        db.session.flush()
+        db.session.add(
+            RecipeItem(product_id=p.id, ingredient_id=ing_base.id, quantity=1.0, unit="piece", variant_key="")
+        )
+        db.session.add(
+            RecipeItem(product_id=p.id, ingredient_id=ing_large.id, quantity=2.0, unit="piece", variant_key="Large")
+        )
+        db.session.commit()
+        pid = p.id
+        i_base = ing_base.id
+        i_large = ing_large.id
+
+    r = client.post(
+        "/api/orders/checkout",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "items": [{"product_id": pid, "quantity": 1, "variant_sku_suffix": "Large"}],
+            "payment_method": "Cash",
+            "branch_id": bid,
+        },
+    )
+    assert r.status_code == 201
+
+    with app.app_context():
+        row_b = IngredientBranchStock.query.filter_by(ingredient_id=i_base, branch_id=bid).first()
+        row_l = IngredientBranchStock.query.filter_by(ingredient_id=i_large, branch_id=bid).first()
+        assert row_b is not None and abs(float(row_b.current_stock) - 50.0) < 1e-6
+        assert row_l is not None and abs(float(row_l.current_stock) - 48.0) < 1e-6

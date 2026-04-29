@@ -38,6 +38,7 @@ from app.services.recipe_variants import (
     recipe_rows_for_variant,
 )
 from app.services.sync_outbox import enqueue_sync_event
+from app.routers.menu import _normalize_variants_list
 from app.socketio_server import RealtimeEvents, schedule_emit_event
 
 orders_router = APIRouter(prefix="/api/orders", tags=["orders"])
@@ -290,17 +291,7 @@ def _process_modifier_depletions(
 
 
 def _normalize_product_variant_labels(raw: Any) -> list[str]:
-    if not isinstance(raw, list):
-        return []
-    out: list[str] = []
-    seen: set[str] = set()
-    for x in raw:
-        if isinstance(x, str):
-            v = x.strip()
-            if v and v not in seen:
-                seen.add(v)
-                out.append(v)
-    return out
+    return _normalize_variants_list(raw)
 
 
 def _validate_selected_product_variant(
