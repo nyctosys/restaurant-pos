@@ -10,6 +10,7 @@ from sqlalchemy.orm import joinedload
 from app.models import Ingredient, Inventory, Product, RecipeItem, SaleItem, User, db
 from app.deps import get_current_user, require_owner
 from app.routers.common import yes
+from app.services.product_pricing import effective_sale_price
 
 menu_router = APIRouter(prefix="/api/menu-items", tags=["menu-items"])
 
@@ -62,7 +63,7 @@ def _product_to_dict(product: Product) -> dict[str, Any]:
         "sku": product.sku,
         "title": product.title,
         "base_price": float(product.base_price),
-        "sale_price": float(getattr(product, "sale_price", None) if getattr(product, "sale_price", None) is not None else product.base_price),
+        "sale_price": effective_sale_price(product),
         "section": product.section or "",
         "variants": _normalize_variants_list(getattr(product, "variants", None)),
         "image_url": product.image_url or "",

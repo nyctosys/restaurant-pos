@@ -29,6 +29,7 @@ from app.services.ingredient_deduction import (
     restore_inventory_allocations,
 )
 from app.services.printer_service import PrinterService
+from app.services.product_pricing import effective_sale_price
 from app.services.recipe_variants import (
     combo_items_for_variant,
     normalize_combo_category_name,
@@ -133,13 +134,7 @@ def _schedule_order_event(event: str, sale: Sale, **extra: Any) -> None:
 
 
 def _sale_unit_price(product: Product) -> float:
-    raw = getattr(product, "sale_price", None)
-    if raw is None:
-        raw = getattr(product, "base_price", 0)
-    try:
-        return float(raw or 0.0)
-    except (TypeError, ValueError):
-        return 0.0
+    return effective_sale_price(product)
 
 
 def _parse_optional_non_negative_charge(value: Any, default: float) -> float:

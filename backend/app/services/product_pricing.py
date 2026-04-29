@@ -11,6 +11,16 @@ def _safe_float(value: object) -> float:
         return 0.0
 
 
+def effective_sale_price(product: Product) -> float:
+    """Return customer-facing price, preserving legacy rows that only used base_price."""
+    sale_price = getattr(product, "sale_price", None)
+    if sale_price is not None:
+        parsed_sale_price = _safe_float(sale_price)
+        if parsed_sale_price > 0:
+            return parsed_sale_price
+    return _safe_float(getattr(product, "base_price", 0.0))
+
+
 def recalculate_product_cost(product: Product) -> float:
     """Recalculate and persist estimated BOM cost (stored in Product.base_price)."""
     cost = 0.0

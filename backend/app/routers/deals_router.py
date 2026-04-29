@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
 from app.models import db, User, Product, ComboItem
+from app.services.product_pricing import effective_sale_price
 from app.services.recipe_variants import (
     normalize_combo_category_name,
     normalize_combo_selection_type,
@@ -59,7 +60,7 @@ def _list_deals_impl(current_user: User) -> dict[str, list[dict]]:
                 "sku": d.sku,
                 "title": d.title,
                 "base_price": float(d.base_price),
-                "sale_price": float(getattr(d, "sale_price", None) if getattr(d, "sale_price", None) is not None else d.base_price),
+                "sale_price": effective_sale_price(d),
                 "section": (d.section or "").strip() or "Deals",
                 "variants": _normalize_variants_list(getattr(d, "variants", None)),
                 "combo_items": items,

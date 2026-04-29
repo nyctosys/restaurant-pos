@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 
 from app.models import Product
 from app.realtime import scanner_hub
+from app.services.product_pricing import effective_sale_price
 
 scanner_router = APIRouter(prefix="/api/scanner", tags=["scanner"])
 
@@ -33,7 +34,7 @@ def scanner_lookup(barcode: str):
             "sku": product.sku,
             "title": product.title,
             "base_price": float(product.base_price),
-            "sale_price": float(getattr(product, "sale_price", None) if getattr(product, "sale_price", None) is not None else product.base_price),
+            "sale_price": effective_sale_price(product),
             "section": product.section or "",
             "variants": product.variants or [],
         },
