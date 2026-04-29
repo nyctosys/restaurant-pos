@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, Fragment } from 'react';
 import { Plus, X, Loader2, Trash2, ScanBarcode, Upload, Archive, ArchiveRestore, Pencil, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 import BarcodeModal from '../BarcodeModal';
 import SearchableSelect from '../SearchableSelect';
@@ -17,14 +17,20 @@ type Product = {
   base_price: number;
   sale_price?: number;
   section: string;
-  variants: string[];
+  variants: { name: string; basePrice: number; salePrice: number; totalQuantity?: number; unit?: string; sku?: string }[];
   image_url?: string;
   archived_at?: string | null;
   unitOfMeasure?: string;
+  totalQuantity?: number;
 };
 
 type SortKey = 'sku' | 'title' | 'section' | 'base_price' | 'sale_price' | 'archived_at';
 type SortDirection = 'asc' | 'desc';
+
+function formatUnit(unit?: string): string {
+  if (!unit) return '';
+  return unit.replace('UnitOfMeasure.', '').toLowerCase();
+}
 
 /** Menu catalog only — stock is tracked per ingredient (Recipes / Ingredients tabs). */
 export default function MenuItemsTab() {
@@ -42,13 +48,14 @@ export default function MenuItemsTab() {
 
   const [formSku, setFormSku] = useState('');
   const [formTitle, setFormTitle] = useState('');
-  const [formPrice, setFormPrice] = useState('');
+  const [expandedRows, setExpandedRows] = useState<Record<number, boolean>>({});
   const [formSection, setFormSection] = useState('');
   const [formImageUrl, setFormImageUrl] = useState('');
   const [formUnit, setFormUnit] = useState('');
   const [formSkuTouched, setFormSkuTouched] = useState(false);
-  const [formVariants, setFormVariants] = useState<string[]>([]);
-  const [formNewVariant, setFormNewVariant] = useState('');
+  const [formVariants, setFormVariants] = useState<{ name: string; salePrice: string; sku: string }[]>([
+    { name: 'Default', salePrice: '', sku: '' },
+  ]);
   const [formError, setFormError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -84,13 +91,11 @@ export default function MenuItemsTab() {
   const resetForm = () => {
     setFormSku('');
     setFormTitle('');
-    setFormPrice('');
     setFormSection('');
     setFormImageUrl('');
     setFormUnit('');
     setFormSkuTouched(false);
-    setFormVariants([]);
-    setFormNewVariant('');
+    setFormVariants([{ name: 'Default', salePrice: '', sku: '' }]);
     setFormError('');
   };
 
@@ -105,12 +110,18 @@ export default function MenuItemsTab() {
     setFormSku(p.sku);
     setFormSkuTouched(true);
     setFormTitle(p.title);
-    setFormPrice(String(p.sale_price ?? p.base_price));
     setFormSection(p.section || '');
     setFormImageUrl(p.image_url || '');
     setFormUnit(p.unitOfMeasure || '');
-    setFormVariants(Array.isArray(p.variants) ? [...p.variants] : []);
-    setFormNewVariant('');
+    setFormVariants(
+      Array.isArray(p.variants) && p.variants.length
+        ? p.variants.map(v => ({
+            name: v.name,
+            salePrice: String(v.salePrice),
+            sku: v.sku || '',
+          }))
+        : [{ name: 'Default', salePrice: '', sku: '' }]
+    );
     setFormError('');
     setShowModal(true);
   }, []);
@@ -162,13 +173,26 @@ export default function MenuItemsTab() {
     e.preventDefault();
     setFormError('');
 
-    if (!formSku.trim() || !formTitle.trim() || !formPrice.trim() || !formSection) {
-      setFormError('SKU, Item name, Sale Price, and Category are required.');
+    if (!formSku.trim() || !formTitle.trim() || !formSection) {
+      setFormError('SKU, Item name, and Category are required.');
       return;
     }
-    const parsedPrice = parseFloat(formPrice);
-    if (Number.isNaN(parsedPrice) || parsedPrice < 0) {
-      setFormError('Sale price must be a valid number (0 or greater).');
+    if (!formVariants.length) {
+      setFormError('At least one variant is required.');
+      return;
+    }
+    const normalizedVariants = formVariants.map((variant, index) => {
+      const name = variant.name.trim();
+      const salePrice = Number.parseFloat(variant.salePrice);
+      if (!name) throw new Error(`Variant row ${index + 1}: name is required.`);
+      if (!Number.isFinite(salePrice) || salePrice <= 0) throw new Error(`Variant "${name}": sale price must be greater than 0.`);
+      return { name, salePrice, sku: variant.sku.trim() || undefined };
+    });
+    const duplicate = normalizedVariants.find((variant, index) =>
+      normalizedVariants.findIndex(item => item.name.toLowerCase() === variant.name.toLowerCase()) !== index
+    );
+    if (duplicate) {
+      setFormError(`Duplicate variant name: ${duplicate.name}`);
       return;
     }
 
@@ -178,9 +202,8 @@ export default function MenuItemsTab() {
       const body = {
         sku: formSku.trim(),
         title: formTitle.trim(),
-        sale_price: parsedPrice,
         section: formSection,
-        variants: formVariants,
+        variants: normalizedVariants,
         image_url: formImageUrl.trim() || '',
         unitOfMeasure: formUnit.trim() || '',
       };
@@ -202,7 +225,7 @@ export default function MenuItemsTab() {
       setShowModal(false);
       await fetchData(true);
     } catch (e) {
-      setFormError(getUserMessage(e));
+      setFormError(e instanceof Error ? e.message : getUserMessage(e));
     } finally {
       setSubmitting(false);
     }
@@ -457,8 +480,8 @@ export default function MenuItemsTab() {
               </thead>
               <tbody className="glass-card">
                 {sortedProducts.map(p => (
+                  <Fragment key={p.id}>
                   <tr
-                    key={p.id}
                     className={`border-b border-white/20 hover:bg-white/40 transition-colors min-h-[52px] xl:min-h-0 ${
                       p.archived_at ? 'bg-white/20 opacity-90' : ''
                     }`}
@@ -475,22 +498,32 @@ export default function MenuItemsTab() {
                       )}
                     </td>
                     <td className="py-3 px-3 lg:px-4 xl:py-2 font-semibold text-sm xl:text-xs">
-                      {formatCurrency(p.base_price)}
+                      {formatCurrency(p.variants?.[0]?.basePrice ?? p.base_price)}
                     </td>
                     <td className="py-3 px-3 lg:px-4 xl:py-2 font-semibold text-sm xl:text-xs">
-                      {formatCurrency(p.sale_price ?? p.base_price)}
+                      {formatCurrency(p.variants?.[0]?.salePrice ?? p.sale_price ?? p.base_price)}
                     </td>
                     <td className="py-3 px-3 lg:px-4 xl:py-2">
-                      {p.unitOfMeasure ? (
+                      {p.totalQuantity !== undefined && p.totalQuantity !== null && p.unitOfMeasure && p.unitOfMeasure !== 'Mixed Units' ? (
                         <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-soot-100 text-soot-600 text-xs font-semibold border border-soot-200">
-                          {p.unitOfMeasure}
+                          {p.totalQuantity} {formatUnit(p.unitOfMeasure)}
                         </span>
+                      ) : p.unitOfMeasure === 'Mixed Units' ? (
+                        <span className="text-soot-500 text-xs">Mixed Units</span>
                       ) : (
                         <span className="text-soot-300 text-xs">—</span>
                       )}
                     </td>
                     <td className="py-3 px-3 lg:px-4 xl:py-2 text-right">
                       <div className="flex items-center justify-end gap-0.5 lg:gap-1 flex-wrap">
+                        <button
+                          type="button"
+                          onClick={() => setExpandedRows(prev => ({ ...prev, [p.id]: !prev[p.id] }))}
+                          className="min-w-[44px] min-h-[44px] xl:min-w-9 xl:min-h-9 flex items-center justify-center text-neutral-400 hover:text-brand-600 hover:bg-brand-50 rounded-lg transition-colors"
+                          title="Show variants"
+                        >
+                          {expandedRows[p.id] ? <ArrowUp className="w-4 h-4" /> : <ArrowDown className="w-4 h-4" />}
+                        </button>
                         <button
                           type="button"
                           onClick={() => setBarcodeProduct(p)}
@@ -549,6 +582,22 @@ export default function MenuItemsTab() {
                       </div>
                     </td>
                   </tr>
+                  {expandedRows[p.id] && (p.variants || []).map((variant) => (
+                    <tr key={`${p.id}-${variant.name}`} className="bg-white/20 border-b border-white/15">
+                      <td className="py-2 px-3 lg:px-4 xl:py-1 text-xs text-soot-400">↳</td>
+                      <td className="py-2 px-3 lg:px-4 xl:py-1 text-xs font-medium text-soot-700">{variant.name}</td>
+                      <td className="py-2 px-3 lg:px-4 xl:py-1 text-xs text-soot-500">Variant</td>
+                      <td className="py-2 px-3 lg:px-4 xl:py-1 text-xs font-semibold">{formatCurrency(variant.basePrice)}</td>
+                      <td className="py-2 px-3 lg:px-4 xl:py-1 text-xs font-semibold">{formatCurrency(variant.salePrice)}</td>
+                      <td className="py-2 px-3 lg:px-4 xl:py-1 text-xs text-soot-500">
+                        {variant.totalQuantity !== undefined && variant.totalQuantity !== null && variant.unit && variant.unit !== 'Mixed Units'
+                          ? `${variant.totalQuantity} ${formatUnit(variant.unit)}`
+                          : (variant.unit || '—')}
+                      </td>
+                      <td className="py-2 px-3 lg:px-4 xl:py-1" />
+                    </tr>
+                  ))}
+                  </Fragment>
                 ))}
               </tbody>
             </table>
@@ -601,21 +650,19 @@ export default function MenuItemsTab() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-neutral-700 mb-1">
-                  Sale Price <span className="text-red-400">*</span>
-                </label>
-                <div className="flex gap-2">
-                  <input
-                    type="number"
-                    inputMode="decimal"
-                    step="0.01"
-                    min="0"
-                    value={formPrice}
-                    onChange={e => setFormPrice(e.target.value)}
-                    placeholder="0.00"
-                    className="flex-1 px-4 py-2.5 glass-card text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none"
-                  />
-                  <div className="w-1/3">
+                <label className="block text-sm font-medium text-neutral-700 mb-2">Variants *</label>
+                <div className="space-y-2">
+                  {formVariants.map((variant, index) => (
+                    <div key={`variant-${index}`} className="grid grid-cols-12 gap-2 items-center">
+                      <input className="col-span-6 px-3 py-2 glass-card text-sm" placeholder="Variant name" value={variant.name} onChange={e => setFormVariants(prev => prev.map((v, i) => (i === index ? { ...v, name: e.target.value } : v)))} />
+                      <input className="col-span-4 px-3 py-2 glass-card text-sm" type="number" min="0.01" step="0.01" placeholder="Sale" value={variant.salePrice} onChange={e => setFormVariants(prev => prev.map((v, i) => (i === index ? { ...v, salePrice: e.target.value } : v)))} />
+                      <button type="button" className="col-span-2 px-2 py-2 rounded-lg border border-soot-200 text-xs" onClick={() => setFormVariants(prev => prev.length > 1 ? prev.filter((_, i) => i !== index) : prev)}>Remove</button>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex gap-2 mt-2">
+                  <button type="button" onClick={() => setFormVariants(prev => [...prev, { name: '', salePrice: '', sku: '' }])} className="px-3 py-2 rounded-lg border border-brand-200 text-sm text-brand-800 hover:bg-brand-50">Add variant</button>
+                  <div className="w-1/3 ml-auto">
                     <select
                       value={formUnit}
                       onChange={e => setFormUnit(e.target.value)}
@@ -670,61 +717,6 @@ export default function MenuItemsTab() {
                 <p className="mt-1 text-xs text-neutral-500">Shown on the Dashboard POS.</p>
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-neutral-700 mb-1">Variants (optional)</label>
-                <p className="text-xs text-neutral-500 mb-2">
-                  When set, staff must pick a variant on the POS. Configure per-variant recipes under Inventory → Recipes (BOM).
-                </p>
-                <div className="flex flex-wrap gap-2 mb-2">
-                  {formVariants.map(v => (
-                    <span
-                      key={v}
-                      className="inline-flex items-center gap-1 pl-2.5 pr-1 py-1 rounded-lg bg-brand-50 border border-brand-200 text-sm text-brand-900"
-                    >
-                      {v}
-                      <button
-                        type="button"
-                        onClick={() => setFormVariants(prev => prev.filter(x => x !== v))}
-                        className="p-0.5 rounded hover:bg-brand-100 text-brand-600"
-                        aria-label={`Remove ${v}`}
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    </span>
-                  ))}
-                </div>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={formNewVariant}
-                    onChange={e => setFormNewVariant(e.target.value)}
-                    onKeyDown={e => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        const t = formNewVariant.trim();
-                        if (t && !formVariants.includes(t)) {
-                          setFormVariants(prev => [...prev, t]);
-                          setFormNewVariant('');
-                        }
-                      }
-                    }}
-                    placeholder="e.g. Large, Meal"
-                    className="flex-1 px-4 py-2 glass-card text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const t = formNewVariant.trim();
-                      if (!t || formVariants.includes(t)) return;
-                      setFormVariants(prev => [...prev, t]);
-                      setFormNewVariant('');
-                    }}
-                    className="px-3 py-2 rounded-lg border border-brand-200 text-sm font-medium text-brand-800 hover:bg-brand-50"
-                  >
-                    Add
-                  </button>
-                </div>
-              </div>
 
               <div>
                 <label className="block text-sm font-medium text-neutral-700 mb-1">

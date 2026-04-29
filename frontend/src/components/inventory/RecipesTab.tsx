@@ -11,7 +11,7 @@ type Product = {
   sku: string;
   base_price: number;
   sale_price?: number;
-  variants?: string[];
+  variants?: { name: string; basePrice: number; salePrice: number; sku?: string }[];
 };
 
 type Ingredient = {
@@ -351,9 +351,9 @@ export default function RecipesTab() {
                         placeholder="Base (default — used when no variant-specific BOM exists)"
                         searchPlaceholder="Search recipe scopes…"
                         options={selectedProduct.variants.map((variant) => ({
-                          value: variant,
-                          label: `Variant: ${variant}`,
-                          searchText: variant,
+                          value: variant?.name || '',
+                          label: `Variant: ${variant?.name || 'Select Variant'}`,
+                          searchText: variant?.name || '',
                         }))}
                         className="glass-card border-soot-200/80 px-3 py-2"
                       />

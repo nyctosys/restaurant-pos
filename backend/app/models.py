@@ -156,8 +156,12 @@ class Sale(db.Model):
     modified_at = db.Column(db.DateTime(timezone=True), nullable=True)
     # Latest order edit diff for KDS badge + modification print ticket.
     modification_snapshot = db.Column(db.JSON, nullable=True)
+    # Delivery workflow (pending -> assigned -> delivered) with rider ownership.
+    delivery_status = db.Column(db.String(20), nullable=True, default="pending")
+    assigned_rider_id = db.Column(db.Integer, db.ForeignKey("riders.id"), nullable=True)
 
     items = db.relationship('SaleItem', backref='sale', lazy=True, cascade="all, delete-orphan")
+    assigned_rider = db.relationship("Rider", foreign_keys=[assigned_rider_id], lazy=True)
 
 class SaleItem(db.Model):
     __tablename__ = 'sale_items'
@@ -256,7 +260,7 @@ class Ingredient(db.Model):
     reorder_quantity = db.Column(db.Float, default=0.0)
     last_purchase_price = db.Column(db.Float, default=0.0) # Price per PURCHASE unit
     average_cost = db.Column(db.Float, default=0.0)    # Moving average (Price per BASE unit)
-    brand_name = db.Column(db.String(120), nullable=True)
+    brand_name = db.Column(db.String(120), nullable=False, default="")
     preferred_supplier_id = db.Column(db.Integer, db.ForeignKey("suppliers.id"), nullable=True)
     category = db.Column(db.String(100))
     notes = db.Column(db.Text)
@@ -540,6 +544,20 @@ class SyncOutbox(db.Model):
     attempt_count = db.Column(db.Integer, nullable=False, default=0)
     last_error = db.Column(db.Text, nullable=True)
     synced_at = db.Column(db.DateTime(timezone=True), nullable=True)
+
+
+class Rider(db.Model):
+    __tablename__ = "riders"
+    __table_args__ = (
+        db.UniqueConstraint("branch_id", "name", name="uq_rider_branch_name"),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    branch_id = db.Column(db.Integer, db.ForeignKey("branches.id"), nullable=False)
+    name = db.Column(db.String(120), nullable=False)
+    is_available = db.Column(db.Boolean, nullable=False, default=True)
+    created_at = db.Column(db.DateTime(timezone=True), default=utc_now)
+    archived_at = db.Column(db.DateTime(timezone=True), nullable=True)
 
 
 class AppEventLog(db.Model):

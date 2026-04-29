@@ -186,6 +186,30 @@ def _ensure_recipe_extra_costs_table(dialect: str) -> None:
     print("  + Created recipe_extra_costs")
 
 
+def _ensure_riders_table(dialect: str) -> None:
+    id_type = "SERIAL PRIMARY KEY" if dialect == "postgresql" else "INTEGER PRIMARY KEY AUTOINCREMENT"
+    ts_type = "TIMESTAMPTZ" if dialect == "postgresql" else "TIMESTAMP"
+    if _table_exists("riders"):
+        print("  - riders already exists")
+        return
+    db.session.execute(
+        text(
+            f"""
+            CREATE TABLE riders (
+              id {id_type},
+              branch_id INTEGER NOT NULL REFERENCES branches(id),
+              name VARCHAR(120) NOT NULL,
+              is_available BOOLEAN NOT NULL DEFAULT TRUE,
+              created_at {ts_type},
+              archived_at {ts_type},
+              CONSTRAINT uq_rider_branch_name UNIQUE (branch_id, name)
+            )
+            """
+        )
+    )
+    print("  + Created riders")
+
+
 def main() -> None:
     app = create_app()
     with app.app_context():
@@ -252,6 +276,16 @@ def main() -> None:
                 column="sale_price",
                 ddl="ALTER TABLE products ADD COLUMN sale_price NUMERIC(12, 2) DEFAULT 0",
             ),
+            ColumnMigration(
+                table="sales",
+                column="delivery_status",
+                ddl="ALTER TABLE sales ADD COLUMN delivery_status VARCHAR(20) DEFAULT 'pending'",
+            ),
+            ColumnMigration(
+                table="sales",
+                column="assigned_rider_id",
+                ddl="ALTER TABLE sales ADD COLUMN assigned_rider_id INTEGER REFERENCES riders(id)",
+            ),
         ]
 
         print("migrate_latest_schema_changes: starting ...")
@@ -259,11 +293,45 @@ def main() -> None:
             _ensure_stock_movement_preparation_value(dialect)
             _ensure_prepared_item_tables(dialect)
             _ensure_recipe_extra_costs_table(dialect)
+            _ensure_riders_table(dialect)
             for migration in migrations:
                 _apply_column_migration(migration)
             # Backward compatibility: old base_price was sale price.
             db.session.execute(
                 text("UPDATE products SET sale_price = base_price WHERE sale_price IS NULL OR sale_price = 0")
+            )
+            from app.models import Product  # local import to avoid script startup side effects
+
+            for product in Product.query.all():
+                raw_variants = getattr(product, "variants", None)
+                if isinstance(raw_variants, list) and len(raw_variants) > 0:
+                    continue
+                base_price = float(getattr(product, "base_price", 0) or 0)
+                sale_price = float(getattr(product, "sale_price", base_price) or base_price)
+                if sale_price <= 0:
+                    sale_price = base_price if base_price > 0 else 1.0
+                if base_price <= 0:
+                    base_price = sale_price if sale_price > 0 else 1.0
+                product.variants = [
+                    {
+                        "name": "Default",
+                        "basePrice": round(base_price, 2),
+                        "salePrice": round(sale_price, 2),
+                        "sku": "",
+                    }
+                ]
+            db.session.execute(
+                text(
+                    """
+                    UPDATE sales
+                    SET delivery_status = CASE
+                      WHEN COALESCE(order_type, '') <> 'delivery' THEN NULL
+                      WHEN status = 'completed' THEN 'assigned'
+                      ELSE 'pending'
+                    END
+                    WHERE delivery_status IS NULL
+                    """
+                )
             )
             _ensure_combo_product_id_nullable(dialect)
             db.session.commit()

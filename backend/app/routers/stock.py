@@ -144,6 +144,7 @@ def bulk_restock_ingredients(payload: BulkRestockRequest, current_user: User = D
             ing = ingredients_by_id[ingredient_id]
 
             incoming_unit_cost = None if line.unit_cost is None else float(line.unit_cost)
+            incoming_brand_name = str(getattr(line, "brand_name", "") or "").strip()
             movement_type = "adjustment"
             reference_type = "manual_adjustment"
             applied_unit_cost = float(ing.average_cost or 0.0)
@@ -158,6 +159,8 @@ def bulk_restock_ingredients(payload: BulkRestockRequest, current_user: User = D
                 movement_type = "purchase"
                 reference_type = "bulk_restock"
                 applied_unit_cost = incoming_unit_cost
+            if incoming_brand_name and incoming_brand_name != str(getattr(ing, "brand_name", "") or "").strip():
+                ing.brand_name = incoming_brand_name
 
             _, qty_after = adjust_branch_ingredient_stock(
                 ingredient_id,
@@ -194,6 +197,7 @@ def bulk_restock_ingredients(payload: BulkRestockRequest, current_user: User = D
                     "ingredient_id": ingredient_id,
                     "quantity_added": qty_add,
                     "quantity_after": qty_after,
+                    "brand_name": ing.brand_name,
                 }
             )
 

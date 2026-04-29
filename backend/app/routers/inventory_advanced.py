@@ -234,8 +234,10 @@ def list_ingredients(
 @inventory_advanced_router.post("/ingredients")
 def create_ingredient(payload: IngredientCreate, current_user: User = Depends(get_current_user)):
     data = payload.model_dump()
-    data.pop("brand_name", None)
-    data.pop("brandName", None)
+    brand_name = str(data.get("brand_name") or data.get("brandName") or "").strip()
+    if not brand_name:
+        return JSONResponse(status_code=400, content={"message": "Brand is required"})
+    data["brand_name"] = brand_name
     i = Ingredient(**data)
     db.session.add(i)
     db.session.flush()
@@ -250,8 +252,10 @@ def create_ingredients_bulk(payload: IngredientBulkCreate, current_user: User = 
     results = []
     for ing_data in payload.ingredients:
         data = ing_data.model_dump()
-        data.pop("brand_name", None)
-        data.pop("brandName", None)
+        brand_name = str(data.get("brand_name") or data.get("brandName") or "").strip()
+        if not brand_name:
+            return JSONResponse(status_code=400, content={"message": "Brand is required for all rows"})
+        data["brand_name"] = brand_name
         i = Ingredient(**data)
         db.session.add(i)
         db.session.flush()
@@ -270,8 +274,12 @@ def update_ingredient(ingredient_id: int, payload: IngredientUpdate, current_use
         return JSONResponse(status_code=404, content={"message": "Not found"})
     data = payload.model_dump(exclude_unset=True)
     data.pop("current_stock", None)
-    data.pop("brand_name", None)
-    data.pop("brandName", None)
+    if "brand_name" in data or "brandName" in data:
+        brand_name = str(data.get("brand_name") or data.get("brandName") or "").strip()
+        if not brand_name:
+            return JSONResponse(status_code=400, content={"message": "Brand is required"})
+        data["brand_name"] = brand_name
+        data.pop("brandName", None)
     should_recalculate = "average_cost" in data
     for k, v in data.items():
         setattr(i, k, v)

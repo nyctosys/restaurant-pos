@@ -21,6 +21,24 @@ def effective_sale_price(product: Product) -> float:
     return _safe_float(getattr(product, "base_price", 0.0))
 
 
+def effective_sale_price_for_variant(product: Product, variant_key: str | None) -> float:
+    vk = str(variant_key or "").strip()
+    raw_variants = getattr(product, "variants", None)
+    if isinstance(raw_variants, list):
+        for entry in raw_variants:
+            if not isinstance(entry, dict):
+                continue
+            name = str(entry.get("name") or entry.get("label") or "").strip()
+            if not name:
+                continue
+            if vk and name.casefold() != vk.casefold():
+                continue
+            parsed = _safe_float(entry.get("salePrice", entry.get("sale_price")))
+            if parsed > 0:
+                return parsed
+    return effective_sale_price(product)
+
+
 def recalculate_product_cost(product: Product) -> float:
     """Recalculate and persist estimated BOM cost (stored in Product.base_price)."""
     cost = 0.0

@@ -22,6 +22,7 @@ type Ingredient = {
   preferred_supplier_id?: number;
   category?: string;
   notes?: string;
+  brand_name?: string;
 };
 
 type Supplier = {
@@ -36,11 +37,13 @@ type RestockRow = {
   unitCost: string;
   purchasedUnit: string;
   packageQuantity: string;
+  brandName: string;
 };
 
 type BulkAddRow = {
   key: string;
   name: string;
+  brandName: string;
   sku: string;
   skuTouched: boolean;
   unit: string;
@@ -138,6 +141,7 @@ export default function IngredientsTab() {
   const [formName, setFormName] = useState('');
   const [formSku, setFormSku] = useState('');
   const [formSkuTouched, setFormSkuTouched] = useState(false);
+  const [formBrandName, setFormBrandName] = useState('');
   const [formUnit, setFormUnit] = useState('kg');
   const [formMinStock, setFormMinStock] = useState('0');
   const [formReorderQty, setFormReorderQty] = useState('0');
@@ -169,11 +173,13 @@ export default function IngredientsTab() {
     unitCost: '',
     purchasedUnit: '',
     packageQuantity: '',
+    brandName: '',
   });
 
   const createBulkAddRow = (): BulkAddRow => ({
     key: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
     name: '',
+    brandName: '',
     sku: '',
     skuTouched: false,
     unit: 'kg',
@@ -310,6 +316,10 @@ export default function IngredientsTab() {
         setBulkAddError(`Row ${i + 1}: Name is required.`);
         return;
       }
+      if (!row.brandName.trim()) {
+        setBulkAddError(`Row ${i + 1}: Brand is required.`);
+        return;
+      }
       if (!row.unit) {
         setBulkAddError(`Row ${i + 1}: Unit is required.`);
         return;
@@ -317,6 +327,7 @@ export default function IngredientsTab() {
 
       ingredientsToCreate.push({
         name: row.name.trim(),
+        brand_name: row.brandName.trim(),
         sku: row.sku.trim() || undefined,
         unit: row.unit,
         purchase_unit: row.purchaseUnit.trim() || undefined,
@@ -348,7 +359,7 @@ export default function IngredientsTab() {
   const handleSubmitBulkRestock = async (e: React.FormEvent) => {
     e.preventDefault();
     const trimmedReason = restockReason.trim();
-    const items: { ingredient_id: number; quantity: number; unit_cost?: number }[] = [];
+    const items: { ingredient_id: number; quantity: number; unit_cost?: number; brand_name?: string }[] = [];
 
     for (let i = 0; i < restockRows.length; i += 1) {
       const row = restockRows[i];
@@ -404,6 +415,7 @@ export default function IngredientsTab() {
       items.push({
         ingredient_id: ingredientId,
         quantity,
+        brand_name: row.brandName.trim() || undefined,
         ...(unitCost !== undefined ? { unit_cost: unitCost } : {}),
       });
     }
@@ -430,6 +442,7 @@ export default function IngredientsTab() {
     setFormName(ing.name);
     setFormSku(ing.sku || '');
     setFormSkuTouched(true);
+    setFormBrandName(ing.brand_name || '');
     setFormUnit(ing.unit || 'kg');
     setFormMinStock(ing.minimum_stock.toString());
     setFormReorderQty(ing.reorder_quantity.toString());
@@ -445,8 +458,8 @@ export default function IngredientsTab() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formName.trim() || !formUnit) {
-      setFormError('Name and Unit are required.');
+    if (!formName.trim() || !formUnit || !formBrandName.trim()) {
+      setFormError('Name, Brand, and Unit are required.');
       return;
     }
 
@@ -469,6 +482,7 @@ export default function IngredientsTab() {
       const payload = {
         name: formName.trim(),
         sku: formSku.trim() || undefined,
+        brand_name: formBrandName.trim(),
         unit: formUnit,
         purchase_unit: formPurchaseUnit.trim() || undefined,
         conversion_factor: parseFloat(formConversionFactor) || 1.0,
@@ -600,6 +614,7 @@ export default function IngredientsTab() {
                     {renderSortIcon('name')}
                   </button>
                 </th>
+                <th className="py-3 px-3">Brand</th>
                 <th aria-sort={sortKey === 'current_stock' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'} className="py-3 px-3 text-right">
                   <button type="button" onClick={() => handleSort('current_stock')} className="ml-auto flex items-center gap-2 text-right transition-colors hover:text-soot-700 focus:outline-none focus-visible:text-soot-900">
                     <span>Stock</span>
@@ -637,6 +652,7 @@ export default function IngredientsTab() {
                       <div className="font-bold text-soot-900">{ing.name}</div>
                       <div className="text-xs text-soot-500 font-mono mt-0.5">{ing.sku || '-'}</div>
                     </td>
+                    <td className="py-4 px-3 text-sm text-soot-700">{ing.brand_name || '—'}</td>
                     <td className="py-4 px-3 text-right">
                       <div className="font-semibold tabular-nums text-lg inline-flex items-center gap-2">
                         {isLowStock && <span className="w-2 h-2 rounded-full bg-red-500" title="Low Stock"></span>}
@@ -727,6 +743,16 @@ export default function IngredientsTab() {
                       placeholder="Auto-generated from material name"
                     />
                     <p className="text-xs text-neutral-500 mt-1">Auto-generated for new materials. You can still edit it.</p>
+                 </div>
+                 <div>
+                    <label className="block text-sm font-medium text-neutral-700 mb-1">Brand <span className="text-red-400">*</span></label>
+                    <input
+                      type="text"
+                      value={formBrandName}
+                      onChange={e => setFormBrandName(e.target.value)}
+                      className="w-full px-4 py-2.5 glass-card text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none"
+                      placeholder="e.g. National"
+                    />
                  </div>
 
                  <div className="col-span-2">
@@ -869,7 +895,10 @@ export default function IngredientsTab() {
                         <label className="block text-xs font-semibold text-neutral-600 mb-1">Select material from inventory</label>
                         <SearchableSelect
                           value={row.ingredientId}
-                          onChange={(value) => updateRestockRow(row.key, { ingredientId: value })}
+                          onChange={(value) => {
+                            const selected = ingredients.find(ingredient => String(ingredient.id) === value);
+                            updateRestockRow(row.key, { ingredientId: value, brandName: selected?.brand_name || '' });
+                          }}
                           placeholder="Select material"
                           searchPlaceholder="Search materials…"
                           options={ingredients.map((ingredient) => ({
@@ -890,6 +919,16 @@ export default function IngredientsTab() {
                           options={PURCHASED_UNITS}
                           sortOptions={false}
                           className="glass-card border-0 px-3 py-2.5"
+                        />
+                      </div>
+                      <div className="col-span-6 md:col-span-2">
+                        <label className="block text-xs font-semibold text-neutral-600 mb-1">Brand</label>
+                        <input
+                          type="text"
+                          value={row.brandName}
+                          onChange={(e) => updateRestockRow(row.key, { brandName: e.target.value })}
+                          className="w-full px-3 py-2.5 glass-card text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none"
+                          placeholder="Brand name"
                         />
                       </div>
                       <div className="col-span-6 md:col-span-2">
@@ -1024,6 +1063,16 @@ export default function IngredientsTab() {
                         onChange={(e) => updateBulkAddRow(row.key, { name: e.target.value })}
                         className="w-full px-3 py-2 glass-card text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none"
                         placeholder="e.g. Flour"
+                      />
+                    </div>
+                    <div className="col-span-6 md:col-span-2">
+                      <label className="block text-xs font-semibold text-neutral-600 mb-1">Brand *</label>
+                      <input
+                        type="text"
+                        value={row.brandName}
+                        onChange={(e) => updateBulkAddRow(row.key, { brandName: e.target.value })}
+                        className="w-full px-3 py-2 glass-card text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none"
+                        placeholder="e.g. National"
                       />
                     </div>
                     <div className="col-span-6 md:col-span-2">
