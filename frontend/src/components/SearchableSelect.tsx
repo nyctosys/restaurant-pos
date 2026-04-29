@@ -26,6 +26,7 @@ type SearchableSelectProps = {
   disabled?: boolean;
   className?: string;
   dropdownClassName?: string;
+  sortOptions?: boolean;
 };
 
 function cx(...parts: Array<string | false | null | undefined>) {
@@ -42,6 +43,7 @@ export default function SearchableSelect({
   disabled = false,
   className,
   dropdownClassName,
+  sortOptions = true,
 }: SearchableSelectProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -56,10 +58,12 @@ export default function SearchableSelect({
 
   const sortedOptions = useMemo(
     () =>
-      [...options].sort((left, right) =>
-        left.label.localeCompare(right.label, undefined, { numeric: true, sensitivity: 'base' })
-      ),
-    [options]
+      sortOptions
+        ? [...options].sort((left, right) =>
+            left.label.localeCompare(right.label, undefined, { numeric: true, sensitivity: 'base' })
+          )
+        : options,
+    [options, sortOptions]
   );
 
   const filteredOptions = useMemo(() => {

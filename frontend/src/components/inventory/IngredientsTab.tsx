@@ -34,13 +34,15 @@ type RestockRow = {
   ingredientId: string;
   quantity: string;
   unitCost: string;
-  usePurchaseUnit: boolean;
+  purchasedUnit: string;
+  packageQuantity: string;
 };
 
 type BulkAddRow = {
   key: string;
   name: string;
   sku: string;
+  skuTouched: boolean;
   unit: string;
   minStock: string;
   reorderQty: string;
@@ -54,7 +56,76 @@ type BulkAddRow = {
 type SortKey = 'name' | 'current_stock' | 'average_cost' | 'supplier' | 'id';
 type SortDirection = 'asc' | 'desc';
 
-const UNITS = ['kg', 'g', 'l', 'ml', 'piece', 'dozen', 'pack', 'can', 'bottle'];
+const UNITS = [
+  { value: 'kg', label: 'Kg' },
+  { value: 'g', label: 'g' },
+  { value: 'l', label: 'Ltr' },
+  { value: 'piece', label: 'Pc' },
+  { value: 'ml', label: 'ml' },
+];
+
+const PURCHASED_UNITS = [
+  { value: 'kg', label: 'Kg' },
+  { value: 'g', label: 'g' },
+  { value: 'l', label: 'Ltr' },
+  { value: 'ml', label: 'ml' },
+  { value: 'piece', label: 'Pc' },
+  { value: 'carton', label: 'Carton' },
+  { value: 'packet', label: 'Packet' },
+];
+
+const PACKAGE_UNITS = new Set(['carton', 'packet']);
+
+const unitLabel = (unit?: string) => {
+  const normalized = normalizeUnit(unit);
+  return [...UNITS, ...PURCHASED_UNITS].find((option) => option.value === normalized)?.label || unit || 'unit';
+};
+
+const normalizeUnit = (unit?: string) => {
+  const value = (unit || '').trim().toLowerCase();
+  if (value === 'ltr' || value === 'liter' || value === 'litre') return 'l';
+  if (value === 'pc' || value === 'pcs' || value === 'piece' || value === 'pieces') return 'piece';
+  if (value === 'kgs' || value === 'kilogram' || value === 'kilograms') return 'kg';
+  if (value === 'grams' || value === 'gram') return 'g';
+  if (value === 'millilitre' || value === 'milliliter' || value === 'millilitres' || value === 'milliliters') return 'ml';
+  return value;
+};
+
+const getDirectUnitFactor = (fromUnit?: string, toUnit?: string) => {
+  const from = normalizeUnit(fromUnit);
+  const to = normalizeUnit(toUnit);
+  if (!from || !to) return null;
+  if (from === to) return 1;
+  if (from === 'kg' && to === 'g') return 1000;
+  if (from === 'g' && to === 'kg') return 0.001;
+  if (from === 'l' && to === 'ml') return 1000;
+  if (from === 'ml' && to === 'l') return 0.001;
+  return null;
+};
+
+const getPackageMeasureUnit = (inventoryUnit?: string) => {
+  const unit = normalizeUnit(inventoryUnit);
+  if (unit === 'kg' || unit === 'g') return 'kg';
+  if (unit === 'l' || unit === 'ml') return 'l';
+  if (unit === 'piece') return 'piece';
+  return unit || 'unit';
+};
+
+const getPackageQuantityLabel = (inventoryUnit?: string, purchasedUnit?: string) => {
+  return `How many ${unitLabel(getPackageMeasureUnit(inventoryUnit))} in the ${unitLabel(purchasedUnit).toLowerCase()}?`;
+};
+
+const getRestockConversionFactor = (inventoryUnit: string, purchasedUnit: string, packageQuantity: string) => {
+  if (PACKAGE_UNITS.has(purchasedUnit)) {
+    const packageAmount = Number.parseFloat(packageQuantity);
+    if (!Number.isFinite(packageAmount) || packageAmount <= 0) return null;
+    const measureUnit = getPackageMeasureUnit(inventoryUnit);
+    const packageToInventoryFactor = getDirectUnitFactor(measureUnit, inventoryUnit);
+    if (!packageToInventoryFactor) return null;
+    return packageAmount * packageToInventoryFactor;
+  }
+  return getDirectUnitFactor(purchasedUnit, inventoryUnit);
+};
 
 export default function IngredientsTab() {
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
@@ -96,13 +167,15 @@ export default function IngredientsTab() {
     ingredientId: '',
     quantity: '',
     unitCost: '',
-    usePurchaseUnit: false,
+    purchasedUnit: '',
+    packageQuantity: '',
   });
 
   const createBulkAddRow = (): BulkAddRow => ({
     key: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
     name: '',
     sku: '',
+    skuTouched: false,
     unit: 'kg',
     minStock: '0',
     reorderQty: '0',
@@ -152,7 +225,19 @@ export default function IngredientsTab() {
   };
 
   const updateRestockRow = (key: string, patch: Partial<RestockRow>) => {
-    setRestockRows((prev) => prev.map((row) => (row.key === key ? { ...row, ...patch } : row)));
+    setRestockRows((prev) => prev.map((row) => {
+      if (row.key !== key) return row;
+      const updated = { ...row, ...patch };
+      if (patch.ingredientId !== undefined) {
+        const selected = ingredients.find((ingredient) => String(ingredient.id) === patch.ingredientId);
+        updated.purchasedUnit = normalizeUnit(selected?.unit) || '';
+        updated.packageQuantity = '';
+      }
+      if (patch.purchasedUnit !== undefined && !PACKAGE_UNITS.has(patch.purchasedUnit)) {
+        updated.packageQuantity = '';
+      }
+      return updated;
+    }));
   };
 
   const addRestockRow = () => setRestockRows((prev) => [...prev, createRestockRow()]);
@@ -181,6 +266,14 @@ export default function IngredientsTab() {
       const newRows = prev.map((row) => {
         if (row.key === key) {
           const updated = { ...row, ...patch };
+
+          if (patch.name !== undefined && !updated.skuTouched) {
+            const usedSkus = [
+              ...ingredients.map((ingredient) => ingredient.sku),
+              ...prev.filter((existingRow) => existingRow.key !== key).map((existingRow) => existingRow.sku),
+            ];
+            updated.sku = updated.name.trim() ? generateAutoSku('ING', updated.name, usedSkus) : '';
+          }
           
           // Auto-calculate Avg Cost if Last Purchase Price or Conversion Factor changed
           if (patch.lastPurchasePrice !== undefined || patch.conversionFactor !== undefined) {
@@ -260,7 +353,7 @@ export default function IngredientsTab() {
     for (let i = 0; i < restockRows.length; i += 1) {
       const row = restockRows[i];
       const ingredientId = Number.parseInt(row.ingredientId, 10);
-      let quantity = Number.parseFloat(row.quantity);
+      const purchasedQuantity = Number.parseFloat(row.quantity);
       const unitCostText = row.unitCost.trim();
       let unitCost = unitCostText === '' ? undefined : Number.parseFloat(unitCostText);
 
@@ -270,19 +363,41 @@ export default function IngredientsTab() {
       }
 
       const ing = ingredients.find(ing => ing.id === ingredientId);
-      if (row.usePurchaseUnit && ing && ing.conversion_factor) {
-        quantity *= ing.conversion_factor;
-        if (unitCost !== undefined) {
-          unitCost /= ing.conversion_factor;
-        }
+      if (!ing) {
+        setRestockError(`Row ${i + 1}: selected material was not found.`);
+        return;
+      }
+
+      if (!row.purchasedUnit) {
+        setRestockError(`Row ${i + 1}: select a purchased unit.`);
+        return;
+      }
+
+      if (!Number.isFinite(purchasedQuantity) || purchasedQuantity <= 0) {
+        setRestockError(`Row ${i + 1}: purchased quantity must be greater than 0.`);
+        return;
+      }
+
+      const conversionFactor = getRestockConversionFactor(ing.unit, row.purchasedUnit, row.packageQuantity);
+      if (!conversionFactor) {
+        const message = PACKAGE_UNITS.has(row.purchasedUnit)
+          ? `Row ${i + 1}: enter how many ${unitLabel(getPackageMeasureUnit(ing.unit))} are in one ${unitLabel(row.purchasedUnit).toLowerCase()}.`
+          : `Row ${i + 1}: ${unitLabel(row.purchasedUnit)} cannot be converted to ${unitLabel(ing.unit)}.`;
+        setRestockError(message);
+        return;
+      }
+
+      const quantity = purchasedQuantity * conversionFactor;
+      if (unitCost !== undefined) {
+        unitCost /= conversionFactor;
       }
 
       if (!Number.isFinite(quantity) || quantity <= 0) {
-        setRestockError(`Row ${i + 1}: quantity must be greater than 0.`);
+        setRestockError(`Row ${i + 1}: stock quantity must be greater than 0.`);
         return;
       }
       if (unitCostText !== '' && (!Number.isFinite(unitCost) || (unitCost ?? 0) < 0)) {
-        setRestockError(`Row ${i + 1}: unit cost must be 0 or greater.`);
+        setRestockError(`Row ${i + 1}: purchasing cost must be 0 or greater.`);
         return;
       }
 
@@ -571,10 +686,34 @@ export default function IngredientsTab() {
                
                <div className="grid grid-cols-2 gap-4">
                  <div className="col-span-2">
+                    <label className="block text-sm font-medium text-neutral-700 mb-1">Preferred Supplier</label>
+                    <SearchableSelect
+                      value={formSupplierId}
+                      onChange={setFormSupplierId}
+                      placeholder="-- None --"
+                      searchPlaceholder="Search suppliers..."
+                      options={suppliers.map((supplier) => ({ value: String(supplier.id), label: supplier.name }))}
+                      className="glass-card border-0"
+                    />
+                 </div>
+
+                 <div className="col-span-2">
                     <label className="block text-sm font-medium text-neutral-700 mb-1">Name <span className="text-red-400">*</span></label>
                     <input type="text" value={formName} onChange={e => setFormName(e.target.value)} className="w-full px-4 py-2.5 glass-card text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none" placeholder="e.g. Flour, Tomatoes" />
                  </div>
-                 
+
+                 <div>
+                    <label className="block text-sm font-medium text-neutral-700 mb-1">Unit <span className="text-red-400">*</span></label>
+                    <SearchableSelect
+                      value={formUnit}
+                      onChange={setFormUnit}
+                      searchPlaceholder="Search units…"
+                      options={UNITS}
+                      sortOptions={false}
+                      className="glass-card border-0"
+                    />
+                 </div>
+
                  <div>
                     <label className="block text-sm font-medium text-neutral-700 mb-1">SKU</label>
                     <input
@@ -590,14 +729,23 @@ export default function IngredientsTab() {
                     <p className="text-xs text-neutral-500 mt-1">Auto-generated for new materials. You can still edit it.</p>
                  </div>
 
-                 <div>
-                    <label className="block text-sm font-medium text-neutral-700 mb-1">Unit of Measure <span className="text-red-400">*</span></label>
-                    <SearchableSelect
-                      value={formUnit}
-                      onChange={setFormUnit}
-                      searchPlaceholder="Search units…"
-                      options={UNITS.map((unit) => ({ value: unit, label: unit }))}
-                      className="glass-card border-0"
+                 <div className="col-span-2">
+                    <label className="block text-sm font-medium text-neutral-700 mb-1">Price (PKR)</label>
+                    <input
+                      type="number"
+                      step="any"
+                      min="0"
+                      value={formLastPurchasePrice}
+                      onChange={e => {
+                        const val = e.target.value;
+                        setFormLastPurchasePrice(val);
+                        const price = parseFloat(val);
+                        const factor = parseFloat(formConversionFactor);
+                        if (factor > 0 && !isNaN(price)) {
+                          setFormAverageCost((price / factor).toFixed(2));
+                        }
+                      }}
+                      className="w-full px-4 py-2.5 glass-card text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none"
                     />
                  </div>
                  
@@ -645,26 +793,6 @@ export default function IngredientsTab() {
                     </div>
 
                     <div>
-                        <label className="block text-sm font-medium text-neutral-700 mb-1">Purchase Price (PKR / {formPurchaseUnit || 'unit'})</label>
-                        <input
-                          type="number"
-                          step="any"
-                          min="0"
-                          value={formLastPurchasePrice}
-                          onChange={e => {
-                            const val = e.target.value;
-                            setFormLastPurchasePrice(val);
-                            const price = parseFloat(val);
-                            const factor = parseFloat(formConversionFactor);
-                            if (factor > 0 && !isNaN(price)) {
-                              setFormAverageCost((price / factor).toFixed(2));
-                            }
-                          }}
-                          className="w-full px-4 py-2.5 glass-card text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none"
-                        />
-                    </div>
-
-                    <div>
                         <label className="block text-sm font-medium text-neutral-700 mb-1">Base Cost (PKR / {formUnit})</label>
                         <input
                           type="number"
@@ -677,18 +805,6 @@ export default function IngredientsTab() {
                         <p className="text-[10px] text-neutral-500 mt-1">Auto-calculated from purchase price.</p>
                     </div>
                   </div>
-                 
-                 <div className="col-span-2">
-                    <label className="block text-sm font-medium text-neutral-700 mb-1">Preferred Supplier</label>
-                    <SearchableSelect
-                      value={formSupplierId}
-                      onChange={setFormSupplierId}
-                      placeholder="— None —"
-                      searchPlaceholder="Search suppliers…"
-                      options={suppliers.map((supplier) => ({ value: String(supplier.id), label: supplier.name }))}
-                      className="glass-card border-0"
-                    />
-                 </div>
                </div>
 
                <div className="flex gap-3 pt-4">
@@ -734,30 +850,26 @@ export default function IngredientsTab() {
               <div className="space-y-3">
                 {restockRows.map((row, idx) => {
                   const selectedIng = ingredients.find(ing => String(ing.id) === row.ingredientId);
-                  const hasConversion = !!(selectedIng?.purchase_unit && (selectedIng?.conversion_factor ?? 0) > 1);
+                  const conversionFactor = selectedIng && row.purchasedUnit
+                    ? getRestockConversionFactor(selectedIng.unit, row.purchasedUnit, row.packageQuantity)
+                    : null;
+                  const packageUnitSelected = PACKAGE_UNITS.has(row.purchasedUnit);
+                  const purchasedQuantity = Number.parseFloat(row.quantity);
+                  const purchasingCost = Number.parseFloat(row.unitCost);
+                  const convertedQuantity = conversionFactor && Number.isFinite(purchasedQuantity)
+                    ? purchasedQuantity * conversionFactor
+                    : null;
+                  const convertedUnitCost = conversionFactor && row.unitCost.trim() !== '' && Number.isFinite(purchasingCost)
+                    ? purchasingCost / conversionFactor
+                    : null;
 
                   return (
                     <div key={row.key} className="grid grid-cols-12 gap-2 items-end glass-card p-4 rounded-xl border border-white/40">
-                      <div className="col-span-12 md:col-span-5">
-                        <label className="block text-xs font-semibold text-neutral-600 mb-1 flex justify-between items-center">
-                          <span>Material</span>
-                          {hasConversion && (
-                            <button
-                              type="button"
-                              onClick={() => updateRestockRow(row.key, { usePurchaseUnit: !row.usePurchaseUnit })}
-                              className={`text-[10px] uppercase tracking-wider font-bold px-1.5 py-0.5 rounded transition-colors ${
-                                row.usePurchaseUnit 
-                                  ? 'bg-brand-100 text-brand-700 border border-brand-200' 
-                                  : 'bg-neutral-100 text-neutral-500 border border-neutral-200 hover:bg-neutral-200'
-                              }`}
-                            >
-                              {row.usePurchaseUnit ? `Using ${selectedIng.purchase_unit}` : `Use ${selectedIng.purchase_unit}?`}
-                            </button>
-                          )}
-                        </label>
+                      <div className="col-span-12 md:col-span-4">
+                        <label className="block text-xs font-semibold text-neutral-600 mb-1">Select material from inventory</label>
                         <SearchableSelect
                           value={row.ingredientId}
-                          onChange={(value) => updateRestockRow(row.key, { ingredientId: value, usePurchaseUnit: false })}
+                          onChange={(value) => updateRestockRow(row.key, { ingredientId: value })}
                           placeholder="Select material"
                           searchPlaceholder="Search materials…"
                           options={ingredients.map((ingredient) => ({
@@ -768,9 +880,21 @@ export default function IngredientsTab() {
                           className="glass-card border-0 px-3 py-2.5"
                         />
                       </div>
-                      <div className="col-span-6 md:col-span-3">
+                      <div className="col-span-12 md:col-span-3">
+                        <label className="block text-xs font-semibold text-neutral-600 mb-1">Purchased unit</label>
+                        <SearchableSelect
+                          value={row.purchasedUnit}
+                          onChange={(value) => updateRestockRow(row.key, { purchasedUnit: value })}
+                          placeholder="Select unit"
+                          searchPlaceholder="Search units..."
+                          options={PURCHASED_UNITS}
+                          sortOptions={false}
+                          className="glass-card border-0 px-3 py-2.5"
+                        />
+                      </div>
+                      <div className="col-span-6 md:col-span-2">
                         <label className="block text-xs font-semibold text-neutral-600 mb-1">
-                          Quantity ({row.usePurchaseUnit ? selectedIng?.purchase_unit : selectedIng?.unit || '—'})
+                          Purchased quantity
                         </label>
                         <input
                           type="number"
@@ -783,9 +907,7 @@ export default function IngredientsTab() {
                         />
                       </div>
                       <div className="col-span-6 md:col-span-3">
-                        <label className="block text-xs font-semibold text-neutral-600 mb-1">
-                          {row.usePurchaseUnit ? `Price per ${selectedIng?.purchase_unit}` : `Unit cost (${selectedIng?.unit || 'PKR'})`}
-                        </label>
+                        <label className="block text-xs font-semibold text-neutral-600 mb-1">Purchasing Cost</label>
                         <input
                           type="number"
                           step="any"
@@ -796,6 +918,22 @@ export default function IngredientsTab() {
                           placeholder="Optional"
                         />
                       </div>
+                      {packageUnitSelected && selectedIng && (
+                        <div className="col-span-12 md:col-span-5">
+                          <label className="block text-xs font-semibold text-neutral-600 mb-1">
+                            {getPackageQuantityLabel(selectedIng.unit, row.purchasedUnit)}
+                          </label>
+                          <input
+                            type="number"
+                            step="any"
+                            min="0"
+                            value={row.packageQuantity}
+                            onChange={(e) => updateRestockRow(row.key, { packageQuantity: e.target.value })}
+                            className="w-full px-3 py-2.5 glass-card text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none"
+                            placeholder="0"
+                          />
+                        </div>
+                      )}
                       <div className="col-span-12 md:col-span-1 flex justify-end">
                         <button
                           type="button"
@@ -806,11 +944,11 @@ export default function IngredientsTab() {
                           <X className="w-4 h-4" />
                         </button>
                       </div>
-                      {row.usePurchaseUnit && selectedIng && (
+                      {convertedQuantity !== null && selectedIng && (
                         <div className="col-span-12 mt-2 text-[11px] text-neutral-500 italic flex items-center gap-1">
                           <Package className="w-3 h-3" />
-                          Will add {(parseFloat(row.quantity) * (selectedIng.conversion_factor || 1)).toFixed(2)} {selectedIng.unit} to stock
-                          {row.unitCost && ` at Rs. ${(parseFloat(row.unitCost) / (selectedIng.conversion_factor || 1)).toFixed(2)} per ${selectedIng.unit}`}
+                          Will add {convertedQuantity.toFixed(2)} {unitLabel(selectedIng.unit)} to stock
+                          {convertedUnitCost !== null && ` at Rs. ${convertedUnitCost.toFixed(2)} per ${unitLabel(selectedIng.unit)}`}
                         </div>
                       )}
                     </div>
@@ -868,6 +1006,16 @@ export default function IngredientsTab() {
               <div className="space-y-4">
                 {bulkAddRows.map((row) => (
                   <div key={row.key} className="grid grid-cols-12 gap-3 items-end glass-card p-4 rounded-xl border border-white/40">
+                    <div className="col-span-12 md:col-span-2">
+                      <label className="block text-xs font-semibold text-neutral-600 mb-1">Supplier</label>
+                      <SearchableSelect
+                        value={row.supplierId}
+                        onChange={(val) => updateBulkAddRow(row.key, { supplierId: val })}
+                        placeholder="--"
+                        options={suppliers.map(s => ({ value: String(s.id), label: s.name }))}
+                        className="glass-card border-0 px-2 py-1.5"
+                      />
+                    </div>
                     <div className="col-span-12 md:col-span-3">
                       <label className="block text-xs font-semibold text-neutral-600 mb-1">Name *</label>
                       <input
@@ -879,22 +1027,34 @@ export default function IngredientsTab() {
                       />
                     </div>
                     <div className="col-span-6 md:col-span-2">
-                      <label className="block text-xs font-semibold text-neutral-600 mb-1">SKU (optional)</label>
-                      <input
-                        type="text"
-                        value={row.sku}
-                        onChange={(e) => updateBulkAddRow(row.key, { sku: e.target.value })}
-                        className="w-full px-3 py-2 glass-card text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none"
-                        placeholder="Auto"
-                      />
-                    </div>
-                    <div className="col-span-6 md:col-span-2">
                       <label className="block text-xs font-semibold text-neutral-600 mb-1">Unit *</label>
                       <SearchableSelect
                         value={row.unit}
                         onChange={(val) => updateBulkAddRow(row.key, { unit: val })}
-                        options={UNITS.map(u => ({ value: u, label: u }))}
+                        options={UNITS}
+                        sortOptions={false}
                         className="glass-card border-0 px-2 py-1.5"
+                      />
+                    </div>
+                    <div className="col-span-6 md:col-span-2">
+                      <label className="block text-xs font-semibold text-neutral-600 mb-1">SKU</label>
+                      <input
+                        type="text"
+                        value={row.sku}
+                        onChange={(e) => updateBulkAddRow(row.key, { sku: e.target.value, skuTouched: true })}
+                        className="w-full px-3 py-2 glass-card text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none"
+                        placeholder="Auto-generated"
+                      />
+                    </div>
+                    <div className="col-span-6 md:col-span-2">
+                      <label className="block text-xs font-semibold text-neutral-600 mb-1">Price</label>
+                      <input
+                        type="number"
+                        step="any"
+                        min="0"
+                        value={row.lastPurchasePrice}
+                        onChange={(e) => updateBulkAddRow(row.key, { lastPurchasePrice: e.target.value })}
+                        className="w-full px-3 py-2 glass-card text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none"
                       />
                     </div>
                     <div className="col-span-6 md:col-span-2">
@@ -918,16 +1078,6 @@ export default function IngredientsTab() {
                       />
                     </div>
                     <div className="col-span-6 md:col-span-2">
-                      <label className="block text-xs font-semibold text-neutral-600 mb-1">P. Price ({row.purchaseUnit || 'unit'})</label>
-                      <input
-                        type="number"
-                        step="any"
-                        value={row.lastPurchasePrice}
-                        onChange={(e) => updateBulkAddRow(row.key, { lastPurchasePrice: e.target.value })}
-                        className="w-full px-3 py-2 glass-card text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none"
-                      />
-                    </div>
-                    <div className="col-span-6 md:col-span-2">
                       <label className="block text-xs font-semibold text-neutral-600 mb-1">Base Cost ({row.unit})</label>
                       <input
                         type="number"
@@ -935,16 +1085,6 @@ export default function IngredientsTab() {
                         value={row.avgCost}
                         onChange={(e) => updateBulkAddRow(row.key, { avgCost: e.target.value })}
                         className="w-full px-3 py-2 glass-card text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none font-bold text-brand-700"
-                      />
-                    </div>
-                    <div className="col-span-6 md:col-span-2">
-                      <label className="block text-xs font-semibold text-neutral-600 mb-1">Supplier</label>
-                      <SearchableSelect
-                        value={row.supplierId}
-                        onChange={(val) => updateBulkAddRow(row.key, { supplierId: val })}
-                        placeholder="—"
-                        options={suppliers.map(s => ({ value: String(s.id), label: s.name }))}
-                        className="glass-card border-0 px-2 py-1.5"
                       />
                     </div>
                     <div className="col-span-12 md:col-span-1 flex justify-end">
