@@ -13,11 +13,13 @@ from app.models import (
     PurchaseOrder,
     PurchaseOrderItem,
     RecipeItem,
+    RecipeExtraCost,
     RecipePreparedItem,
     Supplier,
     User,
     db,
 )
+from sqlalchemy import distinct
 from app.services.branch_ingredient_stock import (
     InsufficientIngredientStock,
     adjust_branch_ingredient_stock,
@@ -31,12 +33,13 @@ from app.services.prepared_item_stock import (
     seed_prepared_branch_stocks_for_new_item,
     sync_prepared_master_total,
 )
+from app.services.product_pricing import recalculate_product_cost
 from app.services.branch_scope import resolve_terminal_branch_id
 from app.deps import get_current_user
 from app.schemas.inventory_schemas import (
     SupplierCreate, SupplierUpdate, IngredientCreate, IngredientUpdate, IngredientBulkCreate,
     RecipeItemCreate, PurchaseOrderCreate, PurchaseOrderReceive, StockMovementCreate,
-    PreparedItemCreate, PreparedItemUpdate, PreparedItemBatchCreate, RecipePreparedItemCreate,
+    PreparedItemCreate, PreparedItemUpdate, PreparedItemBatchCreate, RecipePreparedItemCreate, RecipeExtraCostCreate,
 )
 
 inventory_advanced_router = APIRouter(prefix="/api/inventory-advanced", tags=["inventory-advanced"])
@@ -45,6 +48,30 @@ inventory_advanced_router = APIRouter(prefix="/api/inventory-advanced", tags=["i
 def _resolve_inventory_branch(branch_id: int | None, current_user: User) -> int:
     _ = branch_id
     return resolve_terminal_branch_id(current_user)
+
+
+def _recalculate_products_using_ingredient(ingredient_id: int) -> None:
+    product_ids = (
+        db.session.query(distinct(RecipeItem.product_id))
+        .filter(RecipeItem.ingredient_id == ingredient_id)
+        .all()
+    )
+    for (product_id,) in product_ids:
+        product = db.session.get(Product, int(product_id))
+        if product is not None:
+            recalculate_product_cost(product)
+
+
+def _recalculate_products_using_prepared_item(prepared_item_id: int) -> None:
+    product_ids = (
+        db.session.query(distinct(RecipePreparedItem.product_id))
+        .filter(RecipePreparedItem.prepared_item_id == prepared_item_id)
+        .all()
+    )
+    for (product_id,) in product_ids:
+        product = db.session.get(Product, int(product_id))
+        if product is not None:
+            recalculate_product_cost(product)
 
 
 def _ingredient_to_dict(ingredient: Ingredient, branch_id: int) -> dict[str, Any]:
@@ -245,8 +272,11 @@ def update_ingredient(ingredient_id: int, payload: IngredientUpdate, current_use
     data.pop("current_stock", None)
     data.pop("brand_name", None)
     data.pop("brandName", None)
+    should_recalculate = "average_cost" in data
     for k, v in data.items():
         setattr(i, k, v)
+    if should_recalculate:
+        _recalculate_products_using_ingredient(i.id)
     db.session.commit()
     return {"message": "Ingredient updated"}
 
@@ -350,6 +380,8 @@ def update_prepared_item(
         except ValueError as exc:
             db.session.rollback()
             return JSONResponse(status_code=400, content={"message": str(exc)})
+    if "average_cost" in data:
+        _recalculate_products_using_prepared_item(item.id)
     db.session.commit()
     return {"message": "Prepared sauce/marination updated"}
 
@@ -423,6 +455,7 @@ def make_prepared_batch(
 def get_recipe(product_id: int, current_user: User = Depends(get_current_user)):
     items = RecipeItem.query.filter_by(product_id=product_id).all()
     prepared_items = RecipePreparedItem.query.filter_by(product_id=product_id).all()
+    extra_cost_items = RecipeExtraCost.query.filter_by(product_id=product_id).all()
     return {"recipe_items": [{
         "id": r.id, "ingredient_id": r.ingredient_id,
         "ingredient_name": r.ingredient.name if r.ingredient else None,
@@ -437,7 +470,14 @@ def get_recipe(product_id: int, current_user: User = Depends(get_current_user)):
         "id": r.id, "prepared_item_id": r.prepared_item_id,
         "quantity": r.quantity, "unit": r.unit.value if hasattr(r.unit, 'value') else r.unit, "notes": r.notes,
         "variant_key": getattr(r, "variant_key", None) or "",
-    } for r in prepared_items]}
+    } for r in prepared_items], "recipe_extra_costs": [{
+        "id": c.id,
+        "product_id": c.product_id,
+        "name": c.name,
+        "amount": float(c.amount or 0.0),
+        "variant_key": (c.variant_key or ""),
+        "created_at": c.created_at.isoformat() if c.created_at else None,
+    } for c in extra_cost_items]}
 
 @inventory_advanced_router.post("/recipes")
 def add_recipe_item(payload: RecipeItemCreate, current_user: User = Depends(get_current_user)):
@@ -457,6 +497,9 @@ def add_recipe_item(payload: RecipeItemCreate, current_user: User = Depends(get_
         data["variant_key"] = str(data["variant_key"]).strip()[:100]
     r = RecipeItem(**data)
     db.session.add(r)
+    product = db.session.get(Product, r.product_id)
+    if product is not None:
+        recalculate_product_cost(product)
     db.session.commit()
     return {"id": r.id, "message": "Recipe item mapped"}
 
@@ -464,7 +507,11 @@ def add_recipe_item(payload: RecipeItemCreate, current_user: User = Depends(get_
 def delete_recipe_item(recipe_item_id: int, current_user: User = Depends(get_current_user)):
     r = db.session.get(RecipeItem, recipe_item_id)
     if r:
+        product = db.session.get(Product, r.product_id)
         db.session.delete(r)
+        db.session.flush()
+        if product is not None:
+            recalculate_product_cost(product)
         db.session.commit()
     return {"message": "Deleted"}
 
@@ -484,6 +531,9 @@ def add_recipe_prepared_item(payload: RecipePreparedItemCreate, current_user: Us
     data["variant_key"] = str(data.get("variant_key") or "").strip()[:100]
     r = RecipePreparedItem(**data)
     db.session.add(r)
+    product = db.session.get(Product, r.product_id)
+    if product is not None:
+        recalculate_product_cost(product)
     db.session.commit()
     return {"id": r.id, "message": "Prepared sauce/marination mapped"}
 
@@ -492,7 +542,69 @@ def add_recipe_prepared_item(payload: RecipePreparedItemCreate, current_user: Us
 def delete_recipe_prepared_item(recipe_item_id: int, current_user: User = Depends(get_current_user)):
     r = db.session.get(RecipePreparedItem, recipe_item_id)
     if r:
+        product = db.session.get(Product, r.product_id)
         db.session.delete(r)
+        db.session.flush()
+        if product is not None:
+            recalculate_product_cost(product)
+        db.session.commit()
+    return {"message": "Deleted"}
+
+
+@inventory_advanced_router.post("/recipes/extra-costs")
+def add_recipe_extra_cost(payload: RecipeExtraCostCreate, current_user: User = Depends(get_current_user)):
+    data = payload.model_dump()
+    data["variant_key"] = str(data.get("variant_key") or "").strip()[:100]
+    row = RecipeExtraCost(**data)
+    db.session.add(row)
+    product = db.session.get(Product, row.product_id)
+    if product is not None:
+        recalculate_product_cost(product)
+    db.session.commit()
+    return {"id": row.id, "message": "Extra cost mapped"}
+
+
+@inventory_advanced_router.patch("/recipes/extra-costs/{extra_cost_id}")
+def update_recipe_extra_cost(
+    extra_cost_id: int,
+    payload: dict[str, Any] | None = None,
+    current_user: User = Depends(get_current_user),
+):
+    row = db.session.get(RecipeExtraCost, extra_cost_id)
+    if row is None:
+        return JSONResponse(status_code=404, content={"message": "Not found"})
+    data = payload or {}
+    if "name" in data:
+        name = str(data.get("name") or "").strip()[:120]
+        if not name:
+            return JSONResponse(status_code=400, content={"message": "name is required"})
+        row.name = name
+    if "amount" in data:
+        try:
+            amount = float(data.get("amount") or 0.0)
+        except (TypeError, ValueError):
+            return JSONResponse(status_code=400, content={"message": "amount must be a number"})
+        if amount < 0:
+            return JSONResponse(status_code=400, content={"message": "amount must be non-negative"})
+        row.amount = amount
+    if "variant_key" in data:
+        row.variant_key = str(data.get("variant_key") or "").strip()[:100]
+    product = db.session.get(Product, row.product_id)
+    if product is not None:
+        recalculate_product_cost(product)
+    db.session.commit()
+    return {"message": "Extra cost updated", "id": row.id}
+
+
+@inventory_advanced_router.delete("/recipes/extra-costs/{extra_cost_id}")
+def delete_recipe_extra_cost(extra_cost_id: int, current_user: User = Depends(get_current_user)):
+    row = db.session.get(RecipeExtraCost, extra_cost_id)
+    if row:
+        product = db.session.get(Product, row.product_id)
+        db.session.delete(row)
+        db.session.flush()
+        if product is not None:
+            recalculate_product_cost(product)
         db.session.commit()
     return {"message": "Deleted"}
 

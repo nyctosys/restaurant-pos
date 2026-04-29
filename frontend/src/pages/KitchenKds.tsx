@@ -29,6 +29,8 @@ type KdsOrder = {
   /** Expanded lines for queue totals (deal components, not the deal parent). */
   prep_lines?: KdsLine[];
   modifications?: { type: string; description: string; timestamp: string }[];
+  is_modified?: boolean;
+  modified_at?: string | null;
 };
 
 type FilterTab = 'placed' | 'preparing' | 'ready';
@@ -210,7 +212,10 @@ const OrderCard = memo(function OrderCard({
   let cardBg = 'bg-white/80 border-white/60 shadow-black/5';
   let timerColor = 'text-neutral-700';
 
-  if (priority === 'yellow') {
+  if (order.is_modified) {
+    cardBg = 'bg-orange-100/95 border-orange-400 shadow-orange-900/15 shadow-lg ring-2 ring-orange-400/45';
+    timerColor = 'text-orange-700';
+  } else if (priority === 'yellow') {
     cardBg = 'bg-amber-100/90 border-amber-300 shadow-amber-900/10 shadow-lg ring-1 ring-amber-400/50';
     timerColor = 'text-amber-700';
   } else if (priority === 'red') {
@@ -234,6 +239,12 @@ const OrderCard = memo(function OrderCard({
             <OtIcon className="w-3 h-3 shrink-0" strokeWidth={2.5} />
             <span className="truncate">{otCfg.label}</span>
           </div>
+          {order.is_modified && (
+            <div className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded border font-bold text-[10px] uppercase tracking-wider bg-orange-100 text-orange-900 border-orange-300">
+              <AlertTriangle className="w-3 h-3 shrink-0 text-orange-700" />
+              <span>Order Modified</span>
+            </div>
+          )}
         </div>
         <div className="text-right flex flex-col items-end shrink-0">
           <span className="text-xs font-bold text-neutral-500 block">

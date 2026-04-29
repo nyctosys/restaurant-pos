@@ -13,6 +13,7 @@ interface Product {
   title: string;
   base_price: number;
   section?: string;
+  sale_price?: number;
 }
 
 interface ComboItem {
@@ -31,6 +32,7 @@ interface Deal {
   sku: string;
   title: string;
   base_price: number;
+  sale_price?: number;
   section?: string;
   variants?: string[];
   combo_items: ComboItem[];
@@ -46,7 +48,7 @@ export default function DealsTab() {
   const [formData, setFormData] = useState({
     title: '',
     sku: '',
-    base_price: '',
+    sale_price: '',
     /** Comma-separated deal variant labels (optional). Used for variant-specific combo lines. */
     variants: '',
     combo_items: [] as ComboItem[]
@@ -101,7 +103,7 @@ export default function DealsTab() {
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    const normalizedPrice = Number(formData.base_price);
+    const normalizedPrice = Number(formData.sale_price);
     if (!Number.isFinite(normalizedPrice) || normalizedPrice < 0) {
       showToast('Enter valid bundled price before saving deal', 'error');
       return;
@@ -133,7 +135,7 @@ export default function DealsTab() {
       await post('/inventory-advanced/deals/', {
         title: formData.title,
         sku: formData.sku,
-        base_price: normalizedPrice,
+        sale_price: normalizedPrice,
         variants: variantList,
         combo_items: formData.combo_items.map(({ product_id, quantity, variant_key, selection_type, category_name }) => ({
           selection_type: selection_type || 'product',
@@ -145,7 +147,7 @@ export default function DealsTab() {
       });
       showToast('Deal created successfully', 'success');
       setShowForm(false);
-      setFormData({ title: '', sku: '', base_price: '', variants: '', combo_items: [] });
+      setFormData({ title: '', sku: '', sale_price: '', variants: '', combo_items: [] });
       setFormSkuTouched(false);
       fetchData();
     } catch (err) {
@@ -296,8 +298,8 @@ export default function DealsTab() {
                   required
                   min="0"
                   step="0.01"
-                  value={formData.base_price}
-                  onChange={e => setFormData({...formData, base_price: e.target.value})}
+                  value={formData.sale_price}
+                  onChange={e => setFormData({...formData, sale_price: e.target.value})}
                   className="w-full bg-white/50 border border-soot-200 rounded-xl px-4 py-3 focus:ring-2 focus:ring-brand-500 transition-all font-medium touch-target outline-none"
                   placeholder="0.00"
                 />
@@ -376,7 +378,7 @@ export default function DealsTab() {
                           searchPlaceholder="Search menu items…"
                           options={products.map((product) => ({
                             value: String(product.id),
-                            label: `${product.title} (${formatCurrency(product.base_price)})`,
+                            label: `${product.title} (${formatCurrency(product.sale_price ?? product.base_price)})`,
                             searchText: `${product.sku} ${product.title} ${(product.section || '').trim()}`,
                           }))}
                           className="border-soot-200 bg-white px-3 py-2 font-medium"
@@ -504,7 +506,7 @@ export default function DealsTab() {
               </div>
               <div className="p-5 bg-soot-50/50 border-t border-soot-100 rounded-b-2xl font-bold text-lg text-brand-700 flex justify-between items-center">
                 <span>Bundle Price:</span>
-                <span>{formatCurrency(deal.base_price)}</span>
+                <span>{formatCurrency(deal.sale_price ?? deal.base_price)}</span>
               </div>
             </div>
           ))

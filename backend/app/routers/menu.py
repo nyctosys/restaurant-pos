@@ -62,6 +62,7 @@ def _product_to_dict(product: Product) -> dict[str, Any]:
         "sku": product.sku,
         "title": product.title,
         "base_price": float(product.base_price),
+        "sale_price": float(getattr(product, "sale_price", None) if getattr(product, "sale_price", None) is not None else product.base_price),
         "section": product.section or "",
         "variants": _normalize_variants_list(getattr(product, "variants", None)),
         "image_url": product.image_url or "",
@@ -84,15 +85,16 @@ def get_products(include_archived: str | None = None, _: User = Depends(get_curr
 @menu_router.post("/")
 def create_product(payload: dict[str, Any] | None = None, _: User = Depends(require_owner)):
     data = payload or {}
-    for k in ("sku", "title", "base_price"):
+    for k in ("sku", "title"):
         if k not in data:
             return JSONResponse(status_code=400, content={"message": "Missing required fields"})
     try:
-        base_price = float(data["base_price"])
+        sale_price_raw = data.get("sale_price", data.get("base_price"))
+        sale_price = float(sale_price_raw)
     except (TypeError, ValueError):
-        return JSONResponse(status_code=400, content={"message": "Base price must be a number"})
-    if base_price != base_price or base_price < 0:
-        return JSONResponse(status_code=400, content={"message": "Base price cannot be negative"})
+        return JSONResponse(status_code=400, content={"message": "Sale price must be a number"})
+    if sale_price != sale_price or sale_price < 0:
+        return JSONResponse(status_code=400, content={"message": "Sale price cannot be negative"})
     sku = (data.get("sku") or "").strip()
     title = (data.get("title") or "").strip()
     if not sku or not title:
@@ -103,7 +105,8 @@ def create_product(payload: dict[str, Any] | None = None, _: User = Depends(requ
         new_product = Product(
             sku=sku,
             title=title,
-            base_price=base_price,
+            base_price=0,
+            sale_price=sale_price,
             section=(data.get("section") or "").strip(),
             variants=_normalize_variants_list(data.get("variants")),
             image_url=(data.get("image_url") or "").strip() or "",
@@ -111,7 +114,10 @@ def create_product(payload: dict[str, Any] | None = None, _: User = Depends(requ
         )
         db.session.add(new_product)
         db.session.commit()
-        return JSONResponse(status_code=201, content={"message": "Product created!", "id": new_product.id})
+        return JSONResponse(
+            status_code=201,
+            content={"message": "Product created!", "id": new_product.id, "product": _product_to_dict(new_product)},
+        )
     except Exception as exc:
         db.session.rollback()
         return JSONResponse(status_code=500, content={"message": "Error creating product", "error": str(exc)})
@@ -129,14 +135,15 @@ def update_product(product_id: int, payload: dict[str, Any] | None = None, _: Us
         product.sku = data["sku"]
     if "title" in data:
         product.title = data["title"]
-    if "base_price" in data:
+    if "sale_price" in data or "base_price" in data:
         try:
-            bp = float(data["base_price"])
-            if bp != bp or bp < 0:
-                return JSONResponse(status_code=400, content={"message": "Base price must be a non-negative number"})
-            product.base_price = bp
+            sale_raw = data.get("sale_price", data.get("base_price"))
+            sp = float(sale_raw)
+            if sp != sp or sp < 0:
+                return JSONResponse(status_code=400, content={"message": "Sale price must be a non-negative number"})
+            product.sale_price = sp
         except (TypeError, ValueError):
-            return JSONResponse(status_code=400, content={"message": "Base price must be a number"})
+            return JSONResponse(status_code=400, content={"message": "Sale price must be a number"})
     if "section" in data:
         product.section = data["section"]
     if "variants" in data:
@@ -147,7 +154,7 @@ def update_product(product_id: int, payload: dict[str, Any] | None = None, _: Us
         product.unit = (data.get("unitOfMeasure") or data.get("unit") or "").strip() or None
     try:
         db.session.commit()
-        return {"message": "Product updated!"}
+        return {"message": "Product updated!", "product": _product_to_dict(product)}
     except Exception as exc:
         db.session.rollback()
         return JSONResponse(status_code=500, content={"message": "Error updating product", "error": str(exc)})

@@ -132,6 +132,16 @@ def _schedule_order_event(event: str, sale: Sale, **extra: Any) -> None:
     schedule_emit_event(event, _order_event_payload(sale, **extra))
 
 
+def _sale_unit_price(product: Product) -> float:
+    raw = getattr(product, "sale_price", None)
+    if raw is None:
+        raw = getattr(product, "base_price", 0)
+    try:
+        return float(raw or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def _parse_optional_non_negative_charge(value: Any, default: float) -> float:
     if value is None:
         return default
@@ -703,7 +713,7 @@ def _deduct_product_inventory_and_create_sale_items(
     if not ok_snap:
         return False, err_snap, 0.0
 
-    unit_price = 0.0 if is_deal_child else float(product.base_price)
+    unit_price = 0.0 if is_deal_child else _sale_unit_price(product)
     subtotal = unit_price * qty
 
     sale_item = SaleItem(
@@ -910,6 +920,54 @@ def checkout(
         branch_obj = db.session.get(Branch, branch_id) if branch_id else None
         if branch_obj:
             branch_name = branch_obj.name
+        # Backend-driven KDS auto-print: print immediately when a paid order is created.
+        if getattr(new_sale, "order_type", None) in KITCHEN_OPEN_ORDER_TYPES and getattr(new_sale, "kds_ticket_printed_at", None) is None:
+            kot_rows = (
+                db.session.query(
+                    SaleItem.id,
+                    SaleItem.sale_id,
+                    SaleItem.variant_sku_suffix,
+                    SaleItem.quantity,
+                    SaleItem.modifiers,
+                    SaleItem.parent_sale_item_id,
+                    Product.title,
+                    Product.is_deal,
+                )
+                .outerjoin(Product, SaleItem.product_id == Product.id)
+                .filter(SaleItem.sale_id == new_sale.id)
+                .all()
+            )
+            kot_flat_items: list[dict[str, Any]] = []
+            for row in kot_rows:
+                kot_flat_items.append(
+                    {
+                        "id": row.id,
+                        "sale_id": row.sale_id,
+                        "product_title": row.title if row.title else "Unknown",
+                        "variant_sku_suffix": row.variant_sku_suffix or "",
+                        "quantity": row.quantity,
+                        "modifiers": _modifiers_for_display(row.modifiers or []),
+                        "parent_sale_item_id": row.parent_sale_item_id,
+                        "is_deal": row.is_deal,
+                        "children": [],
+                    }
+                )
+            kot_items = _nest_sale_item_dicts(kot_flat_items).get(new_sale.id, [])
+            table_name = (order_snapshot_norm or {}).get("table_name", "") if isinstance(order_snapshot_norm, dict) else ""
+            kot_print_ok = printer_service.print_kot(
+                {
+                    "sale_id": new_sale.id,
+                    "branch_id": branch_id,
+                    "branch": branch_name,
+                    "operator": current_user.username,
+                    "table_name": table_name,
+                    "order_type": order_type_norm,
+                    "items": kot_items,
+                }
+            )
+            if kot_print_ok:
+                new_sale.kds_ticket_printed_at = datetime.now(timezone.utc)
+                db.session.commit()
         receipt_items = []
         for i in items:
             product = db.session.get(Product, i.get("product_id"))
@@ -917,7 +975,7 @@ def checkout(
                 {
                     "title": str(product.title if product else "Item"),
                     "quantity": int(i.get("quantity", 1)),
-                    "unit_price": float(product.base_price) if product else 0.0,
+                    "unit_price": _sale_unit_price(product) if product else 0.0,
                 }
             )
         discount_name = (
@@ -1456,6 +1514,78 @@ def _line_dict_from_nested_node(
     }
 
 
+def _line_signature(line: dict[str, Any]) -> str:
+    mods = [m for m in (line.get("modifiers") or []) if isinstance(m, str)]
+    mods.sort()
+    vk = (line.get("variant_sku_suffix") or "").strip()
+    return f'{line.get("product_title") or "Unknown"}|{vk}|{",".join(mods)}'
+
+
+def _summarize_line(line: dict[str, Any]) -> str:
+    qty = int(line.get("quantity") or 0)
+    title = str(line.get("product_title") or "Unknown")
+    vk = (line.get("variant_sku_suffix") or "").strip()
+    mods = [m for m in (line.get("modifiers") or []) if isinstance(m, str) and m.strip()]
+    text = f"{qty}x {title}"
+    if vk:
+        text += f" ({vk})"
+    if mods:
+        text += f" [+ {', '.join(mods)}]"
+    return text
+
+
+def _compute_order_modifications(
+    old_nested: list[dict[str, Any]],
+    new_nested: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    old_lines = _flatten_kitchen_display_lines(old_nested)
+    new_lines = _flatten_kitchen_display_lines(new_nested)
+    old_map = {_line_signature(line): line for line in old_lines}
+    new_map = {_line_signature(line): line for line in new_lines}
+    changes: list[dict[str, Any]] = []
+
+    for sig, new_line in new_map.items():
+        old_line = old_map.get(sig)
+        new_qty = int(new_line.get("quantity") or 0)
+        old_qty = int(old_line.get("quantity") or 0) if old_line else 0
+        if old_line is None:
+            changes.append(
+                {
+                    "type": "add",
+                    "description": f"Added {_summarize_line(new_line)}",
+                    "old": None,
+                    "new": _summarize_line(new_line),
+                    "old_quantity": 0,
+                    "new_quantity": new_qty,
+                }
+            )
+        elif new_qty != old_qty:
+            changes.append(
+                {
+                    "type": "change",
+                    "description": f"Changed {_summarize_line(new_line)} from {old_qty}x to {new_qty}x",
+                    "old": _summarize_line(old_line),
+                    "new": _summarize_line(new_line),
+                    "old_quantity": old_qty,
+                    "new_quantity": new_qty,
+                }
+            )
+
+    for sig, old_line in old_map.items():
+        if sig not in new_map:
+            changes.append(
+                {
+                    "type": "remove",
+                    "description": f"Removed {_summarize_line(old_line)}",
+                    "old": _summarize_line(old_line),
+                    "new": None,
+                    "old_quantity": int(old_line.get("quantity") or 0),
+                    "new_quantity": 0,
+                }
+            )
+    return changes
+
+
 def _flatten_kitchen_display_lines(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Flatten nested sale items (deals/children) into KDS line rows (full expansion)."""
     lines: list[dict[str, Any]] = []
@@ -1624,7 +1754,13 @@ def list_kitchen_orders(
                     "kitchen_status": _kitchen_status_value(sale),
                     "items": _kds_card_lines(nested),
                     "prep_lines": _kds_prep_lines(nested),
-                    "modifications": [],
+                    "modifications": (
+                        (sale.modification_snapshot or {}).get("changes")
+                        if isinstance(getattr(sale, "modification_snapshot", None), dict)
+                        else []
+                    ),
+                    "is_modified": bool(getattr(sale, "modified_at", None)),
+                    "modified_at": sale.modified_at.isoformat() if getattr(sale, "modified_at", None) else None,
                 }
             )
         return {"orders": out}
@@ -1764,6 +1900,9 @@ def _create_open_kot_response(
             print_ok = printer_service.print_kot(
                 _build_kot_print_payload(new_sale.id, bid, current_user.username)
             )
+            if print_ok:
+                new_sale.kds_ticket_printed_at = datetime.now(timezone.utc)
+                db.session.commit()
         return JSONResponse(
             status_code=201,
             content={
@@ -1871,6 +2010,23 @@ def update_open_sale_items(
         order_snapshot_norm = getattr(sale, "order_snapshot", None)
 
     try:
+        old_flat_items: list[dict[str, Any]] = []
+        for item in list(sale.items):
+            old_flat_items.append(
+                {
+                    "id": item.id,
+                    "sale_id": item.sale_id,
+                    "product_title": item.product.title if item.product else "Unknown",
+                    "variant_sku_suffix": item.variant_sku_suffix or "",
+                    "quantity": item.quantity,
+                    "modifiers": _modifiers_for_display(item.modifiers or []),
+                    "parent_sale_item_id": item.parent_sale_item_id,
+                    "is_deal": bool(item.product.is_deal) if item.product else False,
+                    "children": [],
+                }
+            )
+        old_nested = _nest_sale_item_dicts(old_flat_items).get(sale.id, [])
+
         for old in list(sale.items):
             _restore_sale_item_side_effects(
                 old,
@@ -1910,8 +2066,64 @@ def update_open_sale_items(
         sale.discount_snapshot = None
         sale.order_type = order_type_norm
         sale.order_snapshot = order_snapshot_norm
+        new_rows = (
+            db.session.query(
+                SaleItem.id,
+                SaleItem.sale_id,
+                SaleItem.variant_sku_suffix,
+                SaleItem.quantity,
+                SaleItem.modifiers,
+                SaleItem.parent_sale_item_id,
+                Product.title,
+                Product.is_deal,
+            )
+            .outerjoin(Product, SaleItem.product_id == Product.id)
+            .filter(SaleItem.sale_id == sale.id)
+            .all()
+        )
+        new_flat_items: list[dict[str, Any]] = []
+        for row in new_rows:
+            new_flat_items.append(
+                {
+                    "id": row.id,
+                    "sale_id": row.sale_id,
+                    "product_title": row.title if row.title else "Unknown",
+                    "variant_sku_suffix": row.variant_sku_suffix or "",
+                    "quantity": row.quantity,
+                    "modifiers": _modifiers_for_display(row.modifiers or []),
+                    "parent_sale_item_id": row.parent_sale_item_id,
+                    "is_deal": row.is_deal,
+                    "children": [],
+                }
+            )
+        new_nested = _nest_sale_item_dicts(new_flat_items).get(sale.id, [])
+        changes = _compute_order_modifications(old_nested, new_nested)
+        if changes:
+            now = datetime.now(timezone.utc)
+            for change in changes:
+                change["timestamp"] = now.isoformat()
+            sale.modified_at = now
+            sale.modification_snapshot = {"changes": changes, "count": len(changes), "timestamp": now.isoformat()}
         db.session.commit()
         _schedule_order_event(RealtimeEvents.ORDER_UPDATED, sale, total=float(total_amount))
+        branch_name = sale.branch.name if sale.branch else "Main Branch"
+        table_name = ""
+        snapshot = sale.order_snapshot if isinstance(sale.order_snapshot, dict) else {}
+        if isinstance(snapshot, dict):
+            table_name = snapshot.get("table_name") or ""
+        if changes:
+            printer_service = PrinterService()
+            printer_service.print_kot_modification(
+                {
+                    "sale_id": sale.id,
+                    "branch_id": sale.branch_id,
+                    "branch": branch_name,
+                    "operator": current_user.username,
+                    "table_name": table_name,
+                    "order_type": getattr(sale, "order_type", None),
+                    "changes": changes,
+                }
+            )
         return {"message": "Order updated", "sale_id": sale_id, "total_amount": float(total_amount)}
     except Exception as exc:
         db.session.rollback()

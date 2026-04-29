@@ -15,6 +15,7 @@ type Product = {
   sku: string;
   title: string;
   base_price: number;
+  sale_price?: number;
   section: string;
   variants: string[];
   image_url?: string;
@@ -22,7 +23,7 @@ type Product = {
   unitOfMeasure?: string;
 };
 
-type SortKey = 'sku' | 'title' | 'section' | 'base_price' | 'archived_at';
+type SortKey = 'sku' | 'title' | 'section' | 'base_price' | 'sale_price' | 'archived_at';
 type SortDirection = 'asc' | 'desc';
 
 /** Menu catalog only — stock is tracked per ingredient (Recipes / Ingredients tabs). */
@@ -62,7 +63,7 @@ export default function MenuItemsTab() {
     const productQuery = includeArchived ? '/menu-items/?include_archived=1' : '/menu-items/';
     try {
       const [prodData, settingsData] = await Promise.all([
-        get<{ products?: Product[] }>(productQuery, forceRefresh ? { forceRefresh: true } : undefined),
+        get<{ products?: Product[] }>(productQuery, { cacheTtlMs: 0, forceRefresh }),
         get<{ config?: { sections?: string[] } }>(settingsQuery),
       ]);
       const productsList = prodData?.products ?? [];
@@ -104,7 +105,7 @@ export default function MenuItemsTab() {
     setFormSku(p.sku);
     setFormSkuTouched(true);
     setFormTitle(p.title);
-    setFormPrice(p.base_price.toString());
+    setFormPrice(String(p.sale_price ?? p.base_price));
     setFormSection(p.section || '');
     setFormImageUrl(p.image_url || '');
     setFormUnit(p.unitOfMeasure || '');
@@ -162,12 +163,12 @@ export default function MenuItemsTab() {
     setFormError('');
 
     if (!formSku.trim() || !formTitle.trim() || !formPrice.trim() || !formSection) {
-      setFormError('SKU, Item name, Base Price, and Category are required.');
+      setFormError('SKU, Item name, Sale Price, and Category are required.');
       return;
     }
     const parsedPrice = parseFloat(formPrice);
     if (Number.isNaN(parsedPrice) || parsedPrice < 0) {
-      setFormError('Base price must be a valid number (0 or greater).');
+      setFormError('Sale price must be a valid number (0 or greater).');
       return;
     }
 
@@ -177,16 +178,26 @@ export default function MenuItemsTab() {
       const body = {
         sku: formSku.trim(),
         title: formTitle.trim(),
-        base_price: parsedPrice,
+        sale_price: parsedPrice,
         section: formSection,
         variants: formVariants,
         image_url: formImageUrl.trim() || '',
         unitOfMeasure: formUnit.trim() || '',
       };
+      type SaveResponse = { product?: Product; id?: number; message?: string };
+      let saved: SaveResponse | null = null;
       if (editingProduct) {
-        await put(`/menu-items/${editingProduct.id}`, body);
+        saved = await put<SaveResponse>(`/menu-items/${editingProduct.id}`, body);
       } else {
-        await post('/menu-items/', body);
+        saved = await post<SaveResponse>('/menu-items/', body);
+      }
+      if (saved?.product) {
+        setProducts((prev) => {
+          if (editingProduct) {
+            return prev.map((p) => (p.id === editingProduct.id ? saved!.product! : p));
+          }
+          return [saved.product!, ...prev];
+        });
       }
       setShowModal(false);
       await fetchData(true);
@@ -259,6 +270,9 @@ export default function MenuItemsTab() {
         switch (sortKey) {
           case 'base_price':
             result = left.base_price - right.base_price;
+            break;
+          case 'sale_price':
+            result = (left.sale_price ?? left.base_price) - (right.sale_price ?? right.base_price);
             break;
           case 'archived_at': {
             const leftArchived = left.archived_at ? 1 : 0;
@@ -406,8 +420,21 @@ export default function MenuItemsTab() {
                       onClick={() => handleSort('base_price')}
                       className="flex w-full items-center gap-2 text-left transition-colors hover:text-soot-700 focus:outline-none focus-visible:text-soot-900"
                     >
-                      <span>Base Price</span>
+                      <span>Base Price (Cost)</span>
                       {renderSortIcon('base_price')}
+                    </button>
+                  </th>
+                  <th
+                    aria-sort={sortKey === 'sale_price' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}
+                    className="sticky top-0 z-10 bg-white/90 backdrop-blur-md py-3 px-3 lg:px-4 xl:py-2 xl:text-xs"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => handleSort('sale_price')}
+                      className="flex w-full items-center gap-2 text-left transition-colors hover:text-soot-700 focus:outline-none focus-visible:text-soot-900"
+                    >
+                      <span>Sale Price</span>
+                      {renderSortIcon('sale_price')}
                     </button>
                   </th>
                   <th className="sticky top-0 z-10 bg-white/90 backdrop-blur-md py-3 px-3 lg:px-4 xl:py-2 xl:text-xs text-left text-soot-500 font-semibold">
@@ -449,6 +476,9 @@ export default function MenuItemsTab() {
                     </td>
                     <td className="py-3 px-3 lg:px-4 xl:py-2 font-semibold text-sm xl:text-xs">
                       {formatCurrency(p.base_price)}
+                    </td>
+                    <td className="py-3 px-3 lg:px-4 xl:py-2 font-semibold text-sm xl:text-xs">
+                      {formatCurrency(p.sale_price ?? p.base_price)}
                     </td>
                     <td className="py-3 px-3 lg:px-4 xl:py-2">
                       {p.unitOfMeasure ? (
@@ -572,7 +602,7 @@ export default function MenuItemsTab() {
 
               <div>
                 <label className="block text-sm font-medium text-neutral-700 mb-1">
-                  Base price <span className="text-red-400">*</span>
+                  Sale Price <span className="text-red-400">*</span>
                 </label>
                 <div className="flex gap-2">
                   <input

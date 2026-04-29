@@ -13,6 +13,7 @@ type Product = {
   sku: string;
   title: string;
   base_price: number;
+  sale_price?: number;
   section: string;
   variants: string[];
   image_url?: string;
@@ -674,7 +675,7 @@ export default function Dashboard() {
     handleAddToCart({
       id: product.id,
       title: product.title,
-      price: product.base_price,
+      price: product.sale_price ?? product.base_price,
       image: getProductImageUrl(product),
       variant: defaultVariant,
     });
@@ -1731,7 +1732,7 @@ export default function Dashboard() {
                         </span>
                       ) : null}
                     </div>
-                    <p className={`${layoutView === 'grid' ? 'text-sm' : 'text-base'} shrink-0 font-bold text-brand-700 whitespace-nowrap`}>{formatCurrency(product.base_price)}</p>
+                    <p className={`${layoutView === 'grid' ? 'text-sm' : 'text-base'} shrink-0 font-bold text-brand-700 whitespace-nowrap`}>{formatCurrency(product.sale_price ?? product.base_price)}</p>
                   </div>
                 </button>
                 );

@@ -29,7 +29,8 @@ class ComboItemCreate(BaseModel):
 class DealCreate(BaseModel):
     title: str
     sku: str
-    base_price: float
+    sale_price: float | None = Field(default=None)
+    base_price: float | None = Field(default=None)
     variants: list[str] = Field(default_factory=list)
     combo_items: List[ComboItemCreate]
 
@@ -58,6 +59,7 @@ def _list_deals_impl(current_user: User) -> dict[str, list[dict]]:
                 "sku": d.sku,
                 "title": d.title,
                 "base_price": float(d.base_price),
+                "sale_price": float(getattr(d, "sale_price", None) if getattr(d, "sale_price", None) is not None else d.base_price),
                 "section": (d.section or "").strip() or "Deals",
                 "variants": _normalize_variants_list(getattr(d, "variants", None)),
                 "combo_items": items,
@@ -93,6 +95,12 @@ def _create_deal_impl(payload: DealCreate, current_user: User) -> dict[str, obje
                         "message": "Add deal variants first, or leave combo line variant empty for base-only deals.",
                     },
                 )
+
+    sale_price = payload.sale_price if payload.sale_price is not None else payload.base_price
+    if sale_price is None:
+        return JSONResponse(status_code=400, content={"message": "sale_price is required"})
+    if float(sale_price) < 0:
+        return JSONResponse(status_code=400, content={"message": "sale_price cannot be negative"})
 
     normalized_combo_items: list[dict[str, object]] = []
     for index, ci in enumerate(payload.combo_items):
@@ -152,7 +160,8 @@ def _create_deal_impl(payload: DealCreate, current_user: User) -> dict[str, obje
     combo = Product(
         sku=payload.sku,
         title=payload.title,
-        base_price=payload.base_price,
+        base_price=0,
+        sale_price=float(sale_price),
         variants=variant_labels,
         is_deal=True,
         section="Deals",

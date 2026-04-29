@@ -99,6 +99,49 @@ def _init_database_core() -> None:
                 except (OperationalError, ProgrammingError):
                     db.session.rollback()
                 try:
+                    dname = db.engine.dialect.name
+                    col_sql = "TIMESTAMPTZ" if dname == "postgresql" else "TIMESTAMP"
+                    db.session.execute(
+                        text(f"ALTER TABLE sales ADD COLUMN modified_at {col_sql}")
+                    )
+                    db.session.commit()
+                    print("Added 'modified_at' column to 'sales' table.")
+                except (OperationalError, ProgrammingError):
+                    db.session.rollback()
+                try:
+                    db.session.execute(
+                        text("ALTER TABLE sales ADD COLUMN modification_snapshot JSON")
+                    )
+                    db.session.commit()
+                    print("Added 'modification_snapshot' column to 'sales' table.")
+                except (OperationalError, ProgrammingError):
+                    db.session.rollback()
+                try:
+                    dname = db.engine.dialect.name
+                    col_sql = "TIMESTAMPTZ" if dname == "postgresql" else "TIMESTAMP"
+                    db.session.execute(
+                        text(f"ALTER TABLE sales ADD COLUMN kds_ticket_printed_at {col_sql}")
+                    )
+                    db.session.commit()
+                    print("Added 'kds_ticket_printed_at' column to 'sales' table.")
+                except (OperationalError, ProgrammingError):
+                    db.session.rollback()
+                try:
+                    db.session.execute(
+                        text("ALTER TABLE products ADD COLUMN sale_price NUMERIC(12, 2) DEFAULT 0")
+                    )
+                    db.session.commit()
+                    print("Added 'sale_price' column to 'products' table.")
+                except (OperationalError, ProgrammingError):
+                    db.session.rollback()
+                try:
+                    db.session.execute(
+                        text("UPDATE products SET sale_price = base_price WHERE sale_price IS NULL OR sale_price = 0")
+                    )
+                    db.session.commit()
+                except (OperationalError, ProgrammingError):
+                    db.session.rollback()
+                try:
                     db.session.execute(
                         text(
                             "ALTER TABLE recipe_items ADD COLUMN variant_key VARCHAR(100) NOT NULL DEFAULT ''"

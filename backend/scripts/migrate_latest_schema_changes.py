@@ -161,6 +161,31 @@ def _ensure_combo_product_id_nullable(dialect: str) -> None:
     print("  + combo_items.product_id now allows NULL for category-choice deal rows")
 
 
+def _ensure_recipe_extra_costs_table(dialect: str) -> None:
+    float_type = "DOUBLE PRECISION" if dialect == "postgresql" else "FLOAT"
+    id_type = "SERIAL PRIMARY KEY" if dialect == "postgresql" else "INTEGER PRIMARY KEY AUTOINCREMENT"
+    ts_type = "TIMESTAMPTZ" if dialect == "postgresql" else "TIMESTAMP"
+    if _table_exists("recipe_extra_costs"):
+        print("  - recipe_extra_costs already exists")
+        return
+    db.session.execute(
+        text(
+            f"""
+            CREATE TABLE recipe_extra_costs (
+              id {id_type},
+              product_id INTEGER NOT NULL REFERENCES products(id),
+              name VARCHAR(120) NOT NULL,
+              amount {float_type} NOT NULL DEFAULT 0,
+              variant_key VARCHAR(100) NOT NULL DEFAULT '',
+              created_at {ts_type},
+              CONSTRAINT ck_recipe_extra_cost_amount_nonneg CHECK (amount >= 0)
+            )
+            """
+        )
+    )
+    print("  + Created recipe_extra_costs")
+
+
 def main() -> None:
     app = create_app()
     with app.app_context():
@@ -191,6 +216,21 @@ def main() -> None:
                 column="kitchen_ready_at",
                 ddl=f"ALTER TABLE sales ADD COLUMN kitchen_ready_at {ts_type}",
             ),
+            ColumnMigration(
+                table="sales",
+                column="kds_ticket_printed_at",
+                ddl=f"ALTER TABLE sales ADD COLUMN kds_ticket_printed_at {ts_type}",
+            ),
+            ColumnMigration(
+                table="sales",
+                column="modified_at",
+                ddl=f"ALTER TABLE sales ADD COLUMN modified_at {ts_type}",
+            ),
+            ColumnMigration(
+                table="sales",
+                column="modification_snapshot",
+                ddl=f"ALTER TABLE sales ADD COLUMN modification_snapshot {json_type}",
+            ),
             # Menu combo variant support.
             ColumnMigration(
                 table="combo_items",
@@ -207,14 +247,24 @@ def main() -> None:
                 column="category_name",
                 ddl="ALTER TABLE combo_items ADD COLUMN category_name VARCHAR(100)",
             ),
+            ColumnMigration(
+                table="products",
+                column="sale_price",
+                ddl="ALTER TABLE products ADD COLUMN sale_price NUMERIC(12, 2) DEFAULT 0",
+            ),
         ]
 
         print("migrate_latest_schema_changes: starting ...")
         try:
             _ensure_stock_movement_preparation_value(dialect)
             _ensure_prepared_item_tables(dialect)
+            _ensure_recipe_extra_costs_table(dialect)
             for migration in migrations:
                 _apply_column_migration(migration)
+            # Backward compatibility: old base_price was sale price.
+            db.session.execute(
+                text("UPDATE products SET sale_price = base_price WHERE sale_price IS NULL OR sale_price = 0")
+            )
             _ensure_combo_product_id_nullable(dialect)
             db.session.commit()
             print("migrate_latest_schema_changes: complete.")
