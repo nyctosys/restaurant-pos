@@ -8,7 +8,8 @@ from fastapi.responses import JSONResponse
 
 from app.models import Ingredient, IngredientBranchStock, StockMovement, User, db
 from app.schemas.inventory_schemas import BulkRestockRequest
-from app.services.branch_ingredient_stock import adjust_branch_ingredient_stock, get_branch_stock
+from app.services.branch_ingredient_stock import adjust_branch_ingredient_stock
+from app.services.ingredient_costing import apply_ingredient_purchase_cost
 from app.services.ingredient_master_stock import sync_ingredient_master_total
 from app.services.branch_scope import resolve_terminal_branch_id
 from app.services.sync_outbox import enqueue_sync_event
@@ -148,13 +149,8 @@ def bulk_restock_ingredients(payload: BulkRestockRequest, current_user: User = D
             reference_type = "manual_adjustment"
             applied_unit_cost = float(ing.average_cost or 0.0)
 
-            if incoming_unit_cost is not None and incoming_unit_cost > 0:
-                qty_before = get_branch_stock(ingredient_id, branch_id)
-                total_value_before = qty_before * float(ing.average_cost or 0.0)
-                new_total_qty = qty_before + qty_add
-                if new_total_qty > 0:
-                    ing.average_cost = (total_value_before + (qty_add * incoming_unit_cost)) / new_total_qty
-                ing.last_purchase_price = incoming_unit_cost
+            if incoming_unit_cost is not None:
+                apply_ingredient_purchase_cost(ing, branch_id, qty_add, incoming_unit_cost)
                 movement_type = "purchase"
                 reference_type = "bulk_restock"
                 applied_unit_cost = incoming_unit_cost
@@ -194,6 +190,8 @@ def bulk_restock_ingredients(payload: BulkRestockRequest, current_user: User = D
                     "ingredient_id": ingredient_id,
                     "quantity_added": qty_add,
                     "quantity_after": qty_after,
+                    "average_cost": float(ing.average_cost or 0.0),
+                    "last_purchase_price": float(ing.last_purchase_price or 0.0),
                 }
             )
 

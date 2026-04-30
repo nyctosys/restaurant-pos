@@ -101,6 +101,8 @@ def test_bulk_restock_success_updates_multiple_ingredients(client, app):
     body = res.get_json()
     assert body.get("message") == "Bulk restock completed"
     assert len(body.get("results") or []) == 2
+    assert body["results"][0]["average_cost"] == pytest.approx(43.75)
+    assert body["results"][0]["last_purchase_price"] == pytest.approx(100.0)
 
     with app.app_context():
         row1 = IngredientBranchStock.query.filter_by(ingredient_id=iid1, branch_id=bid).first()
@@ -114,6 +116,38 @@ def test_bulk_restock_success_updates_multiple_ingredients(client, app):
         assert ing2.average_cost == pytest.approx(4.0)
         assert ing1.current_stock == pytest.approx(8.0)
         assert ing2.current_stock == pytest.approx(6.0)
+
+
+def test_bulk_restock_explicit_zero_cost_updates_average_cost(client, app):
+    bid = _seed_user_branch(app)
+    with app.app_context():
+        ing = Ingredient(name="Promo Sauce", unit="l", current_stock=0.0, average_cost=20.0, last_purchase_price=20.0)
+        db.session.add(ing)
+        db.session.flush()
+        seed_branch_stocks_for_new_ingredient(ing.id, 0.0)
+        row = IngredientBranchStock.query.filter_by(ingredient_id=ing.id, branch_id=bid).first()
+        row.current_stock = 5.0
+        db.session.commit()
+        iid = ing.id
+
+    login = client.post("/api/auth/login", json={"username": "invuser", "password": "pass"})
+    token = login.get_json()["token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    res = client.post(
+        "/api/stock/bulk-restock",
+        headers=headers,
+        json={"items": [{"ingredient_id": iid, "quantity": 5, "unit_cost": 0}]},
+    )
+    assert res.status_code == 200
+    body = res.get_json()
+    assert body["results"][0]["average_cost"] == pytest.approx(10.0)
+    assert body["results"][0]["last_purchase_price"] == pytest.approx(0.0)
+
+    with app.app_context():
+        ing = db.session.get(Ingredient, iid)
+        assert ing.average_cost == pytest.approx(10.0)
+        assert ing.last_purchase_price == pytest.approx(0.0)
 
 
 def test_bulk_restock_unknown_ingredient_is_atomic(client, app):

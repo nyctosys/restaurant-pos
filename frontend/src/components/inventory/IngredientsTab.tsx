@@ -4,7 +4,6 @@ import { get, post, put, getUserMessage } from '../../api';
 import { getTerminalBranchIdString, parseUserFromStorage } from '../../utils/branchContext';
 import SearchableSelect from '../SearchableSelect';
 import { showToast } from '../Toast';
-import { formatCurrency } from '../../utils/formatCurrency';
 import { generateAutoSku } from '../../utils/sku';
 
 type Ingredient = {
@@ -46,10 +45,7 @@ type BulkAddRow = {
   unit: string;
   minStock: string;
   reorderQty: string;
-  avgCost: string;
   lastPurchasePrice: string;
-  purchaseUnit: string;
-  conversionFactor: string;
   supplierId: string;
 };
 
@@ -75,6 +71,24 @@ const PURCHASED_UNITS = [
 ];
 
 const PACKAGE_UNITS = new Set(['carton', 'packet']);
+
+const formatAverageUnitCost = (amount: number) => {
+  return `Rs. ${amount.toLocaleString('en-PK', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 4,
+  })}`;
+};
+
+const getPurchasedUnitCost = (ingredient: Ingredient) => {
+  const unit = normalizeUnit(ingredient.unit);
+  if (unit === 'g') {
+    return { amount: ingredient.average_cost * 1000, unit: 'kg' };
+  }
+  if (unit === 'ml') {
+    return { amount: ingredient.average_cost * 1000, unit: 'l' };
+  }
+  return { amount: ingredient.average_cost, unit: unit || ingredient.unit };
+};
 
 const unitLabel = (unit?: string) => {
   const normalized = normalizeUnit(unit);
@@ -142,9 +156,6 @@ export default function IngredientsTab() {
   const [formMinStock, setFormMinStock] = useState('0');
   const [formReorderQty, setFormReorderQty] = useState('0');
   const [formLastPurchasePrice, setFormLastPurchasePrice] = useState('0');
-  const [formAverageCost, setFormAverageCost] = useState('0');
-  const [formPurchaseUnit, setFormPurchaseUnit] = useState('');
-  const [formConversionFactor, setFormConversionFactor] = useState('1');
   const [formSupplierId, setFormSupplierId] = useState('');
   const [formCategory, setFormCategory] = useState('');
   const [formError, setFormError] = useState('');
@@ -179,10 +190,7 @@ export default function IngredientsTab() {
     unit: 'kg',
     minStock: '0',
     reorderQty: '0',
-    avgCost: '0',
     lastPurchasePrice: '0',
-    purchaseUnit: '',
-    conversionFactor: '1',
     supplierId: '',
   });
 
@@ -190,7 +198,7 @@ export default function IngredientsTab() {
     fetchData();
   }, []);
 
-  const fetchData = async () => {
+  const fetchData = async (forceRefresh = false) => {
     setLoading(true);
     try {
       const activeBranchId = getTerminalBranchIdString(parseUserFromStorage());
@@ -198,8 +206,8 @@ export default function IngredientsTab() {
         ? `/inventory-advanced/ingredients?branch_id=${activeBranchId}`
         : '/inventory-advanced/ingredients';
       const [ingRes, supRes] = await Promise.all([
-        get<{ ingredients: Ingredient[] }>(ingPath),
-        get<{ suppliers: Supplier[] }>('/inventory-advanced/suppliers')
+        get<{ ingredients: Ingredient[] }>(ingPath, { forceRefresh }),
+        get<{ suppliers: Supplier[] }>('/inventory-advanced/suppliers', { forceRefresh })
       ]);
       setIngredients(ingRes.ingredients || []);
       setSuppliers(supRes.suppliers || []);
@@ -274,15 +282,6 @@ export default function IngredientsTab() {
             ];
             updated.sku = updated.name.trim() ? generateAutoSku('ING', updated.name, usedSkus) : '';
           }
-          
-          // Auto-calculate Avg Cost if Last Purchase Price or Conversion Factor changed
-          if (patch.lastPurchasePrice !== undefined || patch.conversionFactor !== undefined) {
-             const price = parseFloat(updated.lastPurchasePrice);
-             const factor = parseFloat(updated.conversionFactor);
-             if (!isNaN(price) && factor > 0) {
-                updated.avgCost = (price / factor).toFixed(2);
-             }
-          }
           return updated;
         }
         return row;
@@ -314,17 +313,20 @@ export default function IngredientsTab() {
         setBulkAddError(`Row ${i + 1}: Unit is required.`);
         return;
       }
+      const price = parseFloat(row.lastPurchasePrice);
+      if (row.lastPurchasePrice.trim() !== '' && (!Number.isFinite(price) || price < 0)) {
+        setBulkAddError(`Row ${i + 1}: Price must be a valid amount (0 or greater).`);
+        return;
+      }
 
       ingredientsToCreate.push({
         name: row.name.trim(),
         sku: row.sku.trim() || undefined,
         unit: row.unit,
-        purchase_unit: row.purchaseUnit.trim() || undefined,
-        conversion_factor: parseFloat(row.conversionFactor) || 1.0,
         minimum_stock: parseFloat(row.minStock) || 0,
         reorder_quantity: parseFloat(row.reorderQty) || 0,
-        last_purchase_price: parseFloat(row.lastPurchasePrice) || 0,
-        average_cost: parseFloat(row.avgCost) || 0,
+        last_purchase_price: Number.isFinite(price) ? price : 0,
+        average_cost: Number.isFinite(price) ? price : 0,
         preferred_supplier_id: row.supplierId ? parseInt(row.supplierId, 10) : undefined,
       });
     }
@@ -417,7 +419,7 @@ export default function IngredientsTab() {
       });
       showToast('Bulk restock completed', 'success');
       handleCloseBulkRestock();
-      fetchData();
+      fetchData(true);
     } catch (error) {
       setRestockError(getUserMessage(error));
     } finally {
@@ -434,9 +436,6 @@ export default function IngredientsTab() {
     setFormMinStock(ing.minimum_stock.toString());
     setFormReorderQty(ing.reorder_quantity.toString());
     setFormLastPurchasePrice(String(ing.last_purchase_price ?? 0));
-    setFormAverageCost(String(ing.average_cost ?? 0));
-    setFormPurchaseUnit(ing.purchase_unit || '');
-    setFormConversionFactor(String(ing.conversion_factor ?? 1));
     setFormSupplierId(ing.preferred_supplier_id ? ing.preferred_supplier_id.toString() : '');
     setFormCategory(ing.category || '');
     setFormError('');
@@ -457,9 +456,8 @@ export default function IngredientsTab() {
       return Number.isNaN(n) ? NaN : n;
     };
     const lastPurchase = parseMoney(formLastPurchasePrice);
-    const avgCost = parseMoney(formAverageCost);
-    if (Number.isNaN(lastPurchase) || lastPurchase < 0 || Number.isNaN(avgCost) || avgCost < 0) {
-      setFormError('Cost fields must be valid amounts (0 or greater).');
+    if (Number.isNaN(lastPurchase) || lastPurchase < 0) {
+      setFormError('Price must be a valid amount (0 or greater).');
       return;
     }
 
@@ -470,12 +468,10 @@ export default function IngredientsTab() {
         name: formName.trim(),
         sku: formSku.trim() || undefined,
         unit: formUnit,
-        purchase_unit: formPurchaseUnit.trim() || undefined,
-        conversion_factor: parseFloat(formConversionFactor) || 1.0,
         minimum_stock: parseFloat(formMinStock) || 0,
         reorder_quantity: parseFloat(formReorderQty) || 0,
         last_purchase_price: lastPurchase,
-        average_cost: avgCost,
+        average_cost: lastPurchase,
         preferred_supplier_id: formSupplierId ? parseInt(formSupplierId, 10) : undefined,
         category: formCategory.trim() || undefined,
       };
@@ -529,7 +525,7 @@ export default function IngredientsTab() {
             result = left.current_stock - right.current_stock;
             break;
           case 'average_cost':
-            result = left.average_cost - right.average_cost;
+            result = getPurchasedUnitCost(left).amount - getPurchasedUnitCost(right).amount;
             break;
           case 'supplier':
             result = leftSupplier.localeCompare(rightSupplier, undefined, { sensitivity: 'base' });
@@ -608,7 +604,7 @@ export default function IngredientsTab() {
                 </th>
                 <th aria-sort={sortKey === 'average_cost' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'} className="py-3 px-3 text-right">
                   <button type="button" onClick={() => handleSort('average_cost')} className="ml-auto flex items-center gap-2 text-right transition-colors hover:text-soot-700 focus:outline-none focus-visible:text-soot-900">
-                    <span>Avg Cost</span>
+                    <span>Purchase Unit Cost</span>
                     {renderSortIcon('average_cost')}
                   </button>
                 </th>
@@ -630,6 +626,7 @@ export default function IngredientsTab() {
               {sortedIngredients.map(ing => {
                 const supplier = suppliers.find(s => s.id === ing.preferred_supplier_id);
                 const isLowStock = ing.current_stock <= ing.minimum_stock;
+                const purchaseUnitCost = getPurchasedUnitCost(ing);
                 
                 return (
                   <tr key={ing.id} className="border-b border-white/20 hover:bg-white/40 transition-colors">
@@ -645,8 +642,8 @@ export default function IngredientsTab() {
                       <div className="text-xs text-soot-500 uppercase">{ing.unit}</div>
                     </td>
                     <td className="py-4 px-3 text-right">
-                      <div className="font-medium text-soot-700">{formatCurrency(ing.average_cost)}</div>
-                      <div className="text-xs text-soot-400">/ {ing.unit}</div>
+                      <div className="font-medium text-soot-700">{formatAverageUnitCost(purchaseUnitCost.amount)}</div>
+                      <div className="text-xs text-soot-400">/ {unitLabel(purchaseUnitCost.unit)}</div>
                     </td>
                     <td className="py-4 px-3 hidden md:table-cell text-sm text-soot-600">
                       {supplier ? supplier.name : <span className="text-soot-300">—</span>}
@@ -736,15 +733,7 @@ export default function IngredientsTab() {
                       step="any"
                       min="0"
                       value={formLastPurchasePrice}
-                      onChange={e => {
-                        const val = e.target.value;
-                        setFormLastPurchasePrice(val);
-                        const price = parseFloat(val);
-                        const factor = parseFloat(formConversionFactor);
-                        if (factor > 0 && !isNaN(price)) {
-                          setFormAverageCost((price / factor).toFixed(2));
-                        }
-                      }}
+                      onChange={e => setFormLastPurchasePrice(e.target.value)}
                       className="w-full px-4 py-2.5 glass-card text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none"
                     />
                  </div>
@@ -757,54 +746,7 @@ export default function IngredientsTab() {
                  <div>
                     <label className="block text-sm font-medium text-neutral-700 mb-1">Reorder Quantity</label>
                     <input type="number" step="any" min="0" value={formReorderQty} onChange={e => setFormReorderQty(e.target.value)} className="w-full px-4 py-2.5 glass-card text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none" />
-                 </div>                  <div className="col-span-2 grid grid-cols-2 gap-4 p-4 bg-brand-50/50 rounded-xl border border-brand-100 mb-2">
-                    <div className="col-span-2 text-xs font-bold text-brand-700 uppercase tracking-wider mb-1">Packaging & Conversion</div>
-                    <div>
-                        <label className="block text-sm font-medium text-neutral-700 mb-1">Purchase Unit</label>
-                        <input
-                          type="text"
-                          value={formPurchaseUnit}
-                          onChange={e => setFormPurchaseUnit(e.target.value)}
-                          className="w-full px-4 py-2.5 glass-card text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none"
-                          placeholder="e.g. Carton, Packet"
-                        />
-                        <p className="text-[10px] text-neutral-500 mt-1">Unit you buy from supplier.</p>
-                    </div>
-
-                    <div>
-                        <label className="block text-sm font-medium text-neutral-700 mb-1">Conversion Factor</label>
-                        <input
-                          type="number"
-                          step="any"
-                          min="0.0001"
-                          value={formConversionFactor}
-                          onChange={e => {
-                            const val = e.target.value;
-                            setFormConversionFactor(val);
-                            const factor = parseFloat(val);
-                            const price = parseFloat(formLastPurchasePrice);
-                            if (factor > 0 && !isNaN(price)) {
-                              setFormAverageCost((price / factor).toFixed(2));
-                            }
-                          }}
-                          className="w-full px-4 py-2.5 glass-card text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none"
-                        />
-                        <p className="text-[10px] text-neutral-500 mt-1">How many {formUnit} in 1 {formPurchaseUnit || 'unit'}?</p>
-                    </div>
-
-                    <div>
-                        <label className="block text-sm font-medium text-neutral-700 mb-1">Base Cost (PKR / {formUnit})</label>
-                        <input
-                          type="number"
-                          step="any"
-                          min="0"
-                          value={formAverageCost}
-                          onChange={e => setFormAverageCost(e.target.value)}
-                          className="w-full px-4 py-2.5 glass-card text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none font-bold text-brand-700"
-                        />
-                        <p className="text-[10px] text-neutral-500 mt-1">Auto-calculated from purchase price.</p>
-                    </div>
-                  </div>
+                 </div>
                </div>
 
                <div className="flex gap-3 pt-4">
@@ -1055,36 +997,6 @@ export default function IngredientsTab() {
                         value={row.lastPurchasePrice}
                         onChange={(e) => updateBulkAddRow(row.key, { lastPurchasePrice: e.target.value })}
                         className="w-full px-3 py-2 glass-card text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none"
-                      />
-                    </div>
-                    <div className="col-span-6 md:col-span-2">
-                      <label className="block text-xs font-semibold text-neutral-600 mb-1">Purchase Unit</label>
-                      <input
-                        type="text"
-                        value={row.purchaseUnit}
-                        onChange={(e) => updateBulkAddRow(row.key, { purchaseUnit: e.target.value })}
-                        className="w-full px-3 py-2 glass-card text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none"
-                        placeholder="e.g. Carton"
-                      />
-                    </div>
-                    <div className="col-span-6 md:col-span-1">
-                      <label className="block text-xs font-semibold text-neutral-600 mb-1">Factor</label>
-                      <input
-                        type="number"
-                        step="any"
-                        value={row.conversionFactor}
-                        onChange={(e) => updateBulkAddRow(row.key, { conversionFactor: e.target.value })}
-                        className="w-full px-3 py-2 glass-card text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none"
-                      />
-                    </div>
-                    <div className="col-span-6 md:col-span-2">
-                      <label className="block text-xs font-semibold text-neutral-600 mb-1">Base Cost ({row.unit})</label>
-                      <input
-                        type="number"
-                        step="any"
-                        value={row.avgCost}
-                        onChange={(e) => updateBulkAddRow(row.key, { avgCost: e.target.value })}
-                        className="w-full px-3 py-2 glass-card text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none font-bold text-brand-700"
                       />
                     </div>
                     <div className="col-span-12 md:col-span-1 flex justify-end">
