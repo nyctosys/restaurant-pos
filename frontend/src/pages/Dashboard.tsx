@@ -15,7 +15,7 @@ type Product = {
   base_price: number;
   sale_price?: number;
   section: string;
-  variants: string[];
+  variants: { name: string; basePrice: number; salePrice: number; sku?: string }[];
   image_url?: string;
   is_deal?: boolean;
 };
@@ -53,6 +53,7 @@ type CartItem = {
   quantity: number;
   image: string;
   variant?: string;
+  variantPrice?: number;
   dealSelections?: DealSelection[];
   modifiers?: { id: number; name: string; price: number | null }[];
 };
@@ -210,6 +211,7 @@ export default function Dashboard() {
     variant: string;
     selections: Record<number, { productId: string; variant: string }>;
   } | null>(null);
+  const [variantPickerProduct, setVariantPickerProduct] = useState<Product | null>(null);
   /** Set when resuming an open dine-in sale from Active Dine-in → Modify */
   const [editingOpenSaleId, setEditingOpenSaleId] = useState<number | null>(null);
   const [orderReadyAlerts, setOrderReadyAlerts] = useState<{ id: string; sale_id: number; table_name?: string | null }[]>([]);
@@ -217,6 +219,13 @@ export default function Dashboard() {
   const ACTIVE_COUPON_STORAGE_KEY = 'pos_active_coupon';
 
   const terminalBranchKey = getTerminalBranchIdString(parseUserFromStorage());
+
+  const getVariantSalePrice = useCallback((product: Product, variantName?: string) => {
+    const key = (variantName || '').trim().toLowerCase();
+    const selected = (product.variants || []).find(variant => variant.name.trim().toLowerCase() === key);
+    if (selected && Number.isFinite(selected.salePrice) && selected.salePrice > 0) return selected.salePrice;
+    return product.sale_price ?? product.base_price;
+  }, []);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -663,7 +672,12 @@ export default function Dashboard() {
   }, [lastScannedBarcode]);
 
   const handleProductClick = (product: Product) => {
-    const defaultVariant = product.variants?.length ? product.variants[0] : undefined;
+    const hasVariants = (product.variants || []).length > 0;
+    if (hasVariants && !product.is_deal) {
+      setVariantPickerProduct(product);
+      return;
+    }
+    const defaultVariant = product.variants?.length ? product.variants[0]?.name : undefined;
     if (product.is_deal && hasCategoryChoiceRows(product)) {
       setDealConfigurator({
         product,
@@ -675,13 +689,14 @@ export default function Dashboard() {
     handleAddToCart({
       id: product.id,
       title: product.title,
-      price: product.sale_price ?? product.base_price,
+      price: getVariantSalePrice(product, defaultVariant),
       image: getProductImageUrl(product),
       variant: defaultVariant,
+      variantPrice: getVariantSalePrice(product, defaultVariant),
     });
   };
 
-  const handleAddToCart = (product: { id: number; title: string; price: number; image: string; variant?: string; dealSelections?: DealSelection[] }) => {
+  const handleAddToCart = (product: { id: number; title: string; price: number; image: string; variant?: string; variantPrice?: number; dealSelections?: DealSelection[] }) => {
     setCart(prev => {
       const variant = product.variant?.trim() || undefined;
       const uniqueId = buildCartItemUniqueId(product.id, variant, product.dealSelections);
@@ -706,7 +721,12 @@ export default function Dashboard() {
           .filter(i => i.uniqueId !== uniqueId);
       } else {
         // Just update variant and ID
-        return prev.map(i => i.uniqueId === uniqueId ? { ...i, variant: newVariant, uniqueId: newUniqueId } : i);
+        return prev.map(i => {
+          if (i.uniqueId !== uniqueId) return i;
+          const baseProd = products.find(p => p.id === i.id);
+          const nextPrice = baseProd ? getVariantSalePrice(baseProd, newVariant) : i.price;
+          return { ...i, variant: newVariant, uniqueId: newUniqueId, price: nextPrice };
+        });
       }
     });
   };
@@ -748,7 +768,7 @@ export default function Dashboard() {
     handleAddToCart({
       id: dealConfigurator.product.id,
       title: dealConfigurator.product.title,
-      price: dealConfigurator.product.base_price,
+      price: getVariantSalePrice(dealConfigurator.product, dealConfigurator.variant || undefined),
       image: getProductImageUrl(dealConfigurator.product),
       variant: dealConfigurator.variant || undefined,
       dealSelections: nextSelections,
@@ -1351,7 +1371,7 @@ export default function Dashboard() {
                 <SearchableSelect
                   value={dealConfigurator.variant}
                   onChange={(value) => setDealConfigurator(current => (current ? { ...current, variant: value } : current))}
-                  options={dealConfigurator.product.variants.map(variant => ({ value: variant, label: variant }))}
+                  options={dealConfigurator.product.variants.map(variant => ({ value: variant.name, label: `${variant.name} (${formatCurrency(variant.salePrice)})` }))}
                   placeholder="Select variant…"
                   searchPlaceholder="Search variants…"
                   className="border-white/70 bg-white px-3 py-3 font-semibold"
@@ -1435,7 +1455,7 @@ export default function Dashboard() {
                                 : current
                             )
                           }
-                          options={selectedProduct.variants.map(variant => ({ value: variant, label: variant }))}
+                          options={selectedProduct.variants.map(variant => ({ value: variant.name, label: `${variant.name} (${formatCurrency(variant.salePrice)})` }))}
                           placeholder="Choose variant…"
                           searchPlaceholder="Search variants…"
                           className="border-white/70 bg-white px-3 py-3 font-semibold"
@@ -1468,6 +1488,45 @@ export default function Dashboard() {
                   Add Deal
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {variantPickerProduct && (
+        <div className="fixed inset-0 z-[215] flex items-center justify-center bg-neutral-900/55 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-3xl border border-white/30 bg-white/95 p-5 shadow-2xl backdrop-blur-xl">
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="text-lg font-bold text-neutral-900">Select Variant</h3>
+              <button type="button" onClick={() => setVariantPickerProduct(null)} className="rounded-full bg-white p-2 text-neutral-500 hover:bg-neutral-100">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <p className="mt-1 text-sm text-neutral-600">{variantPickerProduct.title}</p>
+            <div className="mt-4 space-y-2">
+              {(variantPickerProduct.variants || []).map((variant) => (
+                <button
+                  key={`${variantPickerProduct.id}-${variant.name}`}
+                  type="button"
+                  className="w-full text-left px-4 py-3 rounded-xl border border-neutral-200 hover:border-brand-300 hover:bg-brand-50 transition-colors"
+                  onClick={() => {
+                    handleAddToCart({
+                      id: variantPickerProduct.id,
+                      title: variantPickerProduct.title,
+                      price: getVariantSalePrice(variantPickerProduct, variant.name),
+                      image: getProductImageUrl(variantPickerProduct),
+                      variant: variant.name,
+                      variantPrice: getVariantSalePrice(variantPickerProduct, variant.name),
+                    });
+                    setVariantPickerProduct(null);
+                  }}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold text-neutral-900">{variant.name}</span>
+                    <span className="font-bold text-brand-700">{formatCurrency(variant.salePrice)}</span>
+                  </div>
+                </button>
+              ))}
             </div>
           </div>
         </div>
@@ -1531,7 +1590,7 @@ export default function Dashboard() {
                           value={item.variant || ''}
                           onChange={(value) => handleChangeVariant(item.uniqueId, value)}
                           searchPlaceholder="Search variants…"
-                          options={(baseProd?.variants || []).map((variant: string) => ({ value: variant, label: variant }))}
+                          options={(baseProd?.variants || []).map((variant) => ({ value: variant.name, label: `${variant.name} (${formatCurrency(variant.salePrice)})` }))}
                           className="min-h-[32px] border-brand-300/80 bg-white py-1 pl-2 pr-2 text-xs font-bold text-neutral-800 shadow-sm hover:border-brand-400 hover:bg-brand-50/30 focus:border-brand-500"
                           dropdownClassName="min-w-[8.5rem]"
                         />
@@ -1575,7 +1634,7 @@ export default function Dashboard() {
                 {/* Modifiers List on Item */}
                 {(item.modifiers || []).length > 0 && (
                   <div className="mt-1 space-y-1">
-                    {(item.modifiers || []).map((m: any) => (
+                    {(item.modifiers || []).map((m: { id: number; name: string; price: number | null }) => (
                       <div key={m.id} className="flex items-center justify-between gap-2 text-[11px] font-semibold text-neutral-600 bg-white/70 border border-white/80 px-2 py-1.5 rounded-md shadow-sm">
                         <span className="truncate flex items-center gap-1.5">
                           <span className="w-1.5 h-1.5 rounded-full bg-brand-400"></span> {m.name} {m.price ? `(+${formatCurrency(m.price)})` : ''}

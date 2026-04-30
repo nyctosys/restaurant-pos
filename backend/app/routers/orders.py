@@ -13,6 +13,7 @@ from app.models import (
     Ingredient,
     Modifier,
     Product,
+    Rider,
     Sale,
     SaleItem,
     Setting,
@@ -29,7 +30,7 @@ from app.services.ingredient_deduction import (
     restore_inventory_allocations,
 )
 from app.services.printer_service import PrinterService
-from app.services.product_pricing import effective_sale_price
+from app.services.product_pricing import effective_sale_price_for_variant
 from app.services.recipe_variants import (
     combo_items_for_variant,
     normalize_combo_category_name,
@@ -133,8 +134,62 @@ def _schedule_order_event(event: str, sale: Sale, **extra: Any) -> None:
     schedule_emit_event(event, _order_event_payload(sale, **extra))
 
 
-def _sale_unit_price(product: Product) -> float:
-    return effective_sale_price(product)
+def _delivery_status_value(sale: Sale) -> str | None:
+    if (getattr(sale, "order_type", None) or "").strip().lower() != "delivery":
+        return None
+    raw = str(getattr(sale, "delivery_status", "") or "").strip().lower()
+    if raw in ("pending", "assigned", "delivered"):
+        return raw
+    if getattr(sale, "assigned_rider_id", None):
+        return "assigned"
+    return "pending"
+
+
+def _upsert_rider_assignment_for_sale(sale: Sale) -> None:
+    if (getattr(sale, "order_type", None) or "").strip().lower() != "delivery":
+        sale.delivery_status = None
+        sale.assigned_rider_id = None
+        return
+    snapshot = sale.order_snapshot if isinstance(getattr(sale, "order_snapshot", None), dict) else {}
+    rider_name = str(snapshot.get("rider_name") or "").strip()
+    if not rider_name:
+        if getattr(sale, "assigned_rider", None):
+            sale.assigned_rider.is_available = True
+        sale.assigned_rider_id = None
+        sale.delivery_status = "pending"
+        return
+    rider = Rider.query.filter_by(branch_id=sale.branch_id, name=rider_name, archived_at=None).first()
+    if rider is None:
+        rider = Rider(branch_id=sale.branch_id, name=rider_name, is_available=False)
+        db.session.add(rider)
+        db.session.flush()
+    rider.is_available = False
+    sale.assigned_rider_id = rider.id
+    sale.delivery_status = "assigned"
+
+
+def _mark_delivery_completed(sale: Sale) -> tuple[bool, str]:
+    if (getattr(sale, "order_type", None) or "").strip().lower() != "delivery":
+        return False, "Delivered action is only available for delivery orders"
+    if _delivery_status_value(sale) != "assigned":
+        return False, "Only assigned delivery orders can be marked delivered"
+    rider_id = getattr(sale, "assigned_rider_id", None)
+    if not rider_id:
+        return False, "Cannot mark delivered without an assigned rider"
+    rider = db.session.get(Rider, int(rider_id))
+    if rider is not None:
+        rider.is_available = True
+    sale.assigned_rider_id = None
+    sale.delivery_status = "delivered"
+    snapshot = sale.order_snapshot if isinstance(getattr(sale, "order_snapshot", None), dict) else {}
+    if snapshot:
+        snapshot["rider_name"] = None
+        sale.order_snapshot = snapshot
+    return True, ""
+
+
+def _sale_unit_price(product: Product, variant_key: str | None = None) -> float:
+    return effective_sale_price_for_variant(product, variant_key)
 
 
 def _parse_optional_non_negative_charge(value: Any, default: float) -> float:
@@ -296,7 +351,27 @@ def _process_modifier_depletions(
 
 
 def _normalize_product_variant_labels(raw: Any) -> list[str]:
-    return _normalize_variants_list(raw)
+    try:
+        normalized = _normalize_variants_list(raw)
+    except ValueError:
+        normalized = []
+    out: list[str] = []
+    seen: set[str] = set()
+    for entry in normalized:
+        if isinstance(entry, str):
+            label = entry.strip()
+        elif isinstance(entry, dict):
+            label = str(entry.get("name") or entry.get("label") or "").strip()
+        else:
+            label = ""
+        if not label:
+            continue
+        key = label.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(label)
+    return out
 
 
 def _validate_selected_product_variant(
@@ -314,6 +389,8 @@ def _validate_selected_product_variant(
     allowed = _normalize_product_variant_labels(getattr(product, "variants", None))
     if allowed:
         if not vk:
+            if len(allowed) == 1:
+                return allowed[0], None
             return None, _json_error(
                 "Bad Request",
                 f'{item_label}: choose a variant for "{product.title}"',
@@ -708,7 +785,7 @@ def _deduct_product_inventory_and_create_sale_items(
     if not ok_snap:
         return False, err_snap, 0.0
 
-    unit_price = 0.0 if is_deal_child else _sale_unit_price(product)
+    unit_price = 0.0 if is_deal_child else _sale_unit_price(product, line_variant)
     subtotal = unit_price * qty
 
     sale_item = SaleItem(
@@ -845,6 +922,7 @@ def checkout(
             order_type=order_type_norm,
             order_snapshot=order_snapshot_norm,
         )
+        _upsert_rider_assignment_for_sale(new_sale)
         db.session.add(new_sale)
         db.session.flush()
         for item in items:
@@ -970,7 +1048,7 @@ def checkout(
                 {
                     "title": str(product.title if product else "Item"),
                     "quantity": int(i.get("quantity", 1)),
-                    "unit_price": _sale_unit_price(product) if product else 0.0,
+                    "unit_price": _sale_unit_price(product, i.get("variant_sku_suffix")) if product else 0.0,
                 }
             )
         discount_name = (
@@ -1381,7 +1459,13 @@ def list_active_dine_in_orders(
         query = db.session.query(*[col for _, col in select_cols])
 
         if has_status_col:
-            query = query.filter(Sale.status == "open")
+            query = query.filter(
+                or_(
+                    Sale.status == "open",
+                    and_(Sale.order_type == "delivery", Sale.delivery_status != "delivered"),
+                    and_(Sale.order_type == "delivery", Sale.delivery_status.is_(None), Sale.status == "completed"),
+                )
+            )
 
         if has_order_type_col:
             query = query.filter(
@@ -1445,6 +1529,16 @@ def list_active_dine_in_orders(
             }
             out.append(out_row)
             sale_ids.append(sale_id_val)
+
+        sales_by_id: dict[int, Sale] = {}
+        if sale_ids:
+            for sale in Sale.query.filter(Sale.id.in_(sale_ids)).all():
+                sales_by_id[int(sale.id)] = sale
+        for out_row in out:
+            sale_obj = sales_by_id.get(int(out_row["id"]))
+            out_row["delivery_status"] = _delivery_status_value(sale_obj) if sale_obj else None
+            out_row["assigned_rider_id"] = int(sale_obj.assigned_rider_id) if sale_obj and sale_obj.assigned_rider_id else None
+            out_row["orderStatus"] = "paid" if (out_row.get("status") or "completed") != "open" else "open"
 
         if includeItems and sale_ids:
             items_rows = (
@@ -1803,6 +1897,30 @@ def update_kitchen_status(
     return {"ok": True, "id": sale.id, "kitchen_status": status_new}
 
 
+@orders_router.patch("/{sale_id}/delivery-complete")
+def mark_delivery_complete(
+    sale_id: int,
+    current_user: User = Depends(get_current_user),
+):
+    sale = db.session.get(Sale, sale_id)
+    if not sale:
+        return _json_error("Not Found", "Order not found", 404)
+    fb = _forbidden_unless_sale_branch(sale, current_user)
+    if fb:
+        return fb
+    ok, message = _mark_delivery_completed(sale)
+    if not ok:
+        return _json_error("Bad Request", message, 400)
+    db.session.commit()
+    _schedule_order_event(RealtimeEvents.ORDER_UPDATED, sale, delivery_status="delivered")
+    return {
+        "ok": True,
+        "id": sale.id,
+        "delivery_status": "delivered",
+        "assigned_rider_id": None,
+    }
+
+
 def _create_open_kot_response(
     data: dict[str, Any],
     current_user: User,
@@ -1844,6 +1962,7 @@ def _create_open_kot_response(
             order_type=order_type_norm,
             order_snapshot=order_snapshot_norm,
         )
+        _upsert_rider_assignment_for_sale(new_sale)
         db.session.add(new_sale)
         db.session.flush()
         total_amount = 0.0
@@ -2061,6 +2180,7 @@ def update_open_sale_items(
         sale.discount_snapshot = None
         sale.order_type = order_type_norm
         sale.order_snapshot = order_snapshot_norm
+        _upsert_rider_assignment_for_sale(sale)
         new_rows = (
             db.session.query(
                 SaleItem.id,
@@ -2305,6 +2425,8 @@ def cancel_open_sale(sale_id: int, current_user: User = Depends(get_current_user
             "Bad Request", "Only open unpaid orders can be cancelled this way", 400
         )
     try:
+        if (getattr(sale, "order_type", None) or "").strip().lower() == "delivery" and getattr(sale, "assigned_rider", None):
+            sale.assigned_rider.is_available = True
         for item in list(sale.items):
             _restore_sale_item_side_effects(
                 item,
@@ -2364,6 +2486,9 @@ def get_sale_details(sale_id: int, current_user: User = Depends(get_current_user
         "service_charge": float(getattr(sale, "service_charge", 0) or 0),
         "discount_snapshot": getattr(sale, "discount_snapshot", None),
         "order_type": getattr(sale, "order_type", None),
+        "delivery_status": _delivery_status_value(sale),
+        "assigned_rider_id": int(sale.assigned_rider_id) if getattr(sale, "assigned_rider_id", None) else None,
+        "orderStatus": "paid" if getattr(sale, "status", "completed") != "open" else "open",
         "order_snapshot": getattr(sale, "order_snapshot", None),
         "items": items,
     }
@@ -2390,6 +2515,10 @@ def rollback_sale(sale_id: int, current_user: User = Depends(get_current_user)):
         return _json_error("Bad Request", "Sale already refunded", 400)
     try:
         sale.status = "refunded"
+        if (getattr(sale, "order_type", None) or "").strip().lower() == "delivery" and getattr(sale, "assigned_rider", None):
+            sale.assigned_rider.is_available = True
+            sale.assigned_rider_id = None
+            sale.delivery_status = "delivered"
         for item in sale.items:
             _restore_sale_item_side_effects(
                 item,

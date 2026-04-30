@@ -90,8 +90,8 @@ class IngredientBase(BaseModel):
     )
     purchase_unit: str | None = None
     conversion_factor: float = 1.0
-    brand_name: str | None = Field(
-        default=None,
+    brand_name: str = Field(
+        default="",
         validation_alias=AliasChoices("brand_name", "brandName"),
         serialization_alias="brandName",
     )
@@ -123,6 +123,11 @@ class IngredientBulkCreate(BaseModel):
 class IngredientUpdate(IngredientBase):
     name: str | None = None
     unit: str | None = None
+    brand_name: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("brand_name", "brandName"),
+        serialization_alias="brandName",
+    )
 
     @field_validator("name")
     @classmethod
@@ -304,6 +309,11 @@ class BulkRestockLine(BaseModel):
     ingredient_id: int
     quantity: float = Field(gt=0)
     unit_cost: float | None = Field(default=None, ge=0)
+    brand_name: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("brand_name", "brandName"),
+        serialization_alias="brandName",
+    )
 
 
 class BulkRestockRequest(BaseModel):

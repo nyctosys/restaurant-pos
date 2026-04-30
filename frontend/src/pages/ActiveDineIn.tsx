@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Loader2, RefreshCw, UtensilsCrossed, Pencil, CreditCard, Ban, ChefHat, CheckCircle2, Bell, X } from 'lucide-react';
-import { get, post, getUserMessage } from '../api';
+import { get, post, patch, getUserMessage } from '../api';
 import { getSocket } from '../realtime/socket';
 import { getTerminalBranchIdString, parseUserFromStorage } from '../utils/branchContext';
 import { formatCurrency } from '../utils/formatCurrency';
@@ -24,6 +24,8 @@ type ActiveSale = {
   created_at: string;
   status: string;
   order_type: string | null;
+  delivery_status?: 'pending' | 'assigned' | 'delivered' | null;
+  assigned_rider_id?: number | null;
   kitchen_status: 'placed' | 'preparing' | 'ready' | null;
   table_name?: string | null;
   order_snapshot?: { table_name?: string; customer_name?: string; rider_name?: string } | null;
@@ -55,6 +57,7 @@ export default function ActiveDineIn() {
   const [payModalSale, setPayModalSale] = useState<ActiveSale | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<'Card' | 'Cash' | 'Online Transfer'>('Card');
   const [paySubmitting, setPaySubmitting] = useState(false);
+  const [deliveringSaleId, setDeliveringSaleId] = useState<number | null>(null);
   const [readyAlerts, setReadyAlerts] = useState<{ id: string; sale_id: number; label: string }[]>([]);
 
   const terminalBranchId = getTerminalBranchIdString(parseUserFromStorage());
@@ -183,6 +186,19 @@ export default function ActiveDineIn() {
 
   const goModify = (s: ActiveSale) => {
     navigate(`/dashboard?editOrder=${s.id}`);
+  };
+
+  const handleDelivered = async (sale: ActiveSale) => {
+    if (deliveringSaleId === sale.id) return;
+    setDeliveringSaleId(sale.id);
+    try {
+      await patch(`/orders/${sale.id}/delivery-complete`, {});
+      await load();
+    } catch (e) {
+      setError(getUserMessage(e));
+    } finally {
+      setDeliveringSaleId(null);
+    }
   };
 
   return (
@@ -351,10 +367,11 @@ export default function ActiveDineIn() {
                   <button
                     type="button"
                     onClick={() => openPay(s)}
+                    disabled={s.status !== 'open'}
                     className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-brand-700 text-white text-sm font-semibold hover:bg-brand-600"
                   >
                     <CreditCard className="w-4 h-4" />
-                    Pay
+                    {s.status === 'open' ? 'Pay' : 'Paid'}
                   </button>
                   <button
                     type="button"
@@ -374,6 +391,17 @@ export default function ActiveDineIn() {
                     <Ban className="w-4 h-4" />
                     Void
                   </button>
+                  {s.order_type === 'delivery' && s.delivery_status === 'assigned' && s.assigned_rider_id ? (
+                    <button
+                      type="button"
+                      onClick={() => void handleDelivered(s)}
+                      disabled={deliveringSaleId === s.id}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-emerald-200 text-emerald-700 text-sm font-semibold hover:bg-emerald-50 disabled:opacity-60"
+                    >
+                      <CheckCircle2 className="w-4 h-4" />
+                      {deliveringSaleId === s.id ? 'Updating…' : 'Delivered'}
+                    </button>
+                  ) : null}
                 </div>
               </li>
             ))}

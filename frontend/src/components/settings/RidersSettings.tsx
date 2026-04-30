@@ -92,7 +92,7 @@ export default function RidersSettings() {
     <div className="max-w-2xl xl:max-w-3xl">
       <h3 className="text-2xl font-bold text-soot-900 mb-2">Delivery riders</h3>
       <p className="text-sm text-soot-500 mb-6">
-        Register rider names for this branch. Cashiers can assign delivery orders on Order, and assigned riders stay busy until that order closes.
+        Register rider names for this branch. Cashiers can assign delivery orders on Order, and assigned riders stay busy until the order is marked Delivered.
       </p>
 
       <div className="flex gap-2 mb-6">
