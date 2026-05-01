@@ -5,7 +5,7 @@
 
 export type AuthUser = {
   id?: number;
-  branch_id?: number | null;
+  branch_id?: string | null;
   role?: string;
   username?: string;
 };
@@ -20,15 +20,15 @@ export function parseUserFromStorage(): AuthUser | null {
   }
 }
 
-export function getTerminalBranchId(user: AuthUser | null | undefined): number | null {
+export function getTerminalBranchId(user: AuthUser | null | undefined): string | null {
   if (user?.branch_id != null && user.branch_id !== undefined) {
-    const n = Number(user.branch_id);
-    return Number.isFinite(n) ? n : null;
+    const id = String(user.branch_id).trim();
+    return id ? id : null;
   }
   return null;
 }
 
 export function getTerminalBranchIdString(user: AuthUser | null | undefined): string {
   const id = getTerminalBranchId(user);
-  return id == null ? '' : String(id);
+  return id == null ? '' : id;
 }

@@ -54,7 +54,7 @@ def _cashier_headers(client, app):
     return {"Authorization": f"Bearer {token}"}
 
 
-def _set_branch_stock(ingredient_id: int, branch_id: int, level: float) -> None:
+def _set_branch_stock(ingredient_id: int, branch_id: str, level: float) -> None:
     row = IngredientBranchStock.query.filter_by(ingredient_id=ingredient_id, branch_id=branch_id).first()
     if row:
         row.current_stock = float(level)

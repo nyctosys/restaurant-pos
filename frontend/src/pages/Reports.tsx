@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Calendar, Loader2, RefreshCw, Package, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+import { Calendar, Loader2, RefreshCw, Package, ArrowUpDown, ArrowUp, ArrowDown, Banknote, CreditCard, Smartphone, Truck, UtensilsCrossed, ShoppingBag, ReceiptText } from 'lucide-react';
 import SearchableSelect from '../components/SearchableSelect';
 import TransactionDetailsModal from '../components/TransactionDetailsModal';
 import { formatCurrency } from '../utils/formatCurrency';
@@ -29,12 +29,30 @@ type SaleInfo = {
   payment_method: string;
   user_id: number;
   status: string;
+  order_type?: string | null;
   archived_at?: string | null;
 };
 
-type Analytics = {
-  total_sales: number;
-  total_transactions: number;
+type ReportMetric = {
+  orders: number;
+  amount: number;
+};
+
+type DetailedReport = {
+  totals: {
+    orders: number;
+    received_amount: number;
+    discount_amount: number;
+    tax_amount: number;
+    delivery_charge: number;
+    service_charge: number;
+    refunded_orders: number;
+    refunded_amount: number;
+    open_orders: number;
+    open_amount: number;
+  };
+  payment_methods: Record<string, ReportMetric | undefined>;
+  order_types: Record<string, ReportMetric | undefined>;
   most_selling_product: { id: number; title: string; total_sold: number } | null;
 };
 
@@ -47,7 +65,7 @@ export default function Reports() {
   const [customStart, setCustomStart] = useState('');
   const [customEnd, setCustomEnd] = useState('');
   const [sales, setSales] = useState<SaleInfo[]>([]);
-  const [analytics, setAnalytics] = useState<Analytics | null>(null);
+  const [report, setReport] = useState<DetailedReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedSaleId, setSelectedSaleId] = useState<number | null>(null);
   const [includeArchived, setIncludeArchived] = useState(false);
@@ -85,16 +103,16 @@ export default function Reports() {
 
     try {
       const [sData, aData] = await Promise.all([
-        get<{ sales?: SaleInfo[] }>(`/orders/${queryParams}`),
-        get<Analytics>(`/orders/analytics${queryParams}`),
+        get<{ sales?: SaleInfo[] }>(`/orders/${queryParams}&limit=500`),
+        get<DetailedReport>(`/orders/report${queryParams}`),
       ]);
       setSales(sData?.sales ?? []);
-      setAnalytics(aData ?? null);
+      setReport(aData ?? null);
     } catch (e) {
       const userMsg = getUserMessage(e);
 
       setSales([]);
-      setAnalytics(null);
+      setReport(null);
       showToast(userMsg, 'error');
     } finally {
       setLoading(false);
@@ -217,14 +235,67 @@ export default function Reports() {
       : <ArrowDown className="w-3.5 h-3.5 text-brand-700" aria-hidden="true" />;
   };
 
+  const metric = (group: Record<string, ReportMetric | undefined> | undefined, key: string): ReportMetric =>
+    group?.[key] ?? { orders: 0, amount: 0 };
+
+  const orderTypeLabel = (value?: string | null) => {
+    if (value === 'delivery') return 'Delivery';
+    if (value === 'dine_in') return 'Dine-in';
+    if (value === 'takeaway') return 'Takeaway';
+    return 'Unspecified';
+  };
+
+  const MetricCard = ({
+    title,
+    amount,
+    orders,
+    icon: Icon,
+    tone = 'brand',
+    detail,
+  }: {
+    title: string;
+    amount: number;
+    orders?: number;
+    icon: typeof Banknote;
+    tone?: 'brand' | 'cash' | 'online' | 'delivery';
+    detail?: string;
+  }) => {
+    const toneClass = {
+      brand: 'bg-brand-50 text-brand-700 border-brand-100',
+      cash: 'bg-emerald-50 text-emerald-700 border-emerald-100',
+      online: 'bg-sky-50 text-sky-700 border-sky-100',
+      delivery: 'bg-amber-50 text-amber-800 border-amber-100',
+    }[tone];
+
+    return (
+      <div className="glass-card border border-white/60 bg-white/75 p-4 lg:p-5 shadow-sm min-h-[128px]">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-[12px] font-bold uppercase tracking-wide text-soot-600">{title}</div>
+            <div className="mt-2 text-2xl lg:text-3xl font-bold tabular-nums leading-tight text-soot-900">
+              {loading ? '...' : formatCurrency(amount)}
+            </div>
+          </div>
+          <div className={`shrink-0 rounded-lg border p-2 ${toneClass}`}>
+            <Icon className="h-5 w-5" />
+          </div>
+        </div>
+        <div className="mt-3 text-sm font-semibold text-soot-600">
+          {loading ? '...' : orders != null ? `${orders} orders` : detail}
+        </div>
+        {detail && orders != null && !loading && <div className="mt-1 text-xs font-medium text-soot-500">{detail}</div>}
+      </div>
+    );
+  };
+
   return (
     <>
       <div className="flex flex-col h-full min-h-0 bg-transparent">
         
         {/* Header & Filters — tablet-first stack; xl+ aligns toolbar in one row */}
         <div className="page-padding border-b border-soot-200/60 flex flex-col lg:flex-row lg:justify-between lg:items-start xl:items-center bg-white/25 gap-4 shrink-0">
-          <h2 className="text-xl font-bold text-[#171717] flex items-center gap-2">
-            <Calendar className="w-5 h-5 text-[#57534e]" /> Orders & reporting
+          <h2 className="text-xl font-bold text-soot-900 flex items-center gap-2">
+            <Calendar className="w-5 h-5 text-soot-600" /> Orders & reporting
           </h2>
           
           <div className="flex items-center gap-2 flex-wrap w-full lg:w-auto lg:justify-end">
@@ -272,40 +343,40 @@ export default function Reports() {
           </div>
         </div>
 
-        {/* Analytics + tables — stats row first; then sections (avoids grid overlap with col-span) */}
+        {/* Analytics + tables */}
         <div className="page-padding flex-1 min-h-0 overflow-auto flex flex-col gap-8 lg:gap-10">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 lg:gap-5 shrink-0">
-            <div className="glass-card p-5 lg:p-6 min-h-[112px] border border-white/60 bg-white/70 shadow-sm">
-              <div className="text-[13px] font-semibold mb-2 uppercase tracking-wide text-[#57534e]">Total sales</div>
-              <div className="text-3xl font-bold tabular-nums leading-tight text-[#171717]">
-                {loading ? '…' : formatCurrency(analytics?.total_sales ?? 0)}
-              </div>
+          <section className="flex shrink-0 flex-col gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 lg:gap-5 shrink-0">
+              <MetricCard title="Received amount" amount={report?.totals.received_amount ?? 0} orders={report?.totals.orders ?? 0} icon={ReceiptText} />
+              <MetricCard title="Cash orders" amount={metric(report?.payment_methods, 'cash').amount} orders={metric(report?.payment_methods, 'cash').orders} icon={Banknote} tone="cash" />
+              <MetricCard title="Card orders" amount={metric(report?.payment_methods, 'card').amount} orders={metric(report?.payment_methods, 'card').orders} icon={CreditCard} tone="online" />
+              <MetricCard title="Online transfer" amount={metric(report?.payment_methods, 'online_transfer').amount} orders={metric(report?.payment_methods, 'online_transfer').orders} icon={Smartphone} tone="online" />
             </div>
-            <div className="glass-card p-5 lg:p-6 min-h-[112px] border border-white/60 bg-white/70 shadow-sm">
-              <div className="text-[13px] font-semibold mb-2 uppercase tracking-wide text-[#57534e]">Transactions</div>
-              <div className="text-3xl font-bold tabular-nums leading-tight text-[#171717]">
-                {loading ? '…' : analytics?.total_transactions ?? 0}
-              </div>
-            </div>
-            <div className="glass-card p-5 lg:p-6 min-h-[112px] border border-white/60 bg-white/70 shadow-sm flex flex-col justify-center">
-              <div className="text-[13px] font-semibold mb-2 uppercase tracking-wide text-[#57534e]">Top selling item</div>
-              <div
-                className="text-lg sm:text-xl font-bold text-[#7a2e20] leading-snug line-clamp-2"
-                title={analytics?.most_selling_product?.title || undefined}
-              >
-                {loading ? '…' : analytics?.most_selling_product?.title?.trim() ? analytics.most_selling_product.title : '—'}
-              </div>
-              {analytics?.most_selling_product && (
-                <div className="text-sm font-medium text-[#525252] mt-1.5">
-                  {analytics.most_selling_product.total_sold} units sold
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 lg:gap-5 shrink-0">
+              <MetricCard title="Delivery orders" amount={metric(report?.order_types, 'delivery').amount} orders={metric(report?.order_types, 'delivery').orders} icon={Truck} tone="delivery" detail={`Delivery charges: ${formatCurrency(report?.totals.delivery_charge ?? 0)}`} />
+              <MetricCard title="Dine-in orders" amount={metric(report?.order_types, 'dine_in').amount} orders={metric(report?.order_types, 'dine_in').orders} icon={UtensilsCrossed} detail={`Service charges: ${formatCurrency(report?.totals.service_charge ?? 0)}`} />
+              <MetricCard title="Takeaway orders" amount={metric(report?.order_types, 'takeaway').amount} orders={metric(report?.order_types, 'takeaway').orders} icon={ShoppingBag} />
+              <div className="glass-card border border-white/60 bg-white/75 p-4 lg:p-5 shadow-sm min-h-[128px]">
+                <div className="text-[12px] font-bold uppercase tracking-wide text-soot-600">Top selling item</div>
+                <div className="mt-2 text-lg lg:text-xl font-bold text-brand-800 leading-snug line-clamp-2" title={report?.most_selling_product?.title || undefined}>
+                  {loading ? '...' : report?.most_selling_product?.title?.trim() ? report.most_selling_product.title : '-'}
                 </div>
-              )}
+                <div className="mt-3 text-sm font-semibold text-soot-600">
+                  {loading ? '...' : report?.most_selling_product ? `${report.most_selling_product.total_sold} units sold` : 'No item sales yet'}
+                </div>
+                {!loading && (report?.totals.refunded_orders || report?.totals.open_orders) ? (
+                  <div className="mt-1 text-xs font-medium text-soot-500">
+                    {report.totals.refunded_orders} refunded / {report.totals.open_orders} unpaid open
+                  </div>
+                ) : null}
+              </div>
             </div>
-          </div>
+          </section>
 
           {/* Recent Transactions */}
-          <section className="min-h-0">
-            <h3 className="text-lg font-bold text-[#171717] mb-4">Transactions</h3>
+          <section className="shrink-0">
+            <h3 className="text-lg font-bold text-soot-900 mb-4">Recent transactions</h3>
             {loading && sales.length === 0 ? (
                <div className="py-12 flex justify-center text-soot-400">
                  <Loader2 className="w-6 h-6 animate-spin" />
@@ -317,9 +388,9 @@ export default function Reports() {
             ) : (
               <div className="glass-card overflow-hidden border border-white/60 bg-white/70 shadow-sm">
                 <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse min-w-[640px]">
+                <table className="w-full text-left border-collapse min-w-[760px]">
                   <thead>
-                    <tr className="bg-white/40 border-b border-soot-200/80 text-xs uppercase text-[#57534e] font-semibold tracking-wider">
+                    <tr className="bg-white/40 border-b border-soot-200/80 text-xs uppercase text-soot-600 font-semibold tracking-wider">
                       <th aria-sort={salesSortKey === 'id' ? (salesSortDirection === 'asc' ? 'ascending' : 'descending') : 'none'} className="py-3 px-3 lg:px-4 xl:py-2 xl:px-3 xl:text-[11px]">
                         <button type="button" onClick={() => handleSalesSort('id')} className="flex items-center gap-2 text-left transition-colors hover:text-soot-700 focus:outline-none focus-visible:text-soot-900">
                           <span>Transaction ID</span>
@@ -338,6 +409,7 @@ export default function Reports() {
                           {renderSortIcon(salesSortKey === 'payment_method', salesSortDirection)}
                         </button>
                       </th>
+                      <th className="py-3 px-3 lg:px-4 xl:py-2 xl:px-3 xl:text-[11px]">Order type</th>
                       <th aria-sort={salesSortKey === 'status' ? (salesSortDirection === 'asc' ? 'ascending' : 'descending') : 'none'} className="py-3 px-3 lg:px-4 xl:py-2 xl:px-3 xl:text-[11px] text-center">
                         <button type="button" onClick={() => handleSalesSort('status')} className="mx-auto flex items-center gap-2 text-center transition-colors hover:text-soot-700 focus:outline-none focus-visible:text-soot-900">
                           <span>Status</span>
@@ -359,9 +431,10 @@ export default function Reports() {
                         onClick={() => setSelectedSaleId(sale.id)}
                         className={`border-b border-soot-100 hover:bg-white/30 cursor-pointer transition-colors min-h-[48px] xl:min-h-0 ${sale.status === 'refunded' ? 'opacity-60' : ''} ${sale.archived_at ? 'bg-white/20' : ''}`}
                       >
-                        <td className="py-3 px-3 lg:px-4 xl:py-2 xl:px-3 text-sm font-medium text-[#171717]">#ORD-{sale.id}</td>
-                        <td className="py-3 px-3 lg:px-4 xl:py-2 xl:px-3 text-sm text-[#525252]">{getFormatDate(sale.created_at)}</td>
-                        <td className="py-3 px-3 lg:px-4 xl:py-2 xl:px-3 text-sm text-[#525252] font-medium">{sale.payment_method}</td>
+                        <td className="py-3 px-3 lg:px-4 xl:py-2 xl:px-3 text-sm font-medium text-soot-900">#ORD-{sale.id}</td>
+                        <td className="py-3 px-3 lg:px-4 xl:py-2 xl:px-3 text-sm text-soot-600">{getFormatDate(sale.created_at)}</td>
+                        <td className="py-3 px-3 lg:px-4 xl:py-2 xl:px-3 text-sm text-soot-600 font-medium">{sale.payment_method}</td>
+                        <td className="py-3 px-3 lg:px-4 xl:py-2 xl:px-3 text-sm text-soot-600 font-medium">{orderTypeLabel(sale.order_type)}</td>
                         <td className="py-3 px-3 lg:px-4 xl:py-2 xl:px-3 text-sm text-center">
                           {sale.status === 'refunded' ? (
                             <span className="bg-red-50 text-red-600 border border-red-200 px-2 py-0.5 rounded text-xs font-bold">REFUNDED</span>
@@ -369,7 +442,7 @@ export default function Reports() {
                             <span className="bg-brand-50 text-brand-600 border border-brand-200 px-2 py-0.5 rounded text-xs font-bold">COMPLETED</span>
                           )}
                         </td>
-                        <td className={`py-3 px-3 lg:px-4 xl:py-2 xl:px-3 text-right font-medium tabular-nums text-[#171717] ${sale.status === 'refunded' ? 'line-through' : ''}`}>
+                        <td className={`py-3 px-3 lg:px-4 xl:py-2 xl:px-3 text-right font-medium tabular-nums text-soot-900 ${sale.status === 'refunded' ? 'line-through' : ''}`}>
                           {formatCurrency(sale.total_amount)}
                         </td>
                       </tr>
@@ -382,9 +455,9 @@ export default function Reports() {
           </section>
 
           {/* Stock transactions */}
-          <section className="min-h-0">
-            <h3 className="text-lg font-bold text-[#171717] mb-4 flex items-center gap-2">
-              <Package className="w-5 h-5 text-[#57534e]" /> Ingredient stock movements
+          <section className="shrink-0">
+            <h3 className="text-lg font-bold text-soot-900 mb-4 flex items-center gap-2">
+              <Package className="w-5 h-5 text-soot-600" /> Ingredient stock movements
             </h3>
             {stockLoading && stockTransactions.length === 0 ? (
               <div className="py-12 flex justify-center text-soot-400">
@@ -399,7 +472,7 @@ export default function Reports() {
                 <div className="overflow-x-auto">
                 <table className="w-full text-left border-collapse min-w-[520px]">
                   <thead>
-                    <tr className="bg-white/40 border-b border-soot-200/80 text-xs uppercase text-[#57534e] font-semibold tracking-wider">
+                    <tr className="bg-white/40 border-b border-soot-200/80 text-xs uppercase text-soot-600 font-semibold tracking-wider">
                       <th aria-sort={stockSortKey === 'created_at' ? (stockSortDirection === 'asc' ? 'ascending' : 'descending') : 'none'} className="py-3 px-3 lg:px-4 xl:py-2 xl:px-3 xl:text-[11px]">
                         <button type="button" onClick={() => handleStockSort('created_at')} className="flex items-center gap-2 text-left transition-colors hover:text-soot-700 focus:outline-none focus-visible:text-soot-900">
                           <span>Date & time</span>
@@ -429,14 +502,14 @@ export default function Reports() {
                   <tbody>
                     {sortedStockTransactions.map((tx) => (
                       <tr key={tx.id} className="border-b border-soot-100 hover:bg-white/30 min-h-[48px] xl:min-h-0">
-                        <td className="py-3 px-3 lg:px-4 xl:py-2 xl:px-3 text-sm text-[#525252]">{getFormatDate(tx.created_at)}</td>
-                        <td className="py-3 px-3 lg:px-4 xl:py-2 xl:px-3 text-sm font-medium text-[#171717]">
+                        <td className="py-3 px-3 lg:px-4 xl:py-2 xl:px-3 text-sm text-soot-600">{getFormatDate(tx.created_at)}</td>
+                        <td className="py-3 px-3 lg:px-4 xl:py-2 xl:px-3 text-sm font-medium text-soot-900">
                           {tx.ingredient_name ?? (tx.product_title ? tx.product_title : tx.ingredient_id != null ? `#${tx.ingredient_id}` : '—')}
                         </td>
                         <td className={`py-3 px-3 lg:px-4 xl:py-2 xl:px-3 text-right text-sm font-medium tabular-nums ${tx.delta >= 0 ? 'text-brand-600' : 'text-red-600'}`}>
                           {tx.delta >= 0 ? '+' : ''}{tx.delta}
                         </td>
-                        <td className="py-3 px-3 lg:px-4 xl:py-2 xl:px-3 text-sm text-[#525252] capitalize">
+                        <td className="py-3 px-3 lg:px-4 xl:py-2 xl:px-3 text-sm text-soot-600 capitalize">
                           {(tx.movement_type || tx.reason || '').replace(/_/g, ' ')}
                         </td>
                       </tr>

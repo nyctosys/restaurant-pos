@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import log from '../utils/logger';
 import { post, getUserMessage } from '../api';
 
-type LoginResponse = { token: string; user: { id: number; username: string; role: string; branch_id?: number; branch_name?: string } };
+type LoginResponse = { token: string; user: { id: number; username: string; role: string; branch_id?: string; branch_name?: string } };
 
 export default function Login() {
   const [loading, setLoading] = useState(false);

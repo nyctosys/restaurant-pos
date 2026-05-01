@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react';
-import { Loader2, MapPin, Phone, Users } from 'lucide-react';
+import { Fingerprint, Loader2, Phone, Users } from 'lucide-react';
 import { showToast } from '../Toast';
 import { get, put, getUserMessage } from '../../api';
 import { getTerminalBranchId, parseUserFromStorage } from '../../utils/branchContext';
 
 type Branch = {
-  id: number;
+  id: string;
   name: string;
   address: string;
   phone: string;
@@ -17,6 +17,19 @@ type BranchUser = {
   username: string;
   role: string;
 };
+
+function syncStoredBranch(branch: Branch) {
+  const user = parseUserFromStorage();
+  if (!user || user.branch_id === branch.id) return;
+  localStorage.setItem(
+    'user',
+    JSON.stringify({
+      ...user,
+      branch_id: branch.id,
+      branch_name: branch.name,
+    }),
+  );
+}
 
 /**
  * Single-branch POS: show and edit only the terminal's branch (no list, archive, delete, or switching).
@@ -45,8 +58,11 @@ export default function BranchesSettings() {
       try {
         setLoading(true);
         const list = await get<Branch[]>('/branches/');
-        const b = Array.isArray(list) ? list.find((x) => x.id === terminalBranchId) ?? null : null;
+        const b = Array.isArray(list)
+          ? list.find((x) => x.id === terminalBranchId) ?? list[0] ?? null
+          : null;
         if (b) {
+          syncStoredBranch(b);
           setBranch(b);
           setName(b.name);
           setAddress(b.address || '');
@@ -65,10 +81,10 @@ export default function BranchesSettings() {
 
   useEffect(() => {
     const loadUsers = async () => {
-      if (terminalBranchId == null || !branch) return;
+      if (!branch) return;
       try {
         setUsersLoading(true);
-        const data = await get<BranchUser[]>(`/branches/${terminalBranchId}/users`);
+        const data = await get<BranchUser[]>(`/branches/${branch.id}/users`);
         setBranchUsers(Array.isArray(data) ? data : []);
       } catch {
         setBranchUsers([]);
@@ -77,7 +93,7 @@ export default function BranchesSettings() {
       }
     };
     void loadUsers();
-  }, [terminalBranchId, branch?.id]);
+  }, [branch?.id]);
 
   const handleSave = async () => {
     if (!branch || !name.trim()) {
@@ -125,6 +141,14 @@ export default function BranchesSettings() {
       ) : (
         <div className="space-y-6">
           <div className="glass-card p-6 space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-soot-700 mb-1">Official branch identity</label>
+              <div className="flex items-center gap-2 rounded-lg border border-soot-200/70 bg-white/45 px-4 py-3 font-mono text-sm text-soot-800">
+                <Fingerprint className="h-4 w-4 shrink-0 text-brand-700" />
+                <span className="break-all">{branch.id}</span>
+              </div>
+              <p className="mt-1 text-xs text-soot-500">Used for cloud sync and separate POS installs. This ID cannot be edited.</p>
+            </div>
             <div>
               <label className="block text-sm font-medium text-soot-700 mb-1">Branch name</label>
               <input
@@ -190,9 +214,6 @@ export default function BranchesSettings() {
           </div>
 
           <div className="text-xs text-soot-500 flex flex-wrap gap-4">
-            <span className="flex items-center gap-1">
-              <MapPin className="w-3 h-3" /> Branch ID: {branch.id}
-            </span>
             {branch.phone && (
               <span className="flex items-center gap-1">
                 <Phone className="w-3 h-3" /> {branch.phone}

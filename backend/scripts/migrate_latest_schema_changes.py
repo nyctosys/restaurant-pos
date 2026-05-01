@@ -52,6 +52,22 @@ def _table_exists(table: str) -> bool:
         return False
 
 
+def _index_exists(table: str, index_name: str) -> bool:
+    inspector = inspect(db.engine)
+    try:
+        return any(index.get("name") == index_name for index in inspector.get_indexes(table))
+    except Exception:
+        return False
+
+
+def _ensure_index(table: str, index_name: str, ddl: str) -> None:
+    if _index_exists(table, index_name):
+        print(f"  - {index_name} already exists")
+        return
+    db.session.execute(text(ddl))
+    print(f"  + Created {index_name}")
+
+
 def _ensure_stock_movement_preparation_value(dialect: str) -> None:
     if dialect != "postgresql":
         return
@@ -334,6 +350,21 @@ def main() -> None:
                 )
             )
             _ensure_combo_product_id_nullable(dialect)
+            _ensure_index(
+                "sales",
+                "ix_sales_report_branch_created_status",
+                "CREATE INDEX IF NOT EXISTS ix_sales_report_branch_created_status ON sales (branch_id, created_at, status)",
+            )
+            _ensure_index(
+                "sales",
+                "ix_sales_report_branch_created_payment",
+                "CREATE INDEX IF NOT EXISTS ix_sales_report_branch_created_payment ON sales (branch_id, created_at, payment_method)",
+            )
+            _ensure_index(
+                "sales",
+                "ix_sales_report_branch_created_order_type",
+                "CREATE INDEX IF NOT EXISTS ix_sales_report_branch_created_order_type ON sales (branch_id, created_at, order_type)",
+            )
             db.session.commit()
             print("migrate_latest_schema_changes: complete.")
         except Exception:

@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import log from '../utils/logger';
 import { post, getUserMessage } from '../api';
 
-type SetupResponse = { token: string; user: { id: number; username: string; role: string; branch_id?: number; branch_name?: string } };
+type SetupResponse = { token: string; user: { id: number; username: string; role: string; branch_id?: string; branch_name?: string } };
 
 export default function Setup() {
   const [loading, setLoading] = useState(false);

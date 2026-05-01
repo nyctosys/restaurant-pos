@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Loader2, RefreshCw, UtensilsCrossed, Pencil, CreditCard, Ban, ChefHat, CheckCircle2, Bell, X } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
+import { Loader2, RefreshCw, UtensilsCrossed, Pencil, CreditCard, Ban, ChefHat, CheckCircle2, Bell, X, ShoppingBag, Truck } from 'lucide-react';
 import { get, post, patch, getUserMessage } from '../api';
 import { getSocket } from '../realtime/socket';
 import { getTerminalBranchIdString, parseUserFromStorage } from '../utils/branchContext';
@@ -19,7 +20,7 @@ type ActiveSaleLine = {
 
 type ActiveSale = {
   id: number;
-  branch_id: number;
+  branch_id: string;
   total_amount: number;
   created_at: string;
   status: string;
@@ -30,6 +31,36 @@ type ActiveSale = {
   table_name?: string | null;
   order_snapshot?: { table_name?: string; customer_name?: string; rider_name?: string } | null;
   items?: ActiveSaleLine[];
+};
+
+type OrderColumnKey = 'takeaway' | 'dine_in' | 'delivery';
+
+const orderColumns: { key: OrderColumnKey; title: string; empty: string; Icon: LucideIcon }[] = [
+  { key: 'takeaway', title: 'Takeaway', empty: 'No takeaway orders waiting.', Icon: ShoppingBag },
+  { key: 'dine_in', title: 'Dine-in', empty: 'No dine-in tables open.', Icon: UtensilsCrossed },
+  { key: 'delivery', title: 'Delivery', empty: 'No delivery orders active.', Icon: Truck },
+];
+
+const orderLabel = (s: ActiveSale) => {
+  const ot = s.order_type || '';
+  if (ot === 'takeaway') return 'Takeaway';
+  if (ot === 'delivery') {
+    const name = (s.order_snapshot as { customer_name?: string } | null | undefined)?.customer_name?.trim();
+    return name ? `Delivery · ${name}` : 'Delivery';
+  }
+  return s.table_name || s.order_snapshot?.table_name || '—';
+};
+
+const orderKindLabel = (s: ActiveSale) => {
+  const ot = s.order_type || '';
+  if (ot === 'takeaway') return 'Takeaway';
+  if (ot === 'delivery') return 'Delivery';
+  return 'Table';
+};
+
+const deliveryRiderLabel = (s: ActiveSale) => {
+  if ((s.order_type || '') !== 'delivery') return '';
+  return (s.order_snapshot?.rider_name || '').trim();
 };
 
 function ModifierPills({ modifiers }: { modifiers?: string[] }) {
@@ -46,6 +77,155 @@ function ModifierPills({ modifiers }: { modifiers?: string[] }) {
         </span>
       ))}
     </div>
+  );
+}
+
+function OpenOrderCard({
+  sale,
+  deliveringSaleId,
+  onPay,
+  onModify,
+  onVoid,
+  onDelivered,
+}: {
+  sale: ActiveSale;
+  deliveringSaleId: number | null;
+  onPay: (sale: ActiveSale) => void;
+  onModify: (sale: ActiveSale) => void;
+  onVoid: (sale: ActiveSale) => void;
+  onDelivered: (sale: ActiveSale) => void;
+}) {
+  const modifyDisabled = sale.kitchen_status === 'preparing' || sale.kitchen_status === 'ready';
+  const riderLabel = deliveryRiderLabel(sale);
+
+  return (
+    <li className="glass-card rounded-xl p-3 flex flex-col gap-2 border border-white/40 min-h-[210px]">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className="text-[10px] font-semibold text-neutral-500 uppercase tracking-wide">{orderKindLabel(sale)}</p>
+          <p className="text-base font-bold text-neutral-900 truncate">{orderLabel(sale)}</p>
+        </div>
+        <div className="flex flex-col items-end gap-1 shrink-0">
+          <span className="text-xs font-mono text-neutral-400">#{sale.id}</span>
+          {sale.kitchen_status === 'ready' && (
+            <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
+              <CheckCircle2 className="w-3 h-3" /> Ready
+            </span>
+          )}
+          {sale.kitchen_status === 'preparing' && (
+            <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300">
+              <ChefHat className="w-3 h-3" /> Preparing
+            </span>
+          )}
+        </div>
+      </div>
+      <div className="text-xs text-neutral-600">
+        {riderLabel && (
+          <p className="mb-1 text-xs font-semibold text-brand-700">Rider: {riderLabel}</p>
+        )}
+        <span className="text-neutral-500">Subtotal </span>
+        <span className="font-semibold text-neutral-900">{formatCurrency(sale.total_amount)}</span>
+      </div>
+      <p className="text-[11px] text-neutral-400">
+        {new Date(sale.created_at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}
+      </p>
+      {sale.items && sale.items.length > 0 && (
+        <div className="rounded-lg bg-white/35 border border-white/40 px-2.5 py-2 space-y-1.5">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-neutral-500">
+            Items to prepare
+          </p>
+          <div className="space-y-1.5 max-h-[min(26vh,180px)] overflow-y-auto pr-0.5">
+            {sale.items.map((line, idx) => (
+              <div
+                key={`${sale.id}-${line.id}-${idx}`}
+                className="border-b border-black/5 pb-1.5 last:border-0 last:pb-0"
+              >
+                <div className="flex gap-2 items-start">
+                  <span className="shrink-0 min-w-[2rem] text-center text-[11px] font-bold tabular-nums px-1.5 py-0.5 rounded-full bg-brand-100 text-brand-900">
+                    {line.quantity}x
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-semibold text-neutral-900 leading-tight">
+                      {line.product_title}{' '}
+                      {line.is_deal && (
+                        <span className="text-[10px] font-bold text-amber-700">(DEAL)</span>
+                      )}
+                    </p>
+                    {line.variant_sku_suffix && (
+                      <p className="text-[11px] text-neutral-500 mt-0.5">{line.variant_sku_suffix}</p>
+                    )}
+                    <ModifierPills modifiers={line.modifiers} />
+                  </div>
+                </div>
+
+                {line.children && line.children.length > 0 && (
+                  <div className="pl-8 mt-1.5 space-y-1">
+                    {line.children.map((child, childIdx) => (
+                      <div key={`${line.id}-${child.id}-${childIdx}`} className="space-y-1">
+                        <div className="flex gap-2 items-start">
+                          <span className="shrink-0 text-[10px] font-bold text-neutral-500">
+                            {child.quantity}x
+                          </span>
+                          <div className="min-w-0">
+                            <p className="text-xs font-medium text-neutral-700">{child.product_title}</p>
+                            {child.variant_sku_suffix && (
+                              <p className="text-[10px] text-neutral-500">{child.variant_sku_suffix}</p>
+                            )}
+                          </div>
+                        </div>
+                        <div className="pl-4">
+                          <ModifierPills modifiers={child.modifiers} />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      <div className="flex flex-wrap gap-1.5 pt-2 mt-auto border-t border-white/25 shrink-0">
+        <button
+          type="button"
+          onClick={() => onPay(sale)}
+          disabled={sale.status !== 'open'}
+          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-brand-700 text-white text-xs font-semibold hover:bg-brand-600"
+        >
+          <CreditCard className="w-3.5 h-3.5" />
+          {sale.status === 'open' ? 'Pay' : 'Paid'}
+        </button>
+        <button
+          type="button"
+          onClick={() => onModify(sale)}
+          disabled={modifyDisabled}
+          title={modifyDisabled ? 'Cannot modify — kitchen is already working on this order' : 'Modify order'}
+          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg glass-card text-xs font-semibold text-brand-900 disabled:opacity-40 disabled:cursor-not-allowed disabled:pointer-events-none"
+        >
+          <Pencil className="w-3.5 h-3.5" />
+          Modify
+        </button>
+        <button
+          type="button"
+          onClick={() => onVoid(sale)}
+          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-red-200 text-red-700 text-xs font-semibold hover:bg-red-50"
+        >
+          <Ban className="w-3.5 h-3.5" />
+          Void
+        </button>
+        {sale.order_type === 'delivery' && sale.delivery_status === 'assigned' && sale.assigned_rider_id ? (
+          <button
+            type="button"
+            onClick={() => onDelivered(sale)}
+            disabled={deliveringSaleId === sale.id}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-emerald-200 text-emerald-700 text-xs font-semibold hover:bg-emerald-50 disabled:opacity-60"
+          >
+            <CheckCircle2 className="w-3.5 h-3.5" />
+            {deliveringSaleId === sale.id ? 'Updating…' : 'Delivered'}
+          </button>
+        ) : null}
+      </div>
+    </li>
   );
 }
 
@@ -116,27 +296,30 @@ export default function ActiveDineIn() {
   }, [sales, load]);
 
 
-  const orderLabel = (s: ActiveSale) => {
-    const ot = s.order_type || '';
-    if (ot === 'takeaway') return 'Takeaway';
-    if (ot === 'delivery') {
-      const name = (s.order_snapshot as { customer_name?: string } | null | undefined)?.customer_name?.trim();
-      return name ? `Delivery · ${name}` : 'Delivery';
+  const groupedSales = useMemo(() => {
+    const grouped: Record<OrderColumnKey, ActiveSale[]> = {
+      takeaway: [],
+      dine_in: [],
+      delivery: [],
+    };
+    for (const sale of sales) {
+      const key = sale.order_type === 'takeaway' || sale.order_type === 'delivery' ? sale.order_type : 'dine_in';
+      grouped[key].push(sale);
     }
-    return s.table_name || s.order_snapshot?.table_name || '—';
-  };
+    return grouped;
+  }, [sales]);
 
-  const orderKindLabel = (s: ActiveSale) => {
-    const ot = s.order_type || '';
-    if (ot === 'takeaway') return 'Takeaway';
-    if (ot === 'delivery') return 'Delivery';
-    return 'Table';
-  };
-
-  const deliveryRiderLabel = (s: ActiveSale) => {
-    if ((s.order_type || '') !== 'delivery') return '';
-    return (s.order_snapshot?.rider_name || '').trim();
-  };
+  const totalByColumn = useMemo(() => {
+    const totals: Record<OrderColumnKey, number> = {
+      takeaway: 0,
+      dine_in: 0,
+      delivery: 0,
+    };
+    for (const column of orderColumns) {
+      totals[column.key] = groupedSales[column.key].reduce((sum, sale) => sum + sale.total_amount, 0);
+    }
+    return totals;
+  }, [groupedSales]);
 
   const openPay = (s: ActiveSale) => {
     setPayModalSale(s);
@@ -270,142 +453,50 @@ export default function ActiveDineIn() {
           <p className="text-sm text-neutral-400">Send a KOT from Order (any order type) to open a tab.</p>
         </div>
       ) : (
-        <div className="flex-1 min-h-0 overflow-auto">
-          <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 items-stretch">
-            {sales.map(s => (
-              <li
-                key={s.id}
-                className="glass-card rounded-2xl p-4 flex flex-col gap-3 border border-white/40 h-full min-h-0"
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wide">{orderKindLabel(s)}</p>
-                    <p className="text-xl font-bold text-neutral-900">{orderLabel(s)}</p>
-                  </div>
-                  <div className="flex flex-col items-end gap-1">
-                    <span className="text-xs font-mono text-neutral-400">#{s.id}</span>
-                    {/* Kitchen status badge */}
-                    {s.kitchen_status === 'ready' && (
-                      <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
-                        <CheckCircle2 className="w-3 h-3" /> Ready
-                      </span>
-                    )}
-                    {s.kitchen_status === 'preparing' && (
-                      <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300">
-                        <ChefHat className="w-3 h-3" /> Preparing
-                      </span>
-                    )}
-                  </div>
-                </div>
-                <div className="text-sm text-neutral-600">
-                  {deliveryRiderLabel(s) && (
-                    <p className="mb-1 text-xs font-semibold text-brand-700">Rider: {deliveryRiderLabel(s)}</p>
-                  )}
-                  <span className="text-neutral-500">Subtotal </span>
-                  <span className="font-semibold text-neutral-900">{formatCurrency(s.total_amount)}</span>
-                </div>
-                <p className="text-xs text-neutral-400">
-                  {new Date(s.created_at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}
-                </p>
-                {s.items && s.items.length > 0 && (
-                  <div className="rounded-xl bg-white/35 border border-white/40 px-3 py-2.5 space-y-2">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-neutral-500">
-                      Items to prepare
-                    </p>
-                    <div className="space-y-2 max-h-[min(40vh,320px)] overflow-y-auto pr-0.5">
-                      {s.items.map((line, idx) => (
-                        <div
-                          key={`${s.id}-${line.id}-${idx}`}
-                          className="border-b border-black/5 pb-2 last:border-0 last:pb-0"
-                        >
-                          <div className="flex gap-2 items-start">
-                            <span className="shrink-0 min-w-[2rem] text-center text-[11px] font-bold tabular-nums px-1.5 py-0.5 rounded-full bg-brand-100 text-brand-900">
-                              {line.quantity}x
-                            </span>
-                            <div className="min-w-0 flex-1">
-                              <p className="text-sm font-semibold text-neutral-900 leading-tight">
-                                {line.product_title}{' '}
-                                {line.is_deal && (
-                                  <span className="text-[10px] font-bold text-amber-700">(DEAL)</span>
-                                )}
-                              </p>
-                              {line.variant_sku_suffix && (
-                                <p className="text-[11px] text-neutral-500 mt-0.5">{line.variant_sku_suffix}</p>
-                              )}
-                              <ModifierPills modifiers={line.modifiers} />
-                            </div>
-                          </div>
-
-                          {line.children && line.children.length > 0 && (
-                            <div className="pl-8 mt-2 space-y-1.5">
-                              {line.children.map((child, childIdx) => (
-                                <div key={`${line.id}-${child.id}-${childIdx}`} className="space-y-1">
-                                  <div className="flex gap-2 items-start">
-                                    <span className="shrink-0 text-[10px] font-bold text-neutral-500">
-                                      {child.quantity}x
-                                    </span>
-                                    <div className="min-w-0">
-                                      <p className="text-xs font-medium text-neutral-700">{child.product_title}</p>
-                                      {child.variant_sku_suffix && (
-                                        <p className="text-[10px] text-neutral-500">{child.variant_sku_suffix}</p>
-                                      )}
-                                    </div>
-                                  </div>
-                                  <div className="pl-4">
-                                    <ModifierPills modifiers={child.modifiers} />
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      ))}
+        <div className="flex-1 min-h-0 overflow-auto pb-2">
+          <div className="grid gap-4 lg:grid-cols-3 items-start min-w-0">
+            {orderColumns.map(({ key, title, empty, Icon }) => (
+              <section key={key} className="min-w-0 rounded-2xl border border-white/45 bg-white/25 backdrop-blur-xl p-2.5">
+                <div className="flex items-start justify-between gap-3 mb-2.5">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="w-9 h-9 rounded-xl bg-white/65 border border-white/70 flex items-center justify-center shrink-0">
+                      <Icon className="w-[18px] h-[18px] text-brand-800" />
+                    </span>
+                    <div className="min-w-0">
+                      <h2 className="text-base font-bold text-neutral-900 truncate">{title}</h2>
+                      <p className="text-xs font-semibold text-neutral-500">
+                        {groupedSales[key].length} {groupedSales[key].length === 1 ? 'order' : 'orders'}
+                      </p>
                     </div>
                   </div>
-                )}
-                <div className="flex flex-wrap gap-2 pt-2 mt-auto border-t border-white/25 shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => openPay(s)}
-                    disabled={s.status !== 'open'}
-                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-brand-700 text-white text-sm font-semibold hover:bg-brand-600"
-                  >
-                    <CreditCard className="w-4 h-4" />
-                    {s.status === 'open' ? 'Pay' : 'Paid'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => goModify(s)}
-                    disabled={s.kitchen_status === 'preparing' || s.kitchen_status === 'ready'}
-                    title={s.kitchen_status === 'preparing' || s.kitchen_status === 'ready' ? 'Cannot modify — kitchen is already working on this order' : 'Modify order'}
-                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl glass-card text-sm font-semibold text-brand-900 disabled:opacity-40 disabled:cursor-not-allowed disabled:pointer-events-none"
-                  >
-                    <Pencil className="w-4 h-4" />
-                    Modify
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void handleVoid(s)}
-                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-red-200 text-red-700 text-sm font-semibold hover:bg-red-50"
-                  >
-                    <Ban className="w-4 h-4" />
-                    Void
-                  </button>
-                  {s.order_type === 'delivery' && s.delivery_status === 'assigned' && s.assigned_rider_id ? (
-                    <button
-                      type="button"
-                      onClick={() => void handleDelivered(s)}
-                      disabled={deliveringSaleId === s.id}
-                      className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-emerald-200 text-emerald-700 text-sm font-semibold hover:bg-emerald-50 disabled:opacity-60"
-                    >
-                      <CheckCircle2 className="w-4 h-4" />
-                      {deliveringSaleId === s.id ? 'Updating…' : 'Delivered'}
-                    </button>
-                  ) : null}
+                  <p className="text-sm font-bold tabular-nums text-neutral-900 shrink-0">
+                    {formatCurrency(totalByColumn[key])}
+                  </p>
                 </div>
-              </li>
+
+                {groupedSales[key].length === 0 ? (
+                  <div className="min-h-[180px] rounded-xl border border-dashed border-white/70 bg-white/25 flex flex-col items-center justify-center text-center px-4 py-6 text-neutral-500">
+                    <Icon className="w-7 h-7 opacity-40 mb-2" />
+                    <p className="text-sm font-semibold">{empty}</p>
+                  </div>
+                ) : (
+                  <ul className="space-y-2.5">
+                    {groupedSales[key].map(sale => (
+                      <OpenOrderCard
+                        key={sale.id}
+                        sale={sale}
+                        deliveringSaleId={deliveringSaleId}
+                        onPay={openPay}
+                        onModify={goModify}
+                        onVoid={saleToVoid => void handleVoid(saleToVoid)}
+                        onDelivered={saleToDeliver => void handleDelivered(saleToDeliver)}
+                      />
+                    ))}
+                  </ul>
+                )}
+              </section>
             ))}
-          </ul>
+          </div>
         </div>
       )}
 

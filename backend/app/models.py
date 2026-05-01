@@ -1,7 +1,14 @@
-from sqlalchemy import CheckConstraint
+import secrets
 from datetime import datetime, timezone
+from sqlalchemy import CheckConstraint, Index
 
 from app.db import db
+
+BRANCH_ID_LENGTH = 32
+
+
+def generate_branch_id() -> str:
+    return secrets.token_hex(16)
 
 
 def utc_now() -> datetime:
@@ -9,7 +16,7 @@ def utc_now() -> datetime:
 
 class Branch(db.Model):
     __tablename__ = 'branches'
-    id = db.Column(db.Integer, primary_key=True)
+    id = db.Column(db.String(BRANCH_ID_LENGTH), primary_key=True, default=generate_branch_id)
     name = db.Column(db.String(255), nullable=False)
     address = db.Column(db.Text)
     phone = db.Column(db.String(50))
@@ -24,7 +31,7 @@ class Branch(db.Model):
 class User(db.Model):
     __tablename__ = 'users'
     id = db.Column(db.Integer, primary_key=True)
-    branch_id = db.Column(db.Integer, db.ForeignKey('branches.id'), nullable=True) # Null for Global Owner
+    branch_id = db.Column(db.String(BRANCH_ID_LENGTH), db.ForeignKey('branches.id'), nullable=True) # Null for Global Owner
     username = db.Column(db.String(100), unique=True, nullable=False)
     password_hash = db.Column(db.String(255), nullable=False)
     pin_hash = db.Column(db.String(255))
@@ -37,7 +44,7 @@ class User(db.Model):
 class Setting(db.Model):
     __tablename__ = 'settings'
     id = db.Column(db.Integer, primary_key=True)
-    branch_id = db.Column(db.Integer, db.ForeignKey('branches.id'), unique=True, nullable=True) # Null for global
+    branch_id = db.Column(db.String(BRANCH_ID_LENGTH), db.ForeignKey('branches.id'), unique=True, nullable=True) # Null for global
     config = db.Column(db.JSON, nullable=False, default={})
 
 class Product(db.Model):
@@ -99,7 +106,7 @@ class ComboItem(db.Model):
 class Inventory(db.Model):
     __tablename__ = 'inventory'
     id = db.Column(db.Integer, primary_key=True)
-    branch_id = db.Column(db.Integer, db.ForeignKey('branches.id'), nullable=False)
+    branch_id = db.Column(db.String(BRANCH_ID_LENGTH), db.ForeignKey('branches.id'), nullable=False)
     product_id = db.Column(db.Integer, db.ForeignKey('products.id'), nullable=False)
     variant_sku_suffix = db.Column(db.String(50), default='')
     stock_level = db.Column(db.Integer, default=0)
@@ -114,7 +121,7 @@ class InventoryTransaction(db.Model):
     """Ledger of stock level changes for reporting (day/week/month/year/custom)."""
     __tablename__ = 'inventory_transactions'
     id = db.Column(db.Integer, primary_key=True)
-    branch_id = db.Column(db.Integer, db.ForeignKey('branches.id'), nullable=False)
+    branch_id = db.Column(db.String(BRANCH_ID_LENGTH), db.ForeignKey('branches.id'), nullable=False)
     product_id = db.Column(db.Integer, db.ForeignKey('products.id'), nullable=False)
     variant_sku_suffix = db.Column(db.String(50), default='')
     delta = db.Column(db.Integer, nullable=False)  # positive = in, negative = out
@@ -131,9 +138,12 @@ class Sale(db.Model):
         CheckConstraint('total_amount >= 0', name='ck_sale_total_non_neg'),
         CheckConstraint('tax_amount >= 0', name='ck_sale_tax_non_neg'),
         CheckConstraint("status IN ('completed', 'refunded', 'open')", name='ck_sale_status_valid'),
+        Index('ix_sales_report_branch_created_status', 'branch_id', 'created_at', 'status'),
+        Index('ix_sales_report_branch_created_payment', 'branch_id', 'created_at', 'payment_method'),
+        Index('ix_sales_report_branch_created_order_type', 'branch_id', 'created_at', 'order_type'),
     )
     id = db.Column(db.Integer, primary_key=True)
-    branch_id = db.Column(db.Integer, db.ForeignKey('branches.id'), nullable=False)
+    branch_id = db.Column(db.String(BRANCH_ID_LENGTH), db.ForeignKey('branches.id'), nullable=False)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     total_amount = db.Column(db.Numeric(12, 2), nullable=False)
     tax_amount = db.Column(db.Numeric(12, 2), nullable=False)
@@ -290,7 +300,7 @@ class IngredientBranchStock(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     ingredient_id = db.Column(db.Integer, db.ForeignKey("ingredients.id"), nullable=False)
-    branch_id = db.Column(db.Integer, db.ForeignKey("branches.id"), nullable=False)
+    branch_id = db.Column(db.String(BRANCH_ID_LENGTH), db.ForeignKey("branches.id"), nullable=False)
     current_stock = db.Column(db.Float, nullable=False, default=0.0)
 
     ingredient = db.relationship("Ingredient", back_populates="branch_stocks")
@@ -391,7 +401,7 @@ class PreparedItemBranchStock(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     prepared_item_id = db.Column(db.Integer, db.ForeignKey("prepared_items.id"), nullable=False)
-    branch_id = db.Column(db.Integer, db.ForeignKey("branches.id"), nullable=False)
+    branch_id = db.Column(db.String(BRANCH_ID_LENGTH), db.ForeignKey("branches.id"), nullable=False)
     current_stock = db.Column(db.Float, nullable=False, default=0.0)
 
     prepared_item = db.relationship("PreparedItem", back_populates="branch_stocks")
@@ -429,7 +439,7 @@ class PreparedItemStockMovement(db.Model):
     reference_type = db.Column(db.String(50), nullable=True)
     reason = db.Column(db.String(500))
     created_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
-    branch_id = db.Column(db.Integer, db.ForeignKey("branches.id"), nullable=True)
+    branch_id = db.Column(db.String(BRANCH_ID_LENGTH), db.ForeignKey("branches.id"), nullable=True)
     created_at = db.Column(db.DateTime(timezone=True), default=utc_now)
 
     prepared_item = db.relationship("PreparedItem", back_populates="stock_movements")
@@ -450,7 +460,7 @@ class PurchaseOrder(db.Model):
     notes = db.Column(db.Text)
     total_amount = db.Column(db.Float, default=0.0)
     created_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
-    branch_id = db.Column(db.Integer, db.ForeignKey("branches.id"), nullable=True)
+    branch_id = db.Column(db.String(BRANCH_ID_LENGTH), db.ForeignKey("branches.id"), nullable=True)
     created_at = db.Column(db.DateTime(timezone=True), default=utc_now)
     updated_at = db.Column(db.DateTime(timezone=True), onupdate=utc_now)
 
@@ -490,7 +500,7 @@ class StockMovement(db.Model):
     reference_type = db.Column(db.String(50), nullable=True)
     reason = db.Column(db.String(500))
     created_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
-    branch_id = db.Column(db.Integer, db.ForeignKey("branches.id"), nullable=True)
+    branch_id = db.Column(db.String(BRANCH_ID_LENGTH), db.ForeignKey("branches.id"), nullable=True)
     created_at = db.Column(db.DateTime(timezone=True), default=utc_now)
 
     ingredient = db.relationship("Ingredient", back_populates="stock_movements")
@@ -506,7 +516,7 @@ class StockTake(db.Model):
     status = db.Column(db.String(50), default="in_progress")   # in_progress, completed
     notes = db.Column(db.Text)
     created_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
-    branch_id = db.Column(db.Integer, db.ForeignKey("branches.id"), nullable=True)
+    branch_id = db.Column(db.String(BRANCH_ID_LENGTH), db.ForeignKey("branches.id"), nullable=True)
     completed_at = db.Column(db.DateTime(timezone=True), nullable=True)
     created_at = db.Column(db.DateTime(timezone=True), default=utc_now)
 
@@ -534,7 +544,7 @@ class SyncOutbox(db.Model):
     __tablename__ = "sync_outbox"
 
     id = db.Column(db.Integer, primary_key=True)
-    branch_id = db.Column(db.Integer, db.ForeignKey("branches.id"), nullable=False)
+    branch_id = db.Column(db.String(BRANCH_ID_LENGTH), db.ForeignKey("branches.id"), nullable=False)
     entity_type = db.Column(db.String(64), nullable=False)
     entity_id = db.Column(db.Integer, nullable=True)
     event_type = db.Column(db.String(64), nullable=False)
@@ -553,7 +563,7 @@ class Rider(db.Model):
     )
 
     id = db.Column(db.Integer, primary_key=True)
-    branch_id = db.Column(db.Integer, db.ForeignKey("branches.id"), nullable=False)
+    branch_id = db.Column(db.String(BRANCH_ID_LENGTH), db.ForeignKey("branches.id"), nullable=False)
     name = db.Column(db.String(120), nullable=False)
     is_available = db.Column(db.Boolean, nullable=False, default=True)
     created_at = db.Column(db.DateTime(timezone=True), default=utc_now)
@@ -573,7 +583,7 @@ class AppEventLog(db.Model):
     message = db.Column(db.Text, nullable=False)
     request_id = db.Column(db.String(128), nullable=True, index=True)
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
-    branch_id = db.Column(db.Integer, db.ForeignKey("branches.id"), nullable=True)
+    branch_id = db.Column(db.String(BRANCH_ID_LENGTH), db.ForeignKey("branches.id"), nullable=True)
     route = db.Column(db.String(1024), nullable=True)
     exc_type = db.Column(db.String(255), nullable=True)
     stack_trace = db.Column(db.Text, nullable=True)

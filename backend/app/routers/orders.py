@@ -6,6 +6,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from sqlalchemy import and_, func, inspect, or_
+from starlette.concurrency import run_in_threadpool
 
 from app.deps import get_current_user, require_owner
 from app.models import (
@@ -92,7 +93,7 @@ def _json_error(
     return JSONResponse(status_code=status_code, content=payload)
 
 
-def _terminal_branch_or_error(user: User) -> tuple[int | None, JSONResponse | None]:
+def _terminal_branch_or_error(user: User) -> tuple[str | None, JSONResponse | None]:
     try:
         return resolve_terminal_branch_id(user), None
     except HTTPException as exc:
@@ -119,7 +120,7 @@ def _order_event_payload(sale: Sale, **extra: Any) -> dict[str, Any]:
     snapshot = sale.order_snapshot if isinstance(getattr(sale, "order_snapshot", None), dict) else {}
     payload: dict[str, Any] = {
         "sale_id": int(sale.id),
-        "branch_id": int(sale.branch_id),
+        "branch_id": sale.branch_id,
         "status": getattr(sale, "status", None),
         "kitchen_status": getattr(sale, "kitchen_status", None),
         "order_type": getattr(sale, "order_type", None),
@@ -321,7 +322,7 @@ def _resolve_modifier_snapshots(
 def _process_modifier_depletions(
     modifier_ids: list[int],
     line_qty: int,
-    branch_id: int,
+    branch_id: str,
     current_user_id: int,
     sale_id: int,
 ) -> tuple[bool, str, list[dict[str, Any]]]:
@@ -539,7 +540,7 @@ def _validate_deal_selections(
 def _deduct_recipe_for_product(
     product: Product,
     qty: int,
-    branch_id: int,
+    branch_id: str,
     current_user_id: int,
     sale_id: int,
     variant_key: str | None = None,
@@ -608,7 +609,7 @@ def _deduct_recipe_for_product(
 def _restore_recipe_for_sale_item(
     product: Product,
     qty: int,
-    branch_id: int,
+    branch_id: str,
     current_user_id: int,
     sale_id: int,
     reason: str,
@@ -655,7 +656,7 @@ def _restore_recipe_for_sale_item(
 
 def _restore_modifier_depletions_from_sale_item(
     sale_item: SaleItem,
-    branch_id: int,
+    branch_id: str,
     current_user_id: int,
     reason: str,
 ) -> None:
@@ -713,7 +714,7 @@ def _restore_modifier_depletions_from_sale_item(
 
 def _restore_sale_item_side_effects(
     sale_item: SaleItem,
-    branch_id: int,
+    branch_id: str,
     current_user_id: int,
     reason: str,
     inventory_reason: str,
@@ -770,7 +771,7 @@ def _nest_sale_item_dicts(
 def _deduct_product_inventory_and_create_sale_items(
     product: Product,
     item_dict: dict[str, Any],
-    branch_id: int,
+    branch_id: str,
     current_user_id: int,
     sale_id: int,
     parent_sale_item_id: int | None = None,
@@ -1093,9 +1094,10 @@ def get_sales(
     time_filter: str = "today",
     start_date: str | None = None,
     end_date: str | None = None,
-    branch_id: int | None = None,
+    branch_id: str | None = None,
     include_archived: str | None = None,
     include_open: str | None = None,
+    limit: int | None = None,
     current_user: User = Depends(get_current_user),
 ):
     try:
@@ -1132,7 +1134,10 @@ def get_sales(
         if start_dt and end_dt:
             query = query.filter(Sale.created_at >= start_dt, Sale.created_at <= end_dt)
 
-        sales_rows = query.order_by(Sale.created_at.desc()).all()
+        query = query.order_by(Sale.created_at.desc())
+        if limit is not None:
+            query = query.limit(max(1, min(int(limit), 1000)))
+        sales_rows = query.all()
         out = []
         for row in sales_rows:
             row_iter = iter(row)
@@ -1168,7 +1173,7 @@ def get_analytics(
     time_filter: str = "today",
     start_date: str | None = None,
     end_date: str | None = None,
-    branch_id: int | None = None,
+    branch_id: str | None = None,
     current_user: User = Depends(get_current_user),
 ):
     try:
@@ -1220,6 +1225,221 @@ def get_analytics(
         }
     except Exception as exc:
         raise
+
+
+def _money(value: Any) -> float:
+    return float(value or 0)
+
+
+def _metric(orders: int = 0, amount: Any = 0) -> dict[str, Any]:
+    return {"orders": int(orders or 0), "amount": _money(amount)}
+
+
+def _payment_key(value: Any) -> str:
+    normalized = (str(value or "unspecified").strip().lower() or "unspecified")
+    normalized = normalized.replace("-", " ").replace("_", " ")
+    if normalized in {"online", "online transfer", "bank transfer"}:
+        return "online_transfer"
+    return "_".join(normalized.split())
+
+
+def _payment_label(key: str, raw: Any = None) -> str:
+    labels = {
+        "cash": "Cash",
+        "card": "Card",
+        "online_transfer": "Online Transfer",
+        "unspecified": "Unspecified",
+    }
+    return labels.get(key) or (str(raw).strip() if raw else key.replace("_", " ").title())
+
+
+def _order_type_key(value: Any) -> str:
+    normalized = (str(value or "unspecified").strip().lower() or "unspecified")
+    normalized = normalized.replace("-", "_").replace(" ", "_")
+    return normalized if normalized in {"takeaway", "dine_in", "delivery"} else "unspecified"
+
+
+def _sales_report_filters(
+    terminal_branch_id: str,
+    start_dt: datetime | None,
+    end_dt: datetime | None,
+    include_archived: str | None,
+) -> list[Any]:
+    filters: list[Any] = [Sale.branch_id == terminal_branch_id]
+    if start_dt and end_dt:
+        filters.extend([Sale.created_at >= start_dt, Sale.created_at <= end_dt])
+    if not yes(include_archived):
+        filters.append(Sale.archived_at == None)  # noqa: E711
+    return filters
+
+
+def _build_detailed_report(
+    time_filter: str,
+    start_date: str | None,
+    end_date: str | None,
+    include_archived: str | None,
+    current_user: User,
+) -> dict[str, Any] | JSONResponse:
+    start_dt, end_dt = get_time_filter_ranges(time_filter, start_date, end_date)
+    tid, terr = _terminal_branch_or_error(current_user)
+    if terr:
+        return terr
+    assert tid is not None
+
+    base_filters = _sales_report_filters(tid, start_dt, end_dt, include_archived)
+    completed_filters = [*base_filters, Sale.status == "completed"]
+
+    totals_row = (
+        db.session.query(
+            func.count(Sale.id),
+            func.coalesce(func.sum(Sale.total_amount), 0),
+            func.coalesce(func.sum(Sale.discount_amount), 0),
+            func.coalesce(func.sum(Sale.tax_amount), 0),
+            func.coalesce(func.sum(Sale.delivery_charge), 0),
+            func.coalesce(func.sum(Sale.service_charge), 0),
+        )
+        .filter(*completed_filters)
+        .one()
+    )
+    refunded_row = (
+        db.session.query(func.count(Sale.id), func.coalesce(func.sum(Sale.total_amount), 0))
+        .filter(*base_filters, Sale.status == "refunded")
+        .one()
+    )
+    open_row = (
+        db.session.query(func.count(Sale.id), func.coalesce(func.sum(Sale.total_amount), 0))
+        .filter(*base_filters, Sale.status == "open")
+        .one()
+    )
+
+    payment_rows = (
+        db.session.query(
+            Sale.payment_method,
+            func.count(Sale.id).label("orders"),
+            func.coalesce(func.sum(Sale.total_amount), 0).label("amount"),
+        )
+        .filter(*completed_filters)
+        .group_by(Sale.payment_method)
+        .all()
+    )
+    order_type_rows = (
+        db.session.query(
+            Sale.order_type,
+            func.count(Sale.id).label("orders"),
+            func.coalesce(func.sum(Sale.total_amount), 0).label("amount"),
+        )
+        .filter(*completed_filters)
+        .group_by(Sale.order_type)
+        .all()
+    )
+
+    top_row = (
+        db.session.query(
+            SaleItem.product_id,
+            Product.title,
+            func.sum(SaleItem.quantity).label("total_qty"),
+        )
+        .join(Sale, Sale.id == SaleItem.sale_id)
+        .join(Product, Product.id == SaleItem.product_id)
+        .filter(*completed_filters)
+        .group_by(SaleItem.product_id, Product.title)
+        .order_by(func.sum(SaleItem.quantity).desc())
+        .first()
+    )
+
+    payment_methods: dict[str, dict[str, Any]] = {
+        "cash": _metric(),
+        "card": _metric(),
+        "online_transfer": _metric(),
+    }
+    payment_breakdown: list[dict[str, Any]] = []
+    for raw_method, orders, amount in payment_rows:
+        key = _payment_key(raw_method)
+        metric = _metric(orders, amount)
+        payment_methods[key] = metric
+        payment_breakdown.append(
+            {
+                "key": key,
+                "label": _payment_label(key, raw_method),
+                **metric,
+            }
+        )
+
+    order_types: dict[str, dict[str, Any]] = {
+        "delivery": _metric(),
+        "dine_in": _metric(),
+        "takeaway": _metric(),
+        "unspecified": _metric(),
+    }
+    order_type_breakdown: list[dict[str, Any]] = []
+    order_type_labels = {
+        "delivery": "Delivery",
+        "dine_in": "Dine-in",
+        "takeaway": "Takeaway",
+        "unspecified": "Unspecified",
+    }
+    for raw_type, orders, amount in order_type_rows:
+        key = _order_type_key(raw_type)
+        metric = _metric(orders, amount)
+        order_types[key] = metric
+        order_type_breakdown.append({"key": key, "label": order_type_labels[key], **metric})
+
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "period": {
+            "time_filter": time_filter,
+            "start": start_dt.isoformat() if start_dt else None,
+            "end": end_dt.isoformat() if end_dt else None,
+        },
+        "totals": {
+            "orders": int(totals_row[0] or 0),
+            "received_amount": _money(totals_row[1]),
+            "discount_amount": _money(totals_row[2]),
+            "tax_amount": _money(totals_row[3]),
+            "delivery_charge": _money(totals_row[4]),
+            "service_charge": _money(totals_row[5]),
+            "refunded_orders": int(refunded_row[0] or 0),
+            "refunded_amount": _money(refunded_row[1]),
+            "open_orders": int(open_row[0] or 0),
+            "open_amount": _money(open_row[1]),
+        },
+        "payment_methods": payment_methods,
+        "payment_method_breakdown": sorted(
+            payment_breakdown,
+            key=lambda row: (0 if row["key"] in {"cash", "card", "online_transfer"} else 1, row["label"]),
+        ),
+        "order_types": order_types,
+        "order_type_breakdown": sorted(order_type_breakdown, key=lambda row: row["label"]),
+        "most_selling_product": (
+            {
+                "id": top_row.product_id,
+                "title": top_row.title,
+                "total_sold": int(top_row.total_qty or 0),
+            }
+            if top_row
+            else None
+        ),
+    }
+
+
+@orders_router.get("/report")
+async def get_detailed_report(
+    time_filter: str = "today",
+    start_date: str | None = None,
+    end_date: str | None = None,
+    branch_id: str | None = None,
+    include_archived: str | None = None,
+    current_user: User = Depends(get_current_user),
+):
+    _ = branch_id
+    return await run_in_threadpool(
+        _build_detailed_report,
+        time_filter,
+        start_date,
+        end_date,
+        include_archived,
+        current_user,
+    )
 
 
 @orders_router.get("/delivery-customer")
@@ -1420,7 +1640,7 @@ def _resolve_branch_id(
 
 @orders_router.get("/active")
 def list_active_dine_in_orders(
-    branch_id: int | None = None,
+    branch_id: str | None = None,
     include_archived: str | None = None,
     include_items: str | None = None,
     current_user: User = Depends(get_current_user),
@@ -1752,7 +1972,7 @@ def _sale_visible_on_kds(sale: Sale) -> bool:
 
 @orders_router.get("/kitchen")
 def list_kitchen_orders(
-    branch_id: int | None = None,
+    branch_id: str | None = None,
     current_user: User = Depends(get_current_user),
 ):
     """Kitchen Display: open KOT tickets (dine-in, takeaway, delivery) with workflow status (placed → preparing → ready)."""
@@ -2031,7 +2251,7 @@ def _create_open_kot_response(
 
 
 def _build_kot_print_payload(
-    sale_id: int, branch_id: int | None, operator_name: str | None = None
+    sale_id: int, branch_id: str | None, operator_name: str | None = None
 ) -> dict[str, Any]:
     branch_name = "Main Branch"
     branch_obj = db.session.get(Branch, branch_id) if branch_id else None

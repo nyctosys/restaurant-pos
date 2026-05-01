@@ -48,6 +48,15 @@ function emptyComponentRow(): ComponentRow {
   return { ingredientId: '', quantity: '', usePurchaseUnit: false };
 }
 
+function formatYieldUnit(unit: string) {
+  if (unit === 'l') return 'Ltr';
+  return unit;
+}
+
+function formatCostPerYield(amount: number, unit: string) {
+  return `${formatCurrency(amount)} / ${formatYieldUnit(unit)}`;
+}
+
 export default function PreparedItemsTab() {
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
   const [items, setItems] = useState<PreparedItem[]>([]);
@@ -255,7 +264,7 @@ export default function PreparedItemsTab() {
                 <th className="text-left px-4 py-3">Name</th>
                 <th className="text-left px-4 py-3">Type</th>
                 <th className="text-right px-4 py-3">Stock</th>
-                <th className="text-right px-4 py-3">Cost</th>
+                <th className="text-right px-4 py-3">Cost per yield</th>
                 <th className="text-left px-4 py-3">Formula</th>
               </tr>
             </thead>
@@ -270,7 +279,9 @@ export default function PreparedItemsTab() {
                   <td className="px-4 py-3 text-right font-semibold text-soot-900">
                     {item.current_stock.toFixed(2)} {item.unit}
                   </td>
-                  <td className="px-4 py-3 text-right text-soot-700">{formatCurrency(item.average_cost)}</td>
+                  <td className="px-4 py-3 text-right text-soot-700">
+                    {formatCostPerYield(item.average_cost, item.unit)}
+                  </td>
                   <td className="px-4 py-3 text-soot-600">
                     {item.components.length} ingredient{item.components.length === 1 ? '' : 's'}
                   </td>
@@ -370,7 +381,9 @@ export default function PreparedItemsTab() {
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <h4 className="text-sm font-bold text-soot-900">Formula per 1 {unit}</h4>
-                <span className="text-xs font-semibold text-brand-700">Est. cost: {formatCurrency(formCost)}</span>
+                <span className="text-xs font-semibold text-brand-700">
+                  Est. cost / {formatYieldUnit(unit)}: {formatCurrency(formCost)}
+                </span>
               </div>
               {components.map((row, index) => {
                 const ingredient = ingredients.find(ing => String(ing.id) === row.ingredientId);

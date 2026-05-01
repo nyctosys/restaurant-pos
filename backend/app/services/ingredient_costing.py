@@ -6,7 +6,7 @@ from app.services.branch_ingredient_stock import get_branch_stock
 
 def apply_ingredient_purchase_cost(
     ingredient: Ingredient,
-    branch_id: int,
+    branch_id: str,
     quantity_added: float,
     unit_cost: float,
 ) -> float:

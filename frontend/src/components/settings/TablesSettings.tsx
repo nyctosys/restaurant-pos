@@ -42,11 +42,11 @@ export default function TablesSettings() {
       const query = activeBranchId ? `?branch_id=${activeBranchId}` : '';
       const existing = await get<SettingsResponse>(`/settings/${query}`);
       const currentConfig = (existing?.config ?? {}) as Record<string, unknown>;
-      const payload: { config: Record<string, unknown>; branch_id?: number } = {
+      const payload: { config: Record<string, unknown>; branch_id?: string } = {
         config: { ...currentConfig, tables: updated },
       };
       if (activeBranchId) {
-        payload.branch_id = parseInt(activeBranchId, 10);
+        payload.branch_id = activeBranchId;
       }
       await put('/settings/', payload);
       setTables(updated);

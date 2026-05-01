@@ -46,7 +46,7 @@ def get_app_events(
     current_user: User = Depends(require_owner_or_manager),
 ):
     if current_user.role == "owner":
-        scope_branch: int | None = None
+        scope_branch: str | None = None
     else:
         scope_branch = resolve_terminal_branch_id(current_user)
     rows, total = list_events(
@@ -82,7 +82,7 @@ def post_client_app_event(
     if payload.severity not in ("info", "warn", "error"):
         raise HTTPException(status_code=400, detail={"message": "severity must be info, warn, or error"})
     if current_user.role == "owner":
-        bid: int | None = current_user.branch_id
+        bid: str | None = current_user.branch_id
     else:
         bid = resolve_terminal_branch_id(current_user)
     record_event(

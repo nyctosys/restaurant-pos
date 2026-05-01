@@ -125,8 +125,8 @@ export default function ReceiptSettings() {
           qrCodeContent,
         },
       };
-      const payload: { config: Record<string, unknown>; branch_id?: number } = { config: newSettings };
-      if (activeBranchId) payload.branch_id = parseInt(activeBranchId, 10);
+      const payload: { config: Record<string, unknown>; branch_id?: string } = { config: newSettings };
+      if (activeBranchId) payload.branch_id = activeBranchId;
       await put('/settings/', payload);
       showToast('Receipt settings saved!', 'success');
     } catch (e) {

@@ -54,7 +54,7 @@ def record_event(
     message: str,
     request_id: str | None = None,
     user_id: int | None = None,
-    branch_id: int | None = None,
+    branch_id: str | None = None,
     route: str | None = None,
     source: str = "backend",
     category: str | None = None,
@@ -127,7 +127,7 @@ def record_unhandled_exception(
 
 def list_events(
     *,
-    branch_id: int | None,
+    branch_id: str | None,
     role: str,
     severity: str | None = None,
     request_id: str | None = None,

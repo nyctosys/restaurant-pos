@@ -9,7 +9,7 @@ from app.models import SyncOutbox, db
 
 def enqueue_sync_event(
     *,
-    branch_id: int,
+    branch_id: str,
     entity_type: str,
     entity_id: int | None,
     event_type: str,

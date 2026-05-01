@@ -1,5 +1,6 @@
 """Test auth: setup, login, token required, user not found after decode."""
 import pytest
+import re
 from app.models import db, User, Branch
 from werkzeug.security import generate_password_hash
 
@@ -13,6 +14,9 @@ def test_setup_creates_owner_and_returns_token(client):
     data = r.get_json()
     assert "token" in data
     assert data.get("user", {}).get("role") == "owner"
+    branch_id = data.get("user", {}).get("branch_id")
+    assert isinstance(branch_id, str)
+    assert re.fullmatch(r"[0-9a-f]{32}", branch_id)
 
 
 def test_setup_fails_when_already_initialized(client):
@@ -43,7 +47,10 @@ def test_login_success(client, app):
         db.session.commit()
     r = client.post("/api/auth/login", json={"username": "cashier1", "password": "secret"})
     assert r.status_code == 200
-    assert "token" in r.get_json()
+    data = r.get_json()
+    assert "token" in data
+    assert isinstance(data.get("user", {}).get("branch_id"), str)
+    assert re.fullmatch(r"[0-9a-f]{32}", data.get("user", {}).get("branch_id"))
 
 
 def test_login_invalid_credentials(client, app):

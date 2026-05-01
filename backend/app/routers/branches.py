@@ -13,7 +13,7 @@ from app.routers.common import yes
 branches_router = APIRouter(prefix="/api/branches", tags=["branches"])
 
 
-def _assert_branch_access(branch_id: int, user: User) -> None:
+def _assert_branch_access(branch_id: str, user: User) -> None:
     if user.role == "owner":
         return
     if user.role == "manager" and user.branch_id == branch_id:
@@ -36,7 +36,12 @@ def _branch_to_dict(b: Branch) -> dict[str, Any]:
 
 
 @branches_router.get("/")
-def get_branches(include_archived: str | None = None, _: User = Depends(get_current_user)):
+def get_branches(include_archived: str | None = None, current_user: User = Depends(get_current_user)):
+    if current_user.branch_id:
+        branch = db.session.get(Branch, current_user.branch_id)
+        if branch and (yes(include_archived) or not getattr(branch, "archived_at", None)):
+            return [_branch_to_dict(branch)]
+        return []
     query = Branch.query.order_by(Branch.created_at.asc())
     if not yes(include_archived) and hasattr(Branch, "archived_at"):
         query = query.filter(Branch.archived_at == None)  # noqa: E711
@@ -78,7 +83,7 @@ def create_branch(payload: dict[str, Any] | None = None, _: User = Depends(requi
 
 
 @branches_router.put("/{branch_id}")
-def update_branch(branch_id: int, payload: dict[str, Any] | None = None, current_user: User = Depends(require_owner_or_manager)):
+def update_branch(branch_id: str, payload: dict[str, Any] | None = None, current_user: User = Depends(require_owner_or_manager)):
     _assert_branch_access(branch_id, current_user)
     branch = db.session.get(Branch, branch_id)
     if not branch:
@@ -110,7 +115,7 @@ def update_branch(branch_id: int, payload: dict[str, Any] | None = None, current
 
 
 @branches_router.patch("/{branch_id}/archive")
-def archive_branch(branch_id: int, _: User = Depends(require_owner)):
+def archive_branch(branch_id: str, _: User = Depends(require_owner)):
     branch = db.session.get(Branch, branch_id)
     if not branch:
         raise HTTPException(status_code=404, detail="Not Found")
@@ -126,7 +131,7 @@ def archive_branch(branch_id: int, _: User = Depends(require_owner)):
 
 
 @branches_router.patch("/{branch_id}/unarchive")
-def unarchive_branch(branch_id: int, _: User = Depends(require_owner)):
+def unarchive_branch(branch_id: str, _: User = Depends(require_owner)):
     branch = db.session.get(Branch, branch_id)
     if not branch:
         raise HTTPException(status_code=404, detail="Not Found")
@@ -142,7 +147,7 @@ def unarchive_branch(branch_id: int, _: User = Depends(require_owner)):
 
 
 @branches_router.delete("/{branch_id}")
-def delete_branch(branch_id: int, cascade: str | None = None, _: User = Depends(require_owner)):
+def delete_branch(branch_id: str, cascade: str | None = None, _: User = Depends(require_owner)):
     branch = db.session.get(Branch, branch_id)
     if not branch:
         return JSONResponse(status_code=404, content={"message": "Branch not found"})
@@ -205,7 +210,7 @@ def delete_branch(branch_id: int, cascade: str | None = None, _: User = Depends(
 
 
 @branches_router.get("/{branch_id}/users")
-def get_branch_users(branch_id: int, current_user: User = Depends(require_owner_or_manager)):
+def get_branch_users(branch_id: str, current_user: User = Depends(require_owner_or_manager)):
     _assert_branch_access(branch_id, current_user)
     branch = db.session.get(Branch, branch_id)
     if not branch:

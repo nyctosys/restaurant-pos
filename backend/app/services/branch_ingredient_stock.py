@@ -16,7 +16,7 @@ class InsufficientIngredientStock(Exception):
         )
 
 
-def get_branch_stock(ingredient_id: int, branch_id: int) -> float:
+def get_branch_stock(ingredient_id: int, branch_id: str) -> float:
     row = IngredientBranchStock.query.filter_by(
         ingredient_id=ingredient_id, branch_id=branch_id
     ).first()
@@ -26,7 +26,7 @@ def get_branch_stock(ingredient_id: int, branch_id: int) -> float:
     return float(ing.current_stock) if ing else 0.0
 
 
-def ensure_branch_stock_row(ingredient_id: int, branch_id: int) -> IngredientBranchStock:
+def ensure_branch_stock_row(ingredient_id: int, branch_id: str) -> IngredientBranchStock:
     row = IngredientBranchStock.query.filter_by(
         ingredient_id=ingredient_id, branch_id=branch_id
     ).first()
@@ -53,7 +53,7 @@ def _movement_type_enum(movement_type: str) -> StockMovementType:
 
 def adjust_branch_ingredient_stock(
     ingredient_id: int,
-    branch_id: int,
+    branch_id: str,
     quantity_change: float,
     *,
     movement_type: str | StockMovementType,

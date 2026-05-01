@@ -29,7 +29,7 @@ def test_branches_list_requires_auth(client):
 
 def test_branches_get_404(client, app):
     h = _owner_headers(client, app)
-    r = client.put("/api/branches/99999", headers=h, json={"name": "X", "address": "", "phone": ""})
+    r = client.put("/api/branches/ffffffffffffffffffffffffffffffff", headers=h, json={"name": "X", "address": "", "phone": ""})
     assert r.status_code == 404
     data = r.get_json()
     assert "not found" in (data.get("message") or "").lower()

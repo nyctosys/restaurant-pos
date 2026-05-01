@@ -1,8 +1,10 @@
-from app.models import Branch, Setting, User, db
+import re
+
+from app.models import Branch, Setting, SyncOutbox, User, db
 from werkzeug.security import generate_password_hash
 
 
-def _headers_for_user(client, app, *, username: str, role: str, branch_id: int | None):
+def _headers_for_user(client, app, *, username: str, role: str, branch_id: str | None):
     with app.app_context():
         user = User(
             username=username,
@@ -38,9 +40,12 @@ def test_owner_branch_scoped_settings_ignore_stale_client_branch_id(client, app)
     with app.app_context():
         branch_a_settings = Setting.query.filter_by(branch_id=branch_a_id).first()
         branch_b_settings = Setting.query.filter_by(branch_id=branch_b_id).first()
+        outbox = SyncOutbox.query.filter_by(entity_type="settings", event_type="settings_updated").one()
         assert branch_a_settings is not None
         assert branch_a_settings.config["sections"] == ["Burgers"]
         assert branch_b_settings is None
+        assert outbox.branch_id == branch_a_id
+        assert re.fullmatch(r"[0-9a-f]{32}", outbox.branch_id)
 
 
 def test_manager_branch_scoped_settings_ignore_stale_client_branch_id(client, app):

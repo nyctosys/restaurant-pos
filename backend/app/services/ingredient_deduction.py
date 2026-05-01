@@ -26,7 +26,7 @@ def ingredient_display_name(ingredient: Ingredient | None) -> str:
     return f"{name} ({brand})" if brand else name
 
 
-def _brand_strategy(branch_id: int) -> str:
+def _brand_strategy(branch_id: str) -> str:
     setting = Setting.query.filter_by(branch_id=branch_id).first() or Setting.query.filter_by(branch_id=None).first()
     config = setting.config if setting and isinstance(setting.config, dict) else {}
     raw = (
@@ -70,7 +70,7 @@ def _matching_ingredients(base_ingredient: Ingredient) -> list[Ingredient]:
     return ordered
 
 
-def _candidate_oldest_inbound(branch_id: int, ingredient_ids: list[int]) -> dict[int, datetime]:
+def _candidate_oldest_inbound(branch_id: str, ingredient_ids: list[int]) -> dict[int, datetime]:
     if not ingredient_ids:
         return {}
     rows = (
@@ -87,7 +87,7 @@ def _candidate_oldest_inbound(branch_id: int, ingredient_ids: list[int]) -> dict
     }
 
 
-def _sorted_candidates(branch_id: int, candidates: list[Ingredient]) -> list[tuple[Ingredient, float]]:
+def _sorted_candidates(branch_id: str, candidates: list[Ingredient]) -> list[tuple[Ingredient, float]]:
     if not candidates:
         return []
 
@@ -120,7 +120,7 @@ def deduct_ingredient_stock(
     *,
     source_ingredient: Ingredient,
     required_quantity: float,
-    branch_id: int,
+    branch_id: str,
     user_id: int,
     sale_id: int,
     reason: str,
@@ -186,7 +186,7 @@ def deduct_ingredient_stock(
 def restore_inventory_allocations(
     *,
     allocations: list[dict[str, Any]] | None,
-    branch_id: int,
+    branch_id: str,
     user_id: int,
     sale_id: int,
     reason: str,

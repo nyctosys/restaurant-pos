@@ -25,7 +25,7 @@ def _merge_configs(global_config: dict[str, Any], branch_config: dict[str, Any])
 @settings_router.get("/")
 def get_settings(
     global_only: str | None = None,
-    branch_id: int | None = None,
+    branch_id: str | None = None,
     current_user: User = Depends(get_current_user),
 ):
     if yes(global_only):

@@ -40,7 +40,7 @@ def _get_token(client, username="owner1", password="pass"):
     return r.get_json()["token"]
 
 
-def _set_branch_ingredient_stock(ingredient_id: int, branch_id: int, level: float) -> None:
+def _set_branch_ingredient_stock(ingredient_id: int, branch_id: str, level: float) -> None:
     row = IngredientBranchStock.query.filter_by(ingredient_id=ingredient_id, branch_id=branch_id).first()
     if row:
         row.current_stock = float(level)
@@ -50,7 +50,7 @@ def _set_branch_ingredient_stock(ingredient_id: int, branch_id: int, level: floa
         )
 
 
-def _create_menu_item_with_recipe(app, branch_id: int, title: str = "Widget", stock: float = 100.0, recipe_qty: float = 1.0):
+def _create_menu_item_with_recipe(app, branch_id: str, title: str = "Widget", stock: float = 100.0, recipe_qty: float = 1.0):
     """One menu item with a single-ingredient BOM; returns (product_id, ingredient_id)."""
     with app.app_context():
         ing = Ingredient(name=f"ing-{title}", unit="piece", current_stock=0.0)
@@ -110,7 +110,7 @@ def test_checkout_empty_cart(client, app):
     r = client.post(
         "/api/orders/checkout",
         headers={"Authorization": f"Bearer {token}"},
-        json={"items": [], "payment_method": "Cash", "branch_id": 1},
+        json={"items": [], "payment_method": "Cash", "branch_id": "stale-client-branch"},
     )
     assert r.status_code == 400
     assert "cart" in (r.get_json().get("message") or "").lower()
@@ -125,7 +125,7 @@ def test_checkout_missing_payment_method(client, app):
     r = client.post(
         "/api/orders/checkout",
         headers={"Authorization": f"Bearer {token}"},
-        json={"items": [{"product_id": 1, "quantity": 1}], "branch_id": 1},
+        json={"items": [{"product_id": 1, "quantity": 1}], "branch_id": "stale-client-branch"},
     )
     assert r.status_code == 400
 
@@ -324,6 +324,7 @@ def test_delivery_checkout_adds_flat_delivery_charge(client, app):
                 "customer_name": "Ali",
                 "phone": "03001234567",
                 "address": "Street 1",
+                "rider_name": "Hamza",
             },
         },
     )
@@ -364,6 +365,7 @@ def test_delivery_checkout_custom_delivery_charge(client, app):
                 "customer_name": "Ali",
                 "phone": "03001234567",
                 "address": "Street 1",
+                "rider_name": "Hamza",
             },
         },
     )
@@ -811,6 +813,7 @@ def test_delivery_order_snapshot_keeps_distance_metadata(client, app):
                 "customer_name": "Ali",
                 "phone": "03001234567",
                 "address": "Street 1",
+                "rider_name": "Hamza",
                 "distance_km": 8.91,
                 "distance_source": "google_route",
             },
@@ -918,6 +921,67 @@ def test_update_open_delivery_order_can_change_rider_name(client, app):
     assert active.status_code == 200
     snapshot = active.get_json()["sales"][0]["order_snapshot"]
     assert snapshot["rider_name"] == "Bilal"
+    assert active.get_json()["sales"][0]["delivery_status"] == "assigned"
+    assert active.get_json()["sales"][0]["assigned_rider_id"] is not None
+
+
+def test_delivery_kot_requires_assigned_rider(client, app):
+    client.post(
+        "/api/auth/setup",
+        json={"username": "owner1", "password": "pass", "branch_name": "Main"},
+    )
+    token = _get_token(client)
+    with app.app_context():
+        b = Branch.query.filter_by(name="Main").first()
+        bid = b.id
+    pid, _ = _create_menu_item_with_recipe(app, bid, "No Rider Burger", stock=50.0)
+
+    res = client.post(
+        "/api/orders/kot",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "items": [{"product_id": pid, "quantity": 1}],
+            "order_type": "delivery",
+            "skip_kot_print": True,
+            "order_snapshot": {
+                "customer_name": "Ali",
+                "phone": "03001234567",
+                "address": "Street 1",
+            },
+        },
+    )
+    assert res.status_code == 400
+    assert "assigned rider" in res.get_json()["message"].lower()
+
+
+def test_delivery_checkout_requires_assigned_rider(client, app):
+    client.post(
+        "/api/auth/setup",
+        json={"username": "owner1", "password": "pass", "branch_name": "Main"},
+    )
+    token = _get_token(client)
+    with app.app_context():
+        b = Branch.query.filter_by(name="Main").first()
+        bid = b.id
+    pid, _ = _create_menu_item_with_recipe(app, bid, "No Rider Paid Burger", stock=50.0)
+
+    res = client.post(
+        "/api/orders/checkout",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "items": [{"product_id": pid, "quantity": 1}],
+            "payment_method": "Cash",
+            "branch_id": bid,
+            "order_type": "delivery",
+            "order_snapshot": {
+                "customer_name": "Ali",
+                "phone": "03001234567",
+                "address": "Street 1",
+            },
+        },
+    )
+    assert res.status_code == 400
+    assert "assigned rider" in res.get_json()["message"].lower()
 
 
 def test_checkout_accepts_object_variants_and_uses_variant_bom(client, app):

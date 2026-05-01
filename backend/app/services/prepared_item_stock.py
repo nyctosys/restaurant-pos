@@ -17,7 +17,7 @@ class InsufficientPreparedItemStock(Exception):
         )
 
 
-def get_prepared_branch_stock(prepared_item_id: int, branch_id: int) -> float:
+def get_prepared_branch_stock(prepared_item_id: int, branch_id: str) -> float:
     row = PreparedItemBranchStock.query.filter_by(
         prepared_item_id=prepared_item_id, branch_id=branch_id
     ).first()
@@ -28,7 +28,7 @@ def get_prepared_branch_stock(prepared_item_id: int, branch_id: int) -> float:
 
 
 def ensure_prepared_branch_stock_row(
-    prepared_item_id: int, branch_id: int
+    prepared_item_id: int, branch_id: str
 ) -> PreparedItemBranchStock:
     row = PreparedItemBranchStock.query.filter_by(
         prepared_item_id=prepared_item_id, branch_id=branch_id
@@ -47,7 +47,7 @@ def ensure_prepared_branch_stock_row(
 
 def adjust_prepared_branch_stock(
     prepared_item_id: int,
-    branch_id: int,
+    branch_id: str,
     quantity_change: float,
     *,
     movement_type: str,

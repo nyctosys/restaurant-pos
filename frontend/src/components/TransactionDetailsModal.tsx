@@ -35,7 +35,7 @@ type TransactionDetails = {
   id: number;
   user_id: number;
   operator_name: string;
-  branch_id: number;
+  branch_id: string;
   total_amount: number;
   tax_amount: number;
   delivery_charge?: number;

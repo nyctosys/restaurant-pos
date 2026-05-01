@@ -150,14 +150,14 @@ export default function Settings() {
       const query = activeBranchId ? `?branch_id=${activeBranchId}` : '';
       const existing = await get<SettingsResponse>(`/settings/${query}`);
       const currentConfig = (existing?.config ?? {}) as Record<string, unknown>;
-      const payload: { config: Record<string, unknown>; branch_id?: number } = {
+      const payload: { config: Record<string, unknown>; branch_id?: string } = {
         config: {
           ...currentConfig,
           dashboard_menu_layout: dashboardMenuLayout,
         },
       };
       if (activeBranchId) {
-        payload.branch_id = parseInt(activeBranchId, 10);
+        payload.branch_id = activeBranchId;
       }
       await put('/settings/', payload);
       setGeneralFeedback('General settings saved!');
@@ -190,11 +190,11 @@ export default function Settings() {
       const query = activeBranchId ? `?branch_id=${activeBranchId}` : '';
       const existing = await get<SettingsResponse>(`/settings/${query}`);
       const currentConfig = (existing?.config ?? {}) as Record<string, unknown>;
-      const payload: { config: Record<string, unknown>; branch_id?: number } = {
+      const payload: { config: Record<string, unknown>; branch_id?: string } = {
         config: { ...currentConfig, sections: updatedSections },
       };
       if (activeBranchId) {
-        payload.branch_id = parseInt(activeBranchId, 10);
+        payload.branch_id = activeBranchId;
       }
       await put('/settings/', payload);
       setSections(updatedSections);
@@ -242,11 +242,11 @@ export default function Settings() {
       const query = activeBranchId ? `?branch_id=${activeBranchId}` : '';
       const existing = await get<SettingsResponse>(`/settings/${query}`);
       const currentConfig = (existing?.config ?? {}) as Record<string, unknown>;
-      const payload: { config: Record<string, unknown>; branch_id?: number } = {
+      const payload: { config: Record<string, unknown>; branch_id?: string } = {
         config: { ...currentConfig, variants: updated },
       };
       if (activeBranchId) {
-        payload.branch_id = parseInt(activeBranchId, 10);
+        payload.branch_id = activeBranchId;
       }
       await put('/settings/', payload);
       setVariants(updated);
@@ -310,11 +310,11 @@ export default function Settings() {
       const query = activeBranchId ? `?branch_id=${activeBranchId}` : '';
       const existing = await get<SettingsResponse>(`/settings/${query}`);
       const currentConfig = (existing?.config ?? {}) as Record<string, unknown>;
-      const payload: { config: Record<string, unknown>; branch_id?: number } = {
+      const payload: { config: Record<string, unknown>; branch_id?: string } = {
         config: { ...currentConfig, discounts: updatedList },
       };
       if (activeBranchId) {
-        payload.branch_id = parseInt(activeBranchId, 10);
+        payload.branch_id = activeBranchId;
       }
       await put('/settings/', payload);
       setDiscounts(updatedList);
@@ -400,7 +400,7 @@ export default function Settings() {
       const query = activeBranchId ? `?branch_id=${activeBranchId}` : '';
       const existing = await get<SettingsResponse>(`/settings/${query}`);
       const currentConfig = (existing?.config ?? {}) as Record<string, unknown>;
-      const payload: { config: Record<string, unknown>; branch_id?: number } = {
+      const payload: { config: Record<string, unknown>; branch_id?: string } = {
         config: {
           ...currentConfig,
           tax_enabled: taxEnabled,
@@ -408,7 +408,7 @@ export default function Settings() {
           tax_rates_by_payment_method: { ...taxRatesByPaymentMethod },
         },
       };
-      if (activeBranchId) payload.branch_id = parseInt(activeBranchId, 10);
+      if (activeBranchId) payload.branch_id = activeBranchId;
       await put('/settings/', payload);
       setTaxFeedback('Tax settings saved!');
       setTimeout(() => setTaxFeedback(''), 2000);
@@ -1331,7 +1331,7 @@ type ServerAppEvent = {
   message: string;
   requestId: string | null;
   user_id: number | null;
-  branch_id: number | null;
+  branch_id: string | null;
   route: string | null;
   exc_type: string | null;
   stack_trace: string | null;

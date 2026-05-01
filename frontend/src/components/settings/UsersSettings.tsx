@@ -10,7 +10,7 @@ type User = {
   id: number;
   username: string;
   role: string;
-  branch_id: number | null;
+  branch_id: string | null;
   branch_name: string;
   created_at: string;
   archived_at?: string | null;
@@ -87,7 +87,7 @@ export default function UsersSettings() {
 
     setSaving(true);
     try {
-      const payload: { username: string; role: string; branch_id?: number | null; password?: string } = {
+      const payload: { username: string; role: string; branch_id?: string | null; password?: string } = {
         username: username.trim(),
         role,
       };

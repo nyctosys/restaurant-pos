@@ -105,6 +105,8 @@ def _run_command(args: list[str], cwd: Path, report: CheckReport, timeout: int |
 def apply_migrations(report: CheckReport) -> bool:
     """Run safe, idempotent schema catch-up scripts."""
     commands = [
+        [sys.executable, "scripts/fix_production_schema.py"],
+        [sys.executable, "scripts/migrate_branch_ids_to_hex.py"],
         [sys.executable, "scripts/migrate_latest_schema_changes.py"],
         [sys.executable, "scripts/sync_db_schema.py"],
     ]
@@ -217,6 +219,13 @@ def _check_latest_schema_contract(inspector, report: CheckReport) -> None:
         existing_columns = {col["name"] for col in inspector.get_columns(table)}
         for column in sorted(required_columns - existing_columns):
             report.fail(f"Latest schema column missing: {table}.{column}")
+
+    if "branches" in existing_tables:
+        branch_id_col = next((col for col in inspector.get_columns("branches") if col["name"] == "id"), None)
+        if branch_id_col and ("char" in str(branch_id_col["type"]).lower() or "text" in str(branch_id_col["type"]).lower()):
+            report.ok("branches.id is string-compatible for hex branch identity")
+        elif branch_id_col:
+            report.fail(f"branches.id is not string-compatible: {branch_id_col['type']}")
 
 
 def _check_postgres_specifics(connection, inspector, report: CheckReport) -> None:

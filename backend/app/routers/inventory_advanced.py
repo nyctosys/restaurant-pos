@@ -45,7 +45,7 @@ from app.schemas.inventory_schemas import (
 inventory_advanced_router = APIRouter(prefix="/api/inventory-advanced", tags=["inventory-advanced"])
 
 
-def _resolve_inventory_branch(branch_id: int | None, current_user: User) -> int:
+def _resolve_inventory_branch(branch_id: str | None, current_user: User) -> str:
     _ = branch_id
     return resolve_terminal_branch_id(current_user)
 
@@ -74,7 +74,7 @@ def _recalculate_products_using_prepared_item(prepared_item_id: int) -> None:
             recalculate_product_cost(product)
 
 
-def _ingredient_to_dict(ingredient: Ingredient, branch_id: int) -> dict[str, Any]:
+def _ingredient_to_dict(ingredient: Ingredient, branch_id: str) -> dict[str, Any]:
     unit_raw = ingredient.unit or ""
     unit = unit_raw.value if hasattr(unit_raw, "value") else unit_raw
     brand_name = getattr(ingredient, "brand_name", None)
@@ -218,7 +218,7 @@ def update_supplier(
 
 @inventory_advanced_router.get("/ingredients")
 def list_ingredients(
-    branch_id: int | None = None,
+    branch_id: str | None = None,
     current_user: User = Depends(get_current_user),
 ):
     bid = _resolve_inventory_branch(branch_id, current_user)
@@ -295,7 +295,7 @@ def _component_payload(component: PreparedItemComponent) -> dict[str, Any]:
     }
 
 
-def _prepared_item_payload(item: PreparedItem, branch_id: int) -> dict[str, Any]:
+def _prepared_item_payload(item: PreparedItem, branch_id: str) -> dict[str, Any]:
     return {
         "id": item.id,
         "name": item.name,
@@ -328,7 +328,7 @@ def _replace_prepared_components(item: PreparedItem, components: list[Any]) -> N
 
 @inventory_advanced_router.get("/prepared-items")
 def list_prepared_items(
-    branch_id: int | None = None,
+    branch_id: str | None = None,
     current_user: User = Depends(get_current_user),
 ):
     bid = _resolve_inventory_branch(branch_id, current_user)
@@ -657,7 +657,7 @@ def receive_purchase_order(po_id: int, payload: PurchaseOrderReceive, current_us
     po.status = "received"
     po.received_date = payload.received_date or datetime.now(timezone.utc)
 
-    branch_id = int(po.branch_id or current_user.branch_id or 1)
+    branch_id = po.branch_id or current_user.branch_id or resolve_terminal_branch_id(current_user)
 
     for item in po.items:
         ing = item.ingredient

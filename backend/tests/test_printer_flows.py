@@ -57,6 +57,7 @@ def _login_token(client):
                 "customer_name": "Ali",
                 "phone": "03001234567",
                 "address": "Street 1",
+                "rider_name": "Hamza",
             },
         ),
     ],

@@ -232,7 +232,7 @@ class PreparedItemBatchCreate(BaseModel):
     model_config = ConfigDict(extra="ignore")
     quantity: float = Field(gt=0)
     reason: str | None = None
-    branch_id: int | None = None
+    branch_id: str | None = None
 
 
 class RecipePreparedItemBase(BaseModel):
@@ -285,7 +285,7 @@ class PurchaseOrderCreate(BaseModel):
     supplier_id: int
     expected_delivery: datetime | None = None
     notes: str | None = None
-    branch_id: int | None = None
+    branch_id: str | None = None
     items: list[PurchaseOrderItemBase]
 
 class PurchaseOrderReceive(BaseModel):
@@ -301,7 +301,7 @@ class StockMovementCreate(BaseModel):
     reference_id: int | None = None
     reference_type: str | None = None
     reason: str | None = None
-    branch_id: int | None = None
+    branch_id: str | None = None
 
 
 class BulkRestockLine(BaseModel):

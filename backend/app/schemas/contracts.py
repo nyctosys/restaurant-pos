@@ -56,7 +56,7 @@ class CheckoutRequest(BaseModel):
     model_config = ConfigDict(extra="ignore")
     items: list[CheckoutItem]
     payment_method: str
-    branch_id: int | None = None
+    branch_id: str | None = None
     discount: DiscountPayload | None = None
     order_type: str | None = None
     order_snapshot: OrderSnapshotPayload | None = None

@@ -49,12 +49,12 @@ def _stock_transactions_time_range(time_filter: str, start_date_str: str | None,
     return start_dt, end_dt
 
 
-def _terminal_branch_id(current_user: User) -> int:
+def _terminal_branch_id(current_user: User) -> str:
     return resolve_terminal_branch_id(current_user)
 
 
 @stock_router.get("/")
-def get_ingredient_stock_map(branch_id: int | None = None, current_user: User = Depends(get_current_user)):
+def get_ingredient_stock_map(branch_id: str | None = None, current_user: User = Depends(get_current_user)):
     """Branch-scoped raw ingredient quantities (restaurant inventory)."""
     _ = branch_id
     resolved_branch_id = _terminal_branch_id(current_user)
@@ -213,7 +213,7 @@ def get_stock_transactions(
     time_filter: str = "today",
     start_date: str | None = None,
     end_date: str | None = None,
-    branch_id: int | None = None,
+    branch_id: str | None = None,
     current_user: User = Depends(get_current_user),
 ):
     """Ingredient movement ledger for reporting (replaces finished-goods inventory transactions)."""
