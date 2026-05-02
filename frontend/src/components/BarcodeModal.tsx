@@ -74,7 +74,7 @@ function buildPrintHtml(
   <body>
     <p class="product-name">${esc(title)}</p>
     <div class="barcode-wrap">${svgHtml}</div>
-    ${autoPrint ? '<script>window.onload = function() { window.print(); }<\/script>' : ''}
+    ${autoPrint ? '<script>window.onload = function() { window.print(); }</script>' : ''}
   </body>
 </html>`;
 }
@@ -142,9 +142,9 @@ export default function BarcodeModal({ sku, title, onClose }: BarcodeModalProps)
         const doPrint = () => {
           win.print();
           setTimeout(() => {
-            try {
+            if (iframe.parentNode) {
               document.body.removeChild(iframe);
-            } catch (_) {}
+            }
           }, 500);
         };
         requestAnimationFrame(() => setTimeout(doPrint, 150));
@@ -171,7 +171,7 @@ export default function BarcodeModal({ sku, title, onClose }: BarcodeModalProps)
         printWindow.once('tauri://created', () => {
           setPrinting(false);
         });
-      } catch (e) {
+      } catch {
         setPrinting(false);
         runIframePrint();
       }

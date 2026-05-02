@@ -14,6 +14,7 @@ export type ConfirmOptions = {
 let showConfirmFn: ((opts: ConfirmOptions) => Promise<boolean>) | null = null;
 
 /** Call this from anywhere to show a confirmation dialog. Returns a promise that resolves to true/false. */
+// eslint-disable-next-line react-refresh/only-export-components
 export function showConfirm(opts: ConfirmOptions): Promise<boolean> {
   if (!showConfirmFn) return Promise.resolve(false);
   return showConfirmFn(opts);

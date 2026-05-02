@@ -1,7 +1,7 @@
 /**
  * API client: error handling, request logging, normalized errors.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { ApiError, getUserMessage, isApiError } from '../api/errors';
 
 describe('ApiError', () => {

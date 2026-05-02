@@ -78,24 +78,29 @@ export default function SearchableSelect({
 
   const selectedOption = sortedOptions.find(option => option.value === value);
 
+  const setOpenState = (nextOpen: boolean | ((current: boolean) => boolean)) => {
+    setOpen(current => {
+      const resolved = typeof nextOpen === 'function' ? nextOpen(current) : nextOpen;
+      if (!resolved) setQuery('');
+      return resolved;
+    });
+  };
+
   useEffect(() => {
-    if (!open) {
-      setQuery('');
-      return;
-    }
+    if (!open) return;
 
     const handlePointerDown = (event: MouseEvent) => {
       const target = event.target as Node;
       const insideRoot = rootRef.current?.contains(target) ?? false;
       const insidePortal = portalRef.current?.contains(target) ?? false;
       if (!insideRoot && !insidePortal) {
-        setOpen(false);
+        setOpenState(false);
       }
     };
 
     const handleEscape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        setOpen(false);
+        setOpenState(false);
       }
     };
 
@@ -149,11 +154,11 @@ export default function SearchableSelect({
     if (disabled) return;
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
-      setOpen(current => !current);
+      setOpenState(current => !current);
     }
     if (event.key === 'ArrowDown') {
       event.preventDefault();
-      setOpen(true);
+      setOpenState(true);
     }
   };
 
@@ -163,7 +168,7 @@ export default function SearchableSelect({
         ref={triggerRef}
         type="button"
         disabled={disabled}
-        onClick={() => setOpen(current => !current)}
+        onClick={() => setOpenState(current => !current)}
         onKeyDown={handleTriggerKeyDown}
         className={cx(
           'flex w-full items-center justify-between gap-3 rounded-[8px] border border-soot-200 bg-white/80 px-4 py-2.5 text-left text-sm text-soot-800 transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500 disabled:cursor-not-allowed disabled:opacity-50',
@@ -208,7 +213,7 @@ export default function SearchableSelect({
                       e.preventDefault();
                       if (filteredOptions.length > 0) {
                         onChange(filteredOptions[0].value);
-                        setOpen(false);
+                        setOpenState(false);
                       }
                     }
                   }}
@@ -244,7 +249,7 @@ export default function SearchableSelect({
                         onClick={() => {
                           if (option.disabled) return;
                           onChange(option.value);
-                          setOpen(false);
+                          setOpenState(false);
                         }}
                         className={cx(
                           'flex w-full items-center justify-between gap-3 rounded-[8px] px-3 py-2 text-left text-sm transition-colors',

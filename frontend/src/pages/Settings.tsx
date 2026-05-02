@@ -1398,7 +1398,8 @@ function AppLogsPanel() {
   };
 
   useEffect(() => {
-    loadServer();
+    const id = window.setTimeout(loadServer, 0);
+    return () => window.clearTimeout(id);
   }, []);
 
   const serverEntries = serverEvents.map(serverEventToLogEntry);

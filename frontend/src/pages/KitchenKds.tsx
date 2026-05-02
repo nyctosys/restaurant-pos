@@ -192,7 +192,7 @@ const OrderCard = memo(function OrderCard({
   isBusy: boolean;
   onUpdateStatus: (id: number, status: KitchenStatus) => void;
 }) {
-  const [nowMs, setNowMs] = useState(Date.now());
+  const [nowMs, setNowMs] = useState(() => Date.now());
   const ks = normalizeKitchenStatus(order.kitchen_status);
 
   useEffect(() => {
@@ -313,7 +313,7 @@ const OrderCard = memo(function OrderCard({
               Modifications
             </div>
             <ul className="space-y-1.5">
-              {order.modifications.map((mod: any, i: number) => (
+              {order.modifications.map((mod, i: number) => (
                 <li key={i} className="flex gap-2 items-start text-sm font-semibold text-amber-950 bg-white/40 border border-white/50 rounded-[8px] p-2.5">
                   <span className="shrink-0 text-amber-700 font-black mt-0.5">
                     {mod.type === 'add' ? '+' : mod.type === 'remove' ? '-' : '•'}

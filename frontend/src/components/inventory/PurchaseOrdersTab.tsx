@@ -117,7 +117,7 @@ export default function PurchaseOrdersTab() {
     setFormItems([...formItems, { ingredient_id: 0, quantity_ordered: 1, unit_price: 0, unit: 'kg' }]);
   };
 
-  const handleUpdateItem = (index: number, field: keyof POItem, value: any) => {
+  const handleUpdateItem = (index: number, field: keyof POItem, value: POItem[keyof POItem]) => {
     const newItems = [...formItems];
     newItems[index] = { ...newItems[index], [field]: value };
     

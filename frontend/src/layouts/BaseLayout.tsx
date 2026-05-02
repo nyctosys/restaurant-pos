@@ -60,7 +60,8 @@ export default function BaseLayout() {
   }, [isAuthPage, user, userRole]);
 
   useEffect(() => {
-    void refreshActiveDineInCount();
+    const id = window.setTimeout(() => void refreshActiveDineInCount(), 0);
+    return () => window.clearTimeout(id);
   }, [refreshActiveDineInCount, location.pathname]);
 
   useEffect(() => {

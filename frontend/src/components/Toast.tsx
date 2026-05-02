@@ -13,6 +13,7 @@ let toastId = 0;
 let addToastFn: ((message: string, type: ToastType) => void) | null = null;
 
 /** Call this from anywhere to show a toast notification */
+// eslint-disable-next-line react-refresh/only-export-components
 export function showToast(message: string, type: ToastType = 'info') {
   addToastFn?.(message, type);
 }
