@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Plus, X, Loader2, ArrowRightCircle, CheckCircle2, PackageCheck, Ban, History } from 'lucide-react';
-import { get, post, getUserMessage } from '../../api';
+import { Plus, X, Loader2, ArrowRightCircle, CheckCircle2, PackageCheck, Ban, Pencil, Trash2 } from 'lucide-react';
+import { get, post, put, del, getUserMessage } from '../../api';
 import { showToast } from '../Toast';
 import { showConfirm } from '../ConfirmDialog';
 import { formatCurrency } from '../../utils/formatCurrency';
@@ -57,15 +57,18 @@ type PurchaseOrder = {
   expected_delivery: string | null;
   received_date: string | null;
   created_at: string;
+  notes?: string | null;
   items?: PurchaseOrderItem[];
 };
+
+type PurchaseOrderView = 'active' | 'completed' | 'cancelled';
 
 export default function PurchaseOrdersTab() {
   const [pos, setPos] = useState<PurchaseOrder[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showCompleted, setShowCompleted] = useState(false);
+  const [selectedView, setSelectedView] = useState<PurchaseOrderView>('active');
 
   // Form State
   const [showModal, setShowModal] = useState(false);
@@ -74,6 +77,7 @@ export default function PurchaseOrdersTab() {
   const [formNotes, setFormNotes] = useState('');
   const [formItems, setFormItems] = useState<POItem[]>([]);
   const [submitting, setSubmitting] = useState(false);
+  const [editingPo, setEditingPo] = useState<PurchaseOrder | null>(null);
   const [partialReceivePo, setPartialReceivePo] = useState<PurchaseOrder | null>(null);
   const [receiveQuantities, setReceiveQuantities] = useState<Record<number, string>>({});
   const [receiving, setReceiving] = useState(false);
@@ -100,11 +104,40 @@ export default function PurchaseOrdersTab() {
     }
   };
 
-  const handleOpenAdd = () => {
+  const resetForm = () => {
     setFormSupplierId('');
     setFormExpectedDate('');
     setFormNotes('');
     setFormItems([]);
+  };
+
+  const closeOrderModal = () => {
+    setShowModal(false);
+    setEditingPo(null);
+    resetForm();
+  };
+
+  const handleOpenAdd = () => {
+    resetForm();
+    setEditingPo(null);
+    setShowModal(true);
+  };
+
+  const handleOpenEdit = (po: PurchaseOrder) => {
+    setEditingPo(po);
+    setFormSupplierId(String(po.supplier_id));
+    setFormExpectedDate(po.expected_delivery ? po.expected_delivery.slice(0, 10) : '');
+    setFormNotes(po.notes || '');
+    setFormItems((po.items || []).map(item => ({
+      ingredient_id: item.ingredient_id,
+      quantity_ordered: item.quantity_ordered,
+      quantity_received: item.quantity_received,
+      quantity_remaining: item.quantity_remaining,
+      unit_price: item.unit_price,
+      unit: item.unit,
+      packageQty: '',
+      packageUnit: item.unit,
+    })));
     setShowModal(true);
   };
 
@@ -238,14 +271,21 @@ export default function PurchaseOrdersTab() {
         };
       });
 
-      await post('/inventory-advanced/purchase-orders', {
+      const payload = {
         supplier_id: parseInt(formSupplierId, 10),
         expected_delivery: formExpectedDate ? new Date(formExpectedDate).toISOString() : undefined,
         notes: formNotes || undefined,
         items: itemsPayload,
-      });
-      showToast('Purchase Order created', 'success');
-      setShowModal(false);
+      };
+
+      if (editingPo) {
+        await put(`/inventory-advanced/purchase-orders/${editingPo.id}`, payload);
+        showToast('Purchase Order updated', 'success');
+      } else {
+        await post('/inventory-advanced/purchase-orders', payload);
+        showToast('Purchase Order created', 'success');
+      }
+      closeOrderModal();
       fetchData();
     } catch (err) {
       showToast(getUserMessage(err), 'error');
@@ -328,9 +368,10 @@ export default function PurchaseOrdersTab() {
 
   const handleCancel = async (po: PurchaseOrder) => {
     const confirmed = await showConfirm({
-      title: 'Cancel Purchase Order',
-      message: `Are you sure you want to cancel ${po.po_number}? This action cannot be undone.`,
-      confirmLabel: 'Yes, cancel PO',
+      title: 'Cancel this purchase order?',
+      message: `Cancel ${po.po_number}? It will move to Cancelled POs and can no longer be received. Any stock already received will stay in inventory.`,
+      confirmLabel: 'Cancel purchase order',
+      cancelLabel: 'Keep order',
       variant: 'danger'
     });
     if (!confirmed) return;
@@ -338,6 +379,26 @@ export default function PurchaseOrdersTab() {
     try {
       await post(`/inventory-advanced/purchase-orders/${po.id}/cancel`, {});
       showToast('PO cancelled', 'success');
+      setSelectedView('cancelled');
+      fetchData();
+    } catch (err) {
+      showToast(getUserMessage(err), 'error');
+    }
+  };
+
+  const handleDelete = async (po: PurchaseOrder) => {
+    const confirmed = await showConfirm({
+      title: 'Delete this purchase order?',
+      message: `Delete ${po.po_number}? This removes the order from Purchase Orders. Use this only for orders that were created by mistake and have no received stock.`,
+      confirmLabel: 'Delete purchase order',
+      cancelLabel: 'Keep order',
+      variant: 'danger'
+    });
+    if (!confirmed) return;
+
+    try {
+      await del(`/inventory-advanced/purchase-orders/${po.id}`);
+      showToast('PO deleted', 'success');
       fetchData();
     } catch (err) {
       showToast(getUserMessage(err), 'error');
@@ -365,33 +426,66 @@ export default function PurchaseOrdersTab() {
   });
 
   const completedPos = pos.filter(po => po.status === 'received');
-  const activePos = pos.filter(po => po.status !== 'received');
-  const visiblePos = showCompleted ? completedPos : activePos;
-  const emptyTitle = showCompleted ? 'No completed purchase orders' : 'No active purchase orders';
-  const emptyMessage = showCompleted
+  const cancelledPos = pos.filter(po => po.status === 'cancelled');
+  const activePos = pos.filter(po => po.status !== 'received' && po.status !== 'cancelled');
+  const visiblePos = selectedView === 'completed'
+    ? completedPos
+    : selectedView === 'cancelled'
+      ? cancelledPos
+      : activePos;
+  const emptyTitle = selectedView === 'completed'
+    ? 'No completed purchase orders'
+    : selectedView === 'cancelled'
+      ? 'No cancelled purchase orders'
+      : 'No active purchase orders';
+  const emptyMessage = selectedView === 'completed'
     ? 'Received purchase orders will appear here for tracking.'
-    : 'Create a PO to restock your ingredients.';
+    : selectedView === 'cancelled'
+      ? 'Cancelled purchase orders will appear here after confirmation.'
+      : 'Create a PO to restock your ingredients.';
+  const pageTitle = selectedView === 'completed'
+    ? 'Completed Purchase Orders'
+    : selectedView === 'cancelled'
+      ? 'Cancelled Purchase Orders'
+      : 'Active Purchase Orders';
+  const viewButtons: { key: PurchaseOrderView; label: string; count: number; icon: React.ElementType }[] = [
+    { key: 'active', label: 'Active POs', count: activePos.length, icon: PackageCheck },
+    { key: 'completed', label: 'Completed POs', count: completedPos.length, icon: CheckCircle2 },
+    { key: 'cancelled', label: 'Cancelled POs', count: cancelledPos.length, icon: Ban },
+  ];
 
   return (
     <div className="flex flex-col h-full min-h-0 bg-transparent py-4">
       <div className="page-padding flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 bg-transparent shrink-0 pb-4">
         <h3 className="text-xl font-bold text-soot-900">
-          {showCompleted ? 'Completed Purchase Orders' : 'Purchase Orders'}
+          {pageTitle}
         </h3>
         <div className="flex flex-wrap items-center gap-2 sm:justify-end">
-          <button
-            type="button"
-            onClick={() => setShowCompleted(prev => !prev)}
-            className="flex items-center gap-2 border border-soot-200/70 bg-white/45 text-soot-700 px-4 py-2 rounded-lg font-medium hover:bg-white/70 touch-target transition-colors"
-          >
-            {showCompleted ? <PackageCheck className="w-4 h-4" /> : <History className="w-4 h-4" />}
-            {showCompleted ? 'Active POs' : 'Completed POs'}
-            {!showCompleted && completedPos.length > 0 && (
-              <span className="min-w-5 rounded-full bg-soot-900/10 px-1.5 text-xs font-bold text-soot-700">
-                {completedPos.length}
-              </span>
-            )}
-          </button>
+          {viewButtons.map(({ key, label, count, icon: Icon }) => {
+            const isSelected = selectedView === key;
+            return (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setSelectedView(key)}
+                className={`flex items-center gap-2 border px-4 py-2 rounded-lg font-medium touch-target transition-colors ${
+                  isSelected
+                    ? 'border-brand-500/70 bg-brand-700 text-white shadow-sm'
+                    : 'border-soot-200/70 bg-white/45 text-soot-700 hover:bg-white/70'
+                }`}
+              >
+                <Icon className="w-4 h-4" />
+                {label}
+                {count > 0 && (
+                  <span className={`min-w-5 rounded-full px-1.5 text-xs font-bold ${
+                    isSelected ? 'bg-white/20 text-white' : 'bg-soot-900/10 text-soot-700'
+                  }`}>
+                    {count}
+                  </span>
+                )}
+              </button>
+            );
+          })}
           <button
             onClick={handleOpenAdd}
             className="flex items-center gap-2 bg-brand-700 text-white px-4 py-2 rounded-lg font-medium hover:bg-brand-600 touch-target transition-colors"
@@ -419,13 +513,41 @@ export default function PurchaseOrdersTab() {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {visiblePos.map(po => {
               const supplier = suppliers.find(s => s.id === po.supplier_id);
-              const remainingCount = (po.items || []).filter(item => item.quantity_remaining > 0).length;
+              const orderedItems = po.items || [];
+              const remainingItems = orderedItems.filter(item => item.quantity_remaining > 0);
+              const hasReceivedStock = orderedItems.some(item => (item.quantity_received || 0) > 0);
+              const canEdit = po.status !== 'received' && po.status !== 'cancelled' && !hasReceivedStock;
+              const canDelete = po.status !== 'received' && !hasReceivedStock;
               return (
                  <div key={po.id} className="glass-card p-5 relative group flex flex-col justify-between hover:bg-white/40 transition-colors">
                     <div className="flex justify-between items-start mb-3">
-                      <div>
+                      <div className="min-w-0 pr-3">
                         <h4 className="text-lg font-bold font-mono text-soot-900 leading-tight">{po.po_number}</h4>
                         <p className="text-sm font-medium text-soot-600 mt-0.5">{supplier?.name || "Unknown Supplier"}</p>
+                        <div className="mt-2 space-y-1">
+                          {orderedItems.length > 0 ? (
+                            orderedItems.slice(0, 3).map(item => (
+                              <div
+                                key={item.id}
+                                className="flex max-w-full items-center justify-between gap-2 border-b border-soot-200/45 py-1 text-xs last:border-b-0"
+                              >
+                                <span className="min-w-0 truncate font-semibold text-soot-700">
+                                  {item.ingredient_name || 'Ingredient'}
+                                </span>
+                                <span className="shrink-0 tabular-nums font-bold text-brand-700">
+                                  {formatQuantity(item.quantity_ordered)}
+                                </span>
+                              </div>
+                            ))
+                          ) : (
+                            <p className="text-xs font-medium text-soot-400">No ordered items listed</p>
+                          )}
+                          {orderedItems.length > 3 && (
+                            <p className="text-xs font-semibold text-soot-400">
+                              +{orderedItems.length - 3} more item{orderedItems.length - 3 === 1 ? '' : 's'}
+                            </p>
+                          )}
+                        </div>
                       </div>
                       <span className={`text-xs font-bold uppercase tracking-wider px-2 py-1 rounded border ${getStatusColor(po.status)}`}>
                         {getStatusLabel(po.status)}
@@ -442,20 +564,67 @@ export default function PurchaseOrdersTab() {
                          <span>{new Date(po.created_at).toLocaleDateString()}</span>
                       </p>
                       {po.status === 'partially_received' && (
-                        <p className="text-sm text-soot-600 flex justify-between">
+                        <div className="text-sm text-soot-600 flex justify-between gap-3">
                            <span className="text-soot-400">Remaining:</span>
-                           <span className="font-semibold text-amber-700">{remainingCount} item{remainingCount === 1 ? '' : 's'}</span>
-                        </p>
+                           <div className="min-w-0 text-right font-semibold text-amber-700">
+                             {remainingItems.slice(0, 2).map(item => (
+                               <p key={item.id} className="truncate">
+                                 {formatQuantity(item.quantity_remaining)} {item.ingredient_name || 'ingredient'}
+                               </p>
+                             ))}
+                             {remainingItems.length > 2 && (
+                               <p className="text-xs text-amber-600">
+                                 +{remainingItems.length - 2} more ingredient{remainingItems.length - 2 === 1 ? '' : 's'}
+                               </p>
+                             )}
+                           </div>
+                        </div>
                       )}
                     </div>
                     
-                    <div className="pt-3 border-t border-soot-200/50 flex justify-end gap-2">
+                    <div className="pt-3 border-t border-soot-200/50 flex flex-wrap justify-end gap-2">
                       {po.status === 'cancelled' ? (
-                        <span className="flex items-center gap-1.5 text-sm font-medium text-red-600 px-3 py-1.5 rounded-md bg-red-50 border border-red-100/50">
-                          <Ban className="w-4 h-4" /> Cancelled
-                        </span>
+                        <>
+                          {canDelete && (
+                            <button
+                              type="button"
+                              onClick={() => handleDelete(po)}
+                              className="flex items-center gap-1.5 text-sm font-semibold text-red-600 hover:text-red-700 transition-colors hover:bg-red-50 px-2 py-1.5 rounded-md"
+                              title="Delete Purchase Order"
+                            >
+                              <Trash2 className="w-4 h-4" /> Delete
+                            </button>
+                          )}
+                          <span className="flex items-center gap-1.5 text-sm font-medium text-red-600 px-3 py-1.5 rounded-md bg-red-50 border border-red-100/50">
+                            <Ban className="w-4 h-4" /> Cancelled
+                          </span>
+                        </>
                       ) : po.status !== 'received' ? (
                         <>
+                          {canEdit && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => handleOpenEdit(po)}
+                                className="flex items-center gap-1.5 text-sm font-semibold text-soot-600 hover:text-soot-900 transition-colors hover:bg-white/60 px-2 py-1.5 rounded-md"
+                                title="Edit Purchase Order"
+                              >
+                                <Pencil className="w-4 h-4" /> Edit
+                              </button>
+                            </>
+                          )}
+                          {canDelete && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => handleDelete(po)}
+                                className="flex items-center gap-1.5 text-sm font-semibold text-red-600 hover:text-red-700 transition-colors hover:bg-red-50 px-2 py-1.5 rounded-md"
+                                title="Delete Purchase Order"
+                              >
+                                <Trash2 className="w-4 h-4" /> Delete
+                              </button>
+                            </>
+                          )}
                           <button 
                             onClick={() => handleCancel(po)}
                             className="flex items-center gap-1.5 text-sm font-semibold text-red-600 hover:text-red-700 transition-colors hover:bg-red-50 px-2 py-1.5 rounded-md"
@@ -487,8 +656,8 @@ export default function PurchaseOrdersTab() {
          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 glass-overlay overflow-y-auto">
            <div className="glass-floating w-full max-w-2xl my-auto flex flex-col max-h-[90vh] overflow-hidden">
              <div className="flex items-center justify-between px-6 py-4 border-b border-neutral-200/60 bg-white/25 shrink-0">
-                <h3 className="text-lg font-bold text-neutral-900">Create Purchase Order</h3>
-                <button onClick={() => setShowModal(false)} className="p-1.5 rounded-lg hover:bg-neutral-200 transition-colors">
+                <h3 className="text-lg font-bold text-neutral-900">{editingPo ? 'Edit Purchase Order' : 'Create Purchase Order'}</h3>
+                <button onClick={closeOrderModal} className="p-1.5 rounded-lg hover:bg-neutral-200 transition-colors">
                   <X className="w-5 h-5 text-neutral-500" />
                 </button>
              </div>
@@ -625,9 +794,9 @@ export default function PurchaseOrdersTab() {
                  <div className="flex-1 font-semibold text-lg text-soot-800 flex items-center">
                    Total: {formatCurrency(formItems.reduce((acc, it) => acc + (it.quantity_ordered * it.unit_price), 0))}
                  </div>
-                 <button type="button" onClick={() => setShowModal(false)} className="px-5 py-2.5 border border-neutral-200 rounded-lg text-sm font-medium text-neutral-600 hover:bg-neutral-50 transition-colors">Cancel</button>
+                 <button type="button" onClick={closeOrderModal} className="px-5 py-2.5 border border-neutral-200 rounded-lg text-sm font-medium text-neutral-600 hover:bg-neutral-50 transition-colors">Cancel</button>
                  <button type="submit" disabled={submitting} className="px-6 py-2.5 bg-brand-700 text-white rounded-lg text-sm font-medium hover:bg-brand-600 disabled:opacity-50 flex items-center gap-2 touch-target">
-                   {submitting && <Loader2 className="w-4 h-4 animate-spin" />} Save PO
+                   {submitting && <Loader2 className="w-4 h-4 animate-spin" />} {editingPo ? 'Update PO' : 'Save PO'}
                  </button>
                </div>
              </form>

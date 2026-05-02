@@ -156,6 +156,67 @@ def _po_item_to_dict(item: PurchaseOrderItem) -> dict[str, Any]:
     }
 
 
+def _normalize_purchase_order_payload(payload: PurchaseOrderCreate) -> tuple[dict[str, Any], list[dict[str, Any]]] | JSONResponse:
+    data = payload.model_dump()
+    items_data = data.pop("items", [])
+    supplier = db.session.get(Supplier, data.get("supplier_id"))
+    if not supplier or not supplier.is_active:
+        return JSONResponse(status_code=400, content={"message": "Select an active supplier"})
+
+    ingredient_ids = {int(item["ingredient_id"]) for item in items_data}
+    ingredients_by_id = {
+        ingredient.id: ingredient
+        for ingredient in Ingredient.query.filter(Ingredient.id.in_(ingredient_ids)).all()
+    } if ingredient_ids else {}
+    missing_ids = sorted(ingredient_id for ingredient_id in ingredient_ids if ingredient_id not in ingredients_by_id)
+    if missing_ids:
+        return JSONResponse(status_code=400, content={"message": f"Material not found: {missing_ids[0]}"})
+
+    unlinked_items = [
+        ingredient
+        for ingredient in ingredients_by_id.values()
+        if ingredient.preferred_supplier_id != supplier.id
+    ]
+    if unlinked_items:
+        return JSONResponse(
+            status_code=400,
+            content={"message": f"{unlinked_items[0].name} is not linked to {supplier.name}"},
+        )
+
+    normalized_items: list[dict[str, Any]] = []
+    for raw in items_data:
+        ing = db.session.get(Ingredient, int(raw.get("ingredient_id", 0)))
+        if ing is None:
+            return JSONResponse(status_code=404, content={"message": f"Ingredient {raw.get('ingredient_id')} not found"})
+        try:
+            pkg_override = raw.get("packaging_units_per_one")
+            qty_b, price_b, unit_enum = normalize_po_line_to_ingredient_base(
+                ing,
+                float(raw.get("quantity_ordered", 0)),
+                str(raw.get("unit", "")),
+                float(raw.get("unit_price", 0)),
+                packaging_units_per_one=float(pkg_override) if pkg_override is not None else None,
+            )
+        except ValueError as exc:
+            return JSONResponse(status_code=400, content={"message": str(exc)})
+        normalized_items.append(
+            {
+                "ingredient_id": int(raw["ingredient_id"]),
+                "quantity_ordered": qty_b,
+                "unit_price": price_b,
+                "unit": unit_enum,
+                "notes": raw.get("notes"),
+            }
+        )
+
+    data["total_amount"] = sum(float(i["quantity_ordered"]) * float(i["unit_price"]) for i in normalized_items)
+    return data, normalized_items
+
+
+def _purchase_order_has_received_stock(po: PurchaseOrder) -> bool:
+    return any(float(item.quantity_received or 0.0) > 0.000001 for item in po.items)
+
+
 def _apply_supplier_material_links(supplier: Supplier, linked_material_ids: list[int] | None) -> None:
     if linked_material_ids is None:
         return
@@ -667,69 +728,20 @@ def list_purchase_orders(current_user: User = Depends(get_current_user)):
         "expected_delivery": p.expected_delivery.isoformat() if p.expected_delivery else None,
         "received_date": p.received_date.isoformat() if p.received_date else None,
         "created_at": p.created_at.isoformat(),
+        "notes": p.notes,
         "items": [_po_item_to_dict(item) for item in p.items],
     } for p in pos]}
 
 @inventory_advanced_router.post("/purchase-orders")
 def create_purchase_order(payload: PurchaseOrderCreate, current_user: User = Depends(get_current_user)):
-    data = payload.model_dump()
-    items_data = data.pop('items', [])
-    supplier = db.session.get(Supplier, data.get("supplier_id"))
-    if not supplier or not supplier.is_active:
-        return JSONResponse(status_code=400, content={"message": "Select an active supplier"})
+    normalized = _normalize_purchase_order_payload(payload)
+    if isinstance(normalized, JSONResponse):
+        return normalized
+    data, normalized_items = normalized
 
-    ingredient_ids = {int(item["ingredient_id"]) for item in items_data}
-    ingredients_by_id = {
-        ingredient.id: ingredient
-        for ingredient in Ingredient.query.filter(Ingredient.id.in_(ingredient_ids)).all()
-    } if ingredient_ids else {}
-    missing_ids = sorted(ingredient_id for ingredient_id in ingredient_ids if ingredient_id not in ingredients_by_id)
-    if missing_ids:
-        return JSONResponse(status_code=400, content={"message": f"Material not found: {missing_ids[0]}"})
-
-    unlinked_items = [
-        ingredient
-        for ingredient in ingredients_by_id.values()
-        if ingredient.preferred_supplier_id != supplier.id
-    ]
-    if unlinked_items:
-        return JSONResponse(
-            status_code=400,
-            content={"message": f"{unlinked_items[0].name} is not linked to {supplier.name}"},
-        )
-    
     import uuid
     data['po_number'] = f"PO-{uuid.uuid4().hex[:6].upper()}"
     data['created_by'] = current_user.id
-
-    normalized_items: list[dict[str, Any]] = []
-    for raw in items_data:
-        ing = db.session.get(Ingredient, int(raw.get("ingredient_id", 0)))
-        if ing is None:
-            return JSONResponse(status_code=404, content={"message": f"Ingredient {raw.get('ingredient_id')} not found"})
-        try:
-            pkg_override = raw.get("packaging_units_per_one")
-            qty_b, price_b, unit_enum = normalize_po_line_to_ingredient_base(
-                ing,
-                float(raw.get("quantity_ordered", 0)),
-                str(raw.get("unit", "")),
-                float(raw.get("unit_price", 0)),
-                packaging_units_per_one=float(pkg_override) if pkg_override is not None else None,
-            )
-        except ValueError as exc:
-            return JSONResponse(status_code=400, content={"message": str(exc)})
-        normalized_items.append(
-            {
-                "ingredient_id": int(raw["ingredient_id"]),
-                "quantity_ordered": qty_b,
-                "unit_price": price_b,
-                "unit": unit_enum,
-                "notes": raw.get("notes"),
-            }
-        )
-
-    total = sum(float(i["quantity_ordered"]) * float(i["unit_price"]) for i in normalized_items)
-    data['total_amount'] = total
 
     po = PurchaseOrder(**data)
     db.session.add(po)
@@ -741,6 +753,53 @@ def create_purchase_order(payload: PurchaseOrderCreate, current_user: User = Dep
 
     db.session.commit()
     return {"id": po.id, "po_number": po.po_number, "message": "PO created"}
+
+
+@inventory_advanced_router.put("/purchase-orders/{po_id}")
+def update_purchase_order(po_id: int, payload: PurchaseOrderCreate, current_user: User = Depends(get_current_user)):
+    po = db.session.get(PurchaseOrder, po_id)
+    if not po:
+        return JSONResponse(status_code=404, content={"message": "PO not found"})
+    if _po_status_value(po) in {"received", "cancelled"} or _purchase_order_has_received_stock(po):
+        return JSONResponse(
+            status_code=400,
+            content={"message": "Only purchase orders with no received stock can be edited"},
+        )
+
+    normalized = _normalize_purchase_order_payload(payload)
+    if isinstance(normalized, JSONResponse):
+        return normalized
+    data, normalized_items = normalized
+
+    po.supplier_id = data["supplier_id"]
+    po.expected_delivery = data.get("expected_delivery")
+    po.notes = data.get("notes")
+    po.branch_id = data.get("branch_id") or po.branch_id
+    po.total_amount = data["total_amount"]
+
+    po.items.clear()
+    db.session.flush()
+    for item in normalized_items:
+        db.session.add(PurchaseOrderItem(**item, purchase_order_id=po.id))
+
+    db.session.commit()
+    return {"id": po.id, "po_number": po.po_number, "message": "PO updated"}
+
+
+@inventory_advanced_router.delete("/purchase-orders/{po_id}")
+def delete_purchase_order(po_id: int, current_user: User = Depends(get_current_user)):
+    po = db.session.get(PurchaseOrder, po_id)
+    if not po:
+        return JSONResponse(status_code=404, content={"message": "PO not found"})
+    if _po_status_value(po) == "received" or _purchase_order_has_received_stock(po):
+        return JSONResponse(
+            status_code=400,
+            content={"message": "Only purchase orders with no received stock can be deleted"},
+        )
+
+    db.session.delete(po)
+    db.session.commit()
+    return {"message": "PO deleted"}
 
 @inventory_advanced_router.post("/purchase-orders/{po_id}/receive")
 def receive_purchase_order(po_id: int, payload: PurchaseOrderReceive, current_user: User = Depends(get_current_user)):

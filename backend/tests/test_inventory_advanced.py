@@ -240,6 +240,99 @@ def test_purchase_order_partial_receive_keeps_remaining_open(client, app):
     assert po["items"][0]["quantity_remaining"] == 30
 
 
+def test_purchase_order_can_be_updated_before_receiving_stock(client, app):
+    h = _auth_headers(client, app)
+
+    supplier = client.post("/api/inventory-advanced/suppliers", headers=h, json={"name": "Edit PO Supplier"})
+    supplier_id = supplier.get_json()["id"]
+    ingredient = client.post("/api/inventory-advanced/ingredients", headers=h, json={
+        "name": "Edit PO Ketchup",
+        "sku": "ING-EDIT-PO-KETCHUP",
+        "unit": "kg",
+        "preferred_supplier_id": supplier_id,
+    })
+    ingredient_id = ingredient.get_json()["id"]
+
+    created = client.post("/api/inventory-advanced/purchase-orders", headers=h, json={
+        "supplier_id": supplier_id,
+        "items": [{"ingredient_id": ingredient_id, "quantity_ordered": 10, "unit_price": 250, "unit": "kg"}],
+    })
+    assert created.status_code == 200
+    po_id = created.get_json()["id"]
+
+    updated = client.put(f"/api/inventory-advanced/purchase-orders/{po_id}", headers=h, json={
+        "supplier_id": supplier_id,
+        "items": [{"ingredient_id": ingredient_id, "quantity_ordered": 15, "unit_price": 300, "unit": "kg"}],
+    })
+    assert updated.status_code == 200
+
+    listed = client.get("/api/inventory-advanced/purchase-orders", headers=h).get_json()["purchase_orders"]
+    po = next(p for p in listed if p["id"] == po_id)
+    assert po["total_amount"] == 4500
+    assert po["items"][0]["quantity_ordered"] == 15
+    assert po["items"][0]["quantity_received"] == 0
+    assert po["items"][0]["unit_price"] == 300
+
+
+def test_purchase_order_delete_removes_unreceived_order(client, app):
+    h = _auth_headers(client, app)
+
+    supplier = client.post("/api/inventory-advanced/suppliers", headers=h, json={"name": "Delete PO Supplier"})
+    supplier_id = supplier.get_json()["id"]
+    ingredient = client.post("/api/inventory-advanced/ingredients", headers=h, json={
+        "name": "Delete PO Mayo",
+        "sku": "ING-DELETE-PO-MAYO",
+        "unit": "kg",
+        "preferred_supplier_id": supplier_id,
+    })
+    ingredient_id = ingredient.get_json()["id"]
+    created = client.post("/api/inventory-advanced/purchase-orders", headers=h, json={
+        "supplier_id": supplier_id,
+        "items": [{"ingredient_id": ingredient_id, "quantity_ordered": 5, "unit_price": 100, "unit": "kg"}],
+    })
+    po_id = created.get_json()["id"]
+
+    deleted = client.delete(f"/api/inventory-advanced/purchase-orders/{po_id}", headers=h)
+    assert deleted.status_code == 200
+
+    listed = client.get("/api/inventory-advanced/purchase-orders", headers=h).get_json()["purchase_orders"]
+    assert all(po["id"] != po_id for po in listed)
+
+
+def test_purchase_order_edit_and_delete_reject_received_stock(client, app):
+    h = _auth_headers(client, app)
+
+    supplier = client.post("/api/inventory-advanced/suppliers", headers=h, json={"name": "Locked PO Supplier"})
+    supplier_id = supplier.get_json()["id"]
+    ingredient = client.post("/api/inventory-advanced/ingredients", headers=h, json={
+        "name": "Locked PO Chicken",
+        "sku": "ING-LOCKED-PO-CHICKEN",
+        "unit": "kg",
+        "preferred_supplier_id": supplier_id,
+    })
+    ingredient_id = ingredient.get_json()["id"]
+    created = client.post("/api/inventory-advanced/purchase-orders", headers=h, json={
+        "supplier_id": supplier_id,
+        "items": [{"ingredient_id": ingredient_id, "quantity_ordered": 8, "unit_price": 500, "unit": "kg"}],
+    })
+    po_id = created.get_json()["id"]
+    received = client.post(
+        f"/api/inventory-advanced/purchase-orders/{po_id}/receive",
+        headers=h,
+        json={"items": [{"ingredient_id": ingredient_id, "quantity_received": 2}]},
+    )
+    assert received.status_code == 200
+
+    edit = client.put(f"/api/inventory-advanced/purchase-orders/{po_id}", headers=h, json={
+        "supplier_id": supplier_id,
+        "items": [{"ingredient_id": ingredient_id, "quantity_ordered": 10, "unit_price": 500, "unit": "kg"}],
+    })
+    delete = client.delete(f"/api/inventory-advanced/purchase-orders/{po_id}", headers=h)
+
+    assert edit.status_code == 400
+    assert delete.status_code == 400
+
+
 def test_purchase_order_converts_grams_to_kg_for_receive(client, app):
     h = _auth_headers(client, app)
     r1 = client.post("/api/inventory-advanced/suppliers", headers=h, json={"name": "Spice Supplier"})
