@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useLayoutEffect, useMemo } from 'react';
 import { Plus, X, Loader2, Trash2, ArrowRight, Utensils, PackageSearch } from 'lucide-react';
 import { get, post, del, getUserMessage } from '../../api';
 import SearchableSelect from '../SearchableSelect';
 import { showToast } from '../Toast';
 import { formatCurrency } from '../../utils/formatCurrency';
+import { formatBaseQuantityGlobal, getSelectableInputUnits } from '../../utils/unitConversion';
 
 type Product = {
   id: number;
@@ -21,6 +22,14 @@ type Ingredient = {
   average_cost: number;
   purchase_unit?: string;
   conversion_factor?: number;
+  unit_conversions?: Record<string, number>;
+};
+
+type PreparedItemComponent = {
+  id: number;
+  ingredient_id: number;
+  quantity: number;
+  unit: string;
 };
 
 type PreparedItem = {
@@ -29,6 +38,7 @@ type PreparedItem = {
   kind: 'sauce' | 'marination';
   unit: string;
   average_cost: number;
+  components?: PreparedItemComponent[];
 };
 
 type RecipeItem = {
@@ -59,6 +69,19 @@ type RecipeExtraCost = {
   variant_key?: string;
 };
 
+type BomSectionModel = {
+  scopeKey: string;
+  label: string;
+  recipeRows: RecipeItem[];
+  preparedRows: RecipePreparedItem[];
+  extraRows: RecipeExtraCost[];
+  sectionCost: number;
+};
+
+function vkNorm(vk: string | undefined): string {
+  return (vk || '').trim();
+}
+
 export default function RecipesTab() {
   const [products, setProducts] = useState<Product[]>([]);
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
@@ -79,23 +102,108 @@ export default function RecipesTab() {
   const [formIngredientId, setFormIngredientId] = useState('');
   const [formPreparedItemId, setFormPreparedItemId] = useState('');
   const [formQuantity, setFormQuantity] = useState('');
-  const [formUsePurchaseUnit, setFormUsePurchaseUnit] = useState(false);
+  const [formInputUnit, setFormInputUnit] = useState('');
   const [formNotes, setFormNotes] = useState('');
+  const [scrollToRowId, setScrollToRowId] = useState<string | null>(null);
+  const rowRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
+  const addFormRef = useRef<HTMLDivElement | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [showExtraCostForm, setShowExtraCostForm] = useState(false);
   const [extraCostName, setExtraCostName] = useState('');
   const [extraCostAmount, setExtraCostAmount] = useState('');
 
+  const selectedProduct = useMemo(
+    () => (selectedProductId != null ? products.find((p) => p.id === selectedProductId) : undefined),
+    [products, selectedProductId]
+  );
+
+  const bomSections = useMemo((): BomSectionModel[] => {
+    if (!selectedProduct) return [];
+    const orderedKeys: string[] = [''];
+    const variantNames = (selectedProduct.variants || [])
+      .map((v) => (v?.name || '').trim())
+      .filter(Boolean);
+    for (const n of variantNames) {
+      if (!orderedKeys.includes(n)) orderedKeys.push(n);
+    }
+    const fromData = new Set<string>();
+    recipeItems.forEach((ri) => fromData.add(vkNorm(ri.variant_key)));
+    recipePreparedItems.forEach((ri) => fromData.add(vkNorm(ri.variant_key)));
+    recipeExtraCosts.forEach((ec) => fromData.add(vkNorm(ec.variant_key)));
+    fromData.forEach((k) => {
+      if (!orderedKeys.includes(k)) orderedKeys.push(k);
+    });
+
+    return orderedKeys.map((scopeKey) => {
+      const recipeRows = recipeItems.filter((ri) => vkNorm(ri.variant_key) === scopeKey);
+      const preparedRows = recipePreparedItems.filter((ri) => vkNorm(ri.variant_key) === scopeKey);
+      const extraRows = recipeExtraCosts.filter((ec) => vkNorm(ec.variant_key) === scopeKey);
+      let sectionCost = 0;
+      recipeRows.forEach((ri) => {
+        const ing = ingredients.find((i) => i.id === ri.ingredient_id);
+        if (ing) sectionCost += (ing.average_cost || 0) * ri.quantity;
+      });
+      preparedRows.forEach((ri) => {
+        const p = preparedItems.find((i) => i.id === ri.prepared_item_id);
+        if (p) sectionCost += (p.average_cost || 0) * ri.quantity;
+      });
+      extraRows.forEach((ec) => {
+        sectionCost += Number(ec.amount || 0);
+      });
+      const label = scopeKey === '' ? 'Base recipe' : `Variant: ${scopeKey}`;
+      return { scopeKey, label, recipeRows, preparedRows, extraRows, sectionCost };
+    });
+  }, [selectedProduct, recipeItems, recipePreparedItems, recipeExtraCosts, ingredients, preparedItems]);
+
+  const activeBomSection = useMemo((): BomSectionModel => {
+    const key = vkNorm(recipeVariantScope);
+    const found = bomSections.find((s) => s.scopeKey === key);
+    if (found) return found;
+    return {
+      scopeKey: key,
+      label: key === '' ? 'Base recipe' : `Variant: ${key}`,
+      recipeRows: [],
+      preparedRows: [],
+      extraRows: [],
+      sectionCost: 0,
+    };
+  }, [bomSections, recipeVariantScope]);
+
   useEffect(() => {
     fetchBaseData();
   }, []);
+
+  useEffect(() => {
+    if (formMaterialType === 'ingredient' && formIngredientId) {
+      const ing = ingredients.find((i) => i.id.toString() === formIngredientId);
+      if (ing) {
+        const opts = getSelectableInputUnits(ing);
+        setFormInputUnit(opts[0] || ing.unit);
+      }
+    } else if (formMaterialType === 'prepared' && formPreparedItemId) {
+      const p = preparedItems.find((i) => i.id.toString() === formPreparedItemId);
+      if (p) {
+        const opts = getSelectableInputUnits(p.unit);
+        setFormInputUnit(opts[0] || p.unit);
+      }
+    }
+  }, [formMaterialType, formIngredientId, formPreparedItemId, ingredients, preparedItems]);
+
+  useLayoutEffect(() => {
+    if (!scrollToRowId) return;
+    const el = rowRefs.current.get(scrollToRowId);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+    setScrollToRowId(null);
+  }, [scrollToRowId, recipeItems, recipePreparedItems, recipeExtraCosts]);
 
   const fetchBaseData = async () => {
     setLoadingInitial(true);
     try {
       // Need all menu items and all ingredients
       const [prodRes, ingRes, preparedRes] = await Promise.all([
-        get<{ products: Product[] }>('/menu-items/'),
+        get<{ products: Product[] }>('/menu-items/', { forceRefresh: true, cacheTtlMs: 0 }),
         get<{ ingredients: Ingredient[] }>('/inventory-advanced/ingredients'),
         get<{ prepared_items: PreparedItem[] }>('/inventory-advanced/prepared-items')
       ]);
@@ -109,14 +217,13 @@ export default function RecipesTab() {
     }
   };
 
-  const loadRecipe = async (productId: number) => {
-    setSelectedProductId(productId);
-    setRecipeVariantScope('');
+  const refreshRecipeData = async (productId: number) => {
     setLoadingRecipe(true);
-    setShowAddForm(false);
-    setShowExtraCostForm(false);
     try {
-      const res = await get<{ recipe_items: RecipeItem[]; recipe_prepared_items: RecipePreparedItem[]; recipe_extra_costs?: RecipeExtraCost[] }>(`/inventory-advanced/recipes/${productId}`);
+      const res = await get<{ recipe_items: RecipeItem[]; recipe_prepared_items: RecipePreparedItem[]; recipe_extra_costs?: RecipeExtraCost[] }>(
+        `/inventory-advanced/recipes/${productId}`,
+        { forceRefresh: true, cacheTtlMs: 0 }
+      );
       setRecipeItems(res.recipe_items || []);
       setRecipePreparedItems(res.recipe_prepared_items || []);
       setRecipeExtraCosts(res.recipe_extra_costs || []);
@@ -125,6 +232,18 @@ export default function RecipesTab() {
     } finally {
       setLoadingRecipe(false);
     }
+  };
+
+  /** Call when user picks a menu item. Resets recipe scope only when switching products. */
+  const selectProductForRecipe = (productId: number) => {
+    const switchingProduct = selectedProductId !== productId;
+    setSelectedProductId(productId);
+    if (switchingProduct) {
+      setRecipeVariantScope('');
+    }
+    setShowAddForm(false);
+    setShowExtraCostForm(false);
+    void refreshRecipeData(productId);
   };
 
   const handleAddSubmit = async (e: React.FormEvent) => {
@@ -144,40 +263,50 @@ export default function RecipesTab() {
 
     setSubmitting(true);
     try {
+      let newRowKey: string | null = null;
       if (formMaterialType === 'ingredient' && ing) {
-        let finalQty = qty;
-        if (formUsePurchaseUnit && ing.conversion_factor) {
-          finalQty = qty * ing.conversion_factor;
-        }
+        const opts = getSelectableInputUnits(ing);
+        const inputU =
+          formInputUnit && opts.includes(formInputUnit) ? formInputUnit : opts[0] || ing.unit;
 
-        await post('/inventory-advanced/recipes', {
+        const res = await post<{ id: number }>('/inventory-advanced/recipes', {
           product_id: selectedProductId,
           ingredient_id: parseInt(formIngredientId, 10),
-          quantity: finalQty,
-          unit: ing.unit,
+          quantity: qty,
+          unit: inputU,
           notes: formNotes || undefined,
           variant_key: recipeVariantScope || '',
         });
+        if (res && typeof res === 'object' && 'id' in res) {
+          newRowKey = `ing-${(res as { id: number }).id}`;
+        }
       } else if (prepared) {
-        await post('/inventory-advanced/recipes/prepared-items', {
+        const opts = getSelectableInputUnits(prepared.unit);
+        const inputU =
+          formInputUnit && opts.includes(formInputUnit) ? formInputUnit : opts[0] || prepared.unit;
+        const res = await post<{ id: number }>('/inventory-advanced/recipes/prepared-items', {
           product_id: selectedProductId,
           prepared_item_id: parseInt(formPreparedItemId, 10),
           quantity: qty,
-          unit: prepared.unit,
+          unit: inputU,
           notes: formNotes || undefined,
           variant_key: recipeVariantScope || '',
         });
+        if (res && typeof res === 'object' && 'id' in res) {
+          newRowKey = `prep-${(res as { id: number }).id}`;
+        }
       }
       showToast('Material added to recipe', 'success');
-      
-      // Reset and reload
+
       setFormIngredientId('');
       setFormPreparedItemId('');
       setFormQuantity('');
-      setFormUsePurchaseUnit(false);
       setFormNotes('');
       setShowAddForm(false);
-      loadRecipe(selectedProductId);
+      if (selectedProductId) {
+        await refreshRecipeData(selectedProductId);
+        if (newRowKey) setScrollToRowId(newRowKey);
+      }
     } catch (e) {
       showToast(getUserMessage(e), 'error');
     } finally {
@@ -189,7 +318,7 @@ export default function RecipesTab() {
     try {
       await del(materialType === 'ingredient' ? `/inventory-advanced/recipes/${itemId}` : `/inventory-advanced/recipes/prepared-items/${itemId}`);
       showToast('Removed from recipe', 'success');
-      if (selectedProductId) loadRecipe(selectedProductId);
+      if (selectedProductId) void refreshRecipeData(selectedProductId);
     } catch (e) {
        showToast(getUserMessage(e), 'error');
     }
@@ -203,41 +332,8 @@ export default function RecipesTab() {
     );
   }
 
-  const selectedProduct = products.find(p => p.id === selectedProductId);
-
-  const displayedRecipeItems = recipeItems.filter(ri => {
-    const vk = (ri.variant_key || '').trim();
-    if (!recipeVariantScope) return vk === '';
-    return vk === recipeVariantScope;
-  });
-  const displayedPreparedRecipeItems = recipePreparedItems.filter(ri => {
-    const vk = (ri.variant_key || '').trim();
-    if (!recipeVariantScope) return vk === '';
-    return vk === recipeVariantScope;
-  });
-  const displayedExtraCosts = recipeExtraCosts.filter(ec => {
-    const vk = (ec.variant_key || '').trim();
-    if (!recipeVariantScope) return vk === '';
-    return vk === recipeVariantScope;
-  });
-
-  // Calculate recipe cost for the selected scope only
-  let totalCost = 0;
-  displayedRecipeItems.forEach(ri => {
-    const ing = ingredients.find(i => i.id === ri.ingredient_id);
-    if (ing) {
-      totalCost += (ing.average_cost * ri.quantity);
-    }
-  });
-  displayedPreparedRecipeItems.forEach(ri => {
-    const prepared = preparedItems.find(i => i.id === ri.prepared_item_id);
-    if (prepared) {
-      totalCost += (prepared.average_cost * ri.quantity);
-    }
-  });
-  displayedExtraCosts.forEach((ec) => {
-    totalCost += Number(ec.amount || 0);
-  });
+  const formIngredientResolved = ingredients.find(i => i.id.toString() === formIngredientId);
+  const formPreparedResolved = preparedItems.find(i => i.id.toString() === formPreparedItemId);
 
   const handleAddExtraCost = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -264,7 +360,7 @@ export default function RecipesTab() {
       setExtraCostName('');
       setExtraCostAmount('');
       setShowExtraCostForm(false);
-      await loadRecipe(selectedProductId);
+      await refreshRecipeData(selectedProductId);
     } catch (e) {
       showToast(getUserMessage(e), 'error');
     } finally {
@@ -276,27 +372,49 @@ export default function RecipesTab() {
     try {
       await del(`/inventory-advanced/recipes/extra-costs/${extraCostId}`);
       showToast('Extra cost removed', 'success');
-      if (selectedProductId) await loadRecipe(selectedProductId);
+      if (selectedProductId) await refreshRecipeData(selectedProductId);
     } catch (e) {
       showToast(getUserMessage(e), 'error');
     }
   };
 
+  const scopeOptions =
+    selectedProduct && selectedProduct.variants && selectedProduct.variants.length > 0
+      ? [
+          {
+            value: '',
+            label: 'Base (default — used when no variant-specific BOM exists)',
+            searchText: 'base default',
+          },
+          ...selectedProduct.variants.map((variant) => ({
+            value: variant?.name || '',
+            label: `Variant: ${variant?.name || 'Select Variant'}`,
+            searchText: variant?.name || '',
+          })),
+        ]
+      : [{ value: '', label: 'Base recipe', searchText: 'base' }];
+
+  const hasAnyBomLines =
+    recipeItems.length > 0 || recipePreparedItems.length > 0 || recipeExtraCosts.length > 0;
+  const viewRowCount =
+    activeBomSection.recipeRows.length +
+    activeBomSection.preparedRows.length +
+    activeBomSection.extraRows.length;
+
   return (
-    <div className="flex flex-col lg:flex-row h-full min-h-0 bg-transparent py-4 gap-4 px-4 lg:px-6">
-      
+    <div className="grid grid-cols-1 lg:grid-cols-[minmax(260px,30%)_minmax(0,1fr)] gap-4 h-full min-h-0 bg-transparent py-4 px-4 lg:px-6">
       {/* Product List Sidebar */}
-      <div className="w-full lg:w-1/3 flex flex-col glass-card h-[40vh] lg:h-full overflow-hidden shrink-0">
-        <div className="p-4 border-b border-white/20 bg-white/10 shrink-0">
+      <div className="flex flex-col glass-card min-h-[36vh] lg:min-h-0 lg:h-full overflow-hidden shrink-0 rounded-xl border border-white/25">
+        <div className="px-3 py-2 border-b border-white/20 bg-white/10 shrink-0">
           <h3 className="font-bold text-soot-900">Select Menu Item</h3>
           <p className="text-xs text-soot-500 mt-0.5">Choose an item to manage its Bill of Materials</p>
         </div>
-        <div className="overflow-y-auto flex-1 p-2 space-y-1">
+        <div className="overflow-y-auto flex-1 p-1.5 space-y-0.5">
           {products.map(p => (
             <button
               key={p.id}
-              onClick={() => loadRecipe(p.id)}
-              className={`w-full text-left px-3 py-2.5 rounded-lg transition-colors flex items-center justify-between group ${
+              onClick={() => selectProductForRecipe(p.id)}
+              className={`w-full text-left px-2.5 py-2 rounded-lg transition-colors flex items-center justify-between group ${
                 selectedProductId === p.id 
                   ? 'bg-brand-600 text-white shadow-md' 
                   : 'hover:bg-white/40 text-soot-700'
@@ -320,188 +438,282 @@ export default function RecipesTab() {
       </div>
 
       {/* Recipe Builder Main Area */}
-      <div className="w-full lg:w-2/3 flex flex-col h-auto lg:h-full overflow-hidden">
+      <div className="flex flex-col min-h-0 min-w-0 overflow-hidden lg:h-full">
         {!selectedProduct ? (
-          <div className="glass-card h-full flex flex-col items-center justify-center p-8 text-center text-soot-400">
+          <div className="glass-card h-full flex flex-col items-center justify-center p-8 text-center text-soot-400 rounded-xl border border-white/25">
             <Utensils className="w-12 h-12 mb-4 text-soot-300" />
             <p className="text-lg font-medium text-soot-600">No Item Selected</p>
             <p className="text-sm mt-1">Select a menu item from the list to view or build its recipe.</p>
           </div>
         ) : (
-          <div className="glass-card flex-1 flex flex-col min-h-0 relative">
-            
-            {/* Header */}
-            <div className="p-5 border-b border-white/20 bg-white/20 shrink-0 flex flex-wrap justify-between items-start gap-4">
-              <div>
-                <h2 className="text-xl font-bold text-soot-900">{selectedProduct.title}</h2>
-                <div className="flex gap-3 text-sm mt-1 flex-wrap">
-                  <span className="text-soot-500 font-mono">{selectedProduct.sku}</span>
+          <div className="glass-card flex-1 flex flex-col min-h-0 overflow-hidden relative rounded-xl border border-white/25">
+            {/* Sticky header */}
+            <header className="sticky top-0 z-10 shrink-0 border-b border-soot-200/70 bg-white/95 backdrop-blur-md px-3 py-2 md:px-4 md:py-3 flex flex-wrap gap-3 justify-between items-start shadow-sm">
+              <div className="min-w-0 flex-1">
+                <h2 className="text-lg md:text-xl font-bold text-soot-900 truncate" title={selectedProduct.title}>
+                  {selectedProduct.title}
+                </h2>
+                <div className="flex gap-2 text-xs md:text-sm mt-0.5 flex-wrap text-soot-600">
+                  <span className="font-mono text-soot-500">{selectedProduct.sku}</span>
                   <span className="text-soot-300">|</span>
-                  <span className="text-soot-600 font-medium">Sell Price: {formatCurrency(selectedProduct.sale_price ?? selectedProduct.base_price)}</span>
+                  <span>Sell {formatCurrency(selectedProduct.sale_price ?? selectedProduct.base_price)}</span>
                 </div>
-                {(selectedProduct.variants && selectedProduct.variants.length > 0) && (
-                  <div className="mt-3 max-w-full">
-                    <label className="block text-xs font-semibold text-soot-600 uppercase tracking-wider mb-1">
-                      Recipe scope
-                    </label>
-                    <div className="w-full sm:max-w-md">
-                      <SearchableSelect
-                        value={recipeVariantScope}
-                        onChange={setRecipeVariantScope}
-                        placeholder="Base (default — used when no variant-specific BOM exists)"
-                        searchPlaceholder="Search recipe scopes…"
-                        options={selectedProduct.variants.map((variant) => ({
-                          value: variant?.name || '',
-                          label: `Variant: ${variant?.name || 'Select Variant'}`,
-                          searchText: variant?.name || '',
-                        }))}
-                        className="glass-card border-soot-200/80 px-3 py-2"
-                      />
-                    </div>
-                    <p className="text-xs text-soot-500 mt-1">
-                      Add ingredients for the base recipe, or pick a variant to override the BOM for that option only.
-                    </p>
-                  </div>
-                )}
+                <div className="mt-2 max-w-full md:max-w-md">
+                  <label className="block text-[10px] font-semibold text-soot-500 uppercase tracking-wider mb-0.5">
+                    BOM scope (view &amp; add lines)
+                  </label>
+                  <SearchableSelect
+                    value={recipeVariantScope}
+                    onChange={setRecipeVariantScope}
+                    placeholder="Scope"
+                    searchPlaceholder="Search scopes…"
+                    options={scopeOptions}
+                    className="glass-card border-soot-200/80 px-2 py-1.5 text-sm"
+                  />
+                  <p className="text-[10px] text-soot-500 mt-0.5">
+                    Only this variant/base BOM is shown. New lines use the same scope.
+                  </p>
+                </div>
               </div>
-              
-              <div className="glass-card px-4 py-2 bg-white/40 border-brand-200/50 flex flex-col items-end">
-                <span className="text-xs uppercase font-bold text-soot-500 tracking-wider">Est. Material Cost</span>
-                <span className="text-lg font-bold text-brand-700 leading-none mt-1">
-                  {formatCurrency(totalCost)}
+              <div className="flex flex-col items-end gap-0.5 px-2 py-1.5 rounded-lg border border-brand-200/60 bg-white/80 shrink-0">
+                <span className="text-[10px] uppercase font-bold text-soot-500 tracking-wider">Est. material (this scope)</span>
+                <span className="text-lg font-bold text-brand-700 tabular-nums leading-none">
+                  {formatCurrency(activeBomSection.sectionCost)}
                 </span>
                 {(selectedProduct.sale_price ?? selectedProduct.base_price) > 0 && (
-                  <span className="text-xs text-brand-600/80 font-medium mt-1">
-                    Margin: {Math.max(0, (((selectedProduct.sale_price ?? selectedProduct.base_price) - totalCost) / (selectedProduct.sale_price ?? selectedProduct.base_price)) * 100).toFixed(1)}%
+                  <span className="text-[10px] text-brand-600/90 font-medium">
+                    Margin{' '}
+                    {Math.max(
+                      0,
+                      (((selectedProduct.sale_price ?? selectedProduct.base_price) - activeBomSection.sectionCost) /
+                        (selectedProduct.sale_price ?? selectedProduct.base_price)) *
+                        100
+                    ).toFixed(1)}
+                    %
                   </span>
                 )}
               </div>
-            </div>
+            </header>
 
-            {/* List */}
-            <div className="flex-1 overflow-y-auto p-5">
+            {/* Scrollable BOM */}
+            <div className="flex-1 min-h-0 overflow-y-auto px-2 py-2">
               {loadingRecipe ? (
-                 <div className="flex items-center justify-center py-10 text-soot-400 gap-2">
-                   <Loader2 className="w-5 h-5 animate-spin" /> Loading recipe...
-                 </div>
-              ) : displayedRecipeItems.length === 0 && displayedPreparedRecipeItems.length === 0 && displayedExtraCosts.length === 0 ? (
-                 <div className="text-center py-10 text-soot-400">
-                   <div className="w-12 h-12 rounded-full bg-soot-100 flex items-center justify-center mx-auto mb-3">
-                     <PackageSearch className="w-6 h-6 text-soot-300" />
-                   </div>
-                   <p className="font-medium text-soot-600">No ingredients mapped</p>
-                   <p className="text-sm mt-1">Add raw materials to track inventory when this item is sold.</p>
-                 </div>
+                <div className="flex items-center justify-center py-10 text-soot-400 gap-2">
+                  <Loader2 className="w-5 h-5 animate-spin" /> Loading recipe...
+                </div>
+              ) : !hasAnyBomLines ? (
+                <div className="text-center py-10 text-soot-400">
+                  <div className="w-12 h-12 rounded-full bg-soot-100 flex items-center justify-center mx-auto mb-3">
+                    <PackageSearch className="w-6 h-6 text-soot-300" />
+                  </div>
+                  <p className="font-medium text-soot-600">No ingredients mapped</p>
+                  <p className="text-sm mt-1">Add raw materials to track inventory when this item is sold.</p>
+                </div>
               ) : (
-                <div className="space-y-3">
-                  {displayedRecipeItems.map(ri => {
-                    const ing = ingredients.find(i => i.id === ri.ingredient_id);
-                    if (!ing) return null;
-                    return (
-                      <div key={ri.id} className="flex items-center justify-between p-3 rounded-lg border border-soot-200 bg-white/30 hover:bg-white/50 transition-colors">
-                        <div>
-                          <p className="font-bold text-soot-900">{ing.name}</p>
-                          <p className="text-xs text-soot-500 mt-0.5">
-                            Cost: {formatCurrency(ing.average_cost)} / {ing.unit}
-                            {(ri.variant_key || '').trim() ? (
-                              <span className="ml-2 text-brand-700 font-semibold">({(ri.variant_key || '').trim()})</span>
-                            ) : null}
-                          </p>
-                        </div>
-                        <div className="flex items-center gap-6">
-                          <div className="text-right">
-                            <span className="font-bold text-lg text-soot-800">{ri.quantity}</span>
-                            <span className="text-sm text-soot-500 ml-1 font-medium">{ri.unit}</span>
-                          </div>
-                          <button 
-                            onClick={() => handleDelete(ri.id)}
-                            className="p-1.5 text-soot-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors"
-                            title="Remove ingredient"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                  {displayedPreparedRecipeItems.map(ri => {
-                    const prepared = preparedItems.find(i => i.id === ri.prepared_item_id);
-                    if (!prepared) return null;
-                    return (
-                      <div key={`prepared-${ri.id}`} className="flex items-center justify-between p-3 rounded-lg border border-brand-200 bg-brand-50/40 hover:bg-brand-50/70 transition-colors">
-                        <div>
-                          <p className="font-bold text-soot-900">{prepared.name}</p>
-                          <p className="text-xs text-soot-500 mt-0.5">
-                            {prepared.kind === 'marination' ? 'Marination' : 'Sauce'} cost: {formatCurrency(prepared.average_cost)} / {prepared.unit}
-                            {(ri.variant_key || '').trim() ? (
-                              <span className="ml-2 text-brand-700 font-semibold">({(ri.variant_key || '').trim()})</span>
-                            ) : null}
-                          </p>
-                        </div>
-                        <div className="flex items-center gap-6">
-                          <div className="text-right">
-                            <span className="font-bold text-lg text-soot-800">{ri.quantity}</span>
-                            <span className="text-sm text-soot-500 ml-1 font-medium">{ri.unit}</span>
-                          </div>
-                          <button 
-                            onClick={() => handleDelete(ri.id, 'prepared')}
-                            className="p-1.5 text-soot-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors"
-                            title="Remove sauce/marination"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                  {displayedExtraCosts.map((ec) => (
-                    <div key={`extra-${ec.id}`} className="flex items-center justify-between p-3 rounded-lg border border-orange-200 bg-orange-50/50 hover:bg-orange-50/80 transition-colors">
-                      <div>
-                        <p className="font-bold text-soot-900">{ec.name}</p>
-                        <p className="text-xs text-soot-500 mt-0.5">
-                          Operational cost
-                          {(ec.variant_key || '').trim() ? (
-                            <span className="ml-2 text-brand-700 font-semibold">({(ec.variant_key || '').trim()})</span>
-                          ) : null}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-6">
-                        <div className="text-right">
-                          <span className="font-bold text-lg text-soot-800">{formatCurrency(ec.amount)}</span>
-                        </div>
-                        <button
-                          onClick={() => handleDeleteExtraCost(ec.id)}
-                          className="p-1.5 text-soot-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors"
-                          title="Remove extra cost"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
+                <div className="rounded-lg border border-soot-200/80 bg-white/40 overflow-hidden">
+                  <div className="px-2 py-1 md:px-2 flex flex-wrap justify-between gap-2 text-xs font-semibold text-soot-800 bg-soot-50/90 border-b border-soot-200/60">
+                    <span>{activeBomSection.label}</span>
+                    <span className="text-[11px] font-normal text-soot-600 tabular-nums">
+                      {formatCurrency(activeBomSection.sectionCost)} · {viewRowCount} line{viewRowCount === 1 ? '' : 's'}
+                    </span>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-[11px] md:text-xs border-collapse min-w-[480px]">
+                      <thead className="sticky top-0 z-[1] bg-white/95 backdrop-blur-sm shadow-sm">
+                        <tr className="text-left uppercase tracking-wide text-soot-500 border-b border-soot-200/80">
+                          <th className="py-1 px-2 font-semibold">Name</th>
+                          <th className="py-1 px-2 font-semibold">Qty</th>
+                          <th className="py-1 px-2 font-semibold text-right">Unit cost</th>
+                          <th className="py-1 px-2 font-semibold text-right text-brand-800">Total</th>
+                          <th className="py-1 px-1 w-9" aria-label="Actions" />
+                        </tr>
+                      </thead>
+                      <tbody>
+                              {activeBomSection.recipeRows.map((ri) => {
+                                const ing = ingredients.find((i) => i.id === ri.ingredient_id);
+                                if (!ing) return null;
+                                const lineCost = (ing.average_cost || 0) * ri.quantity;
+                                const unitLabel = ri.unit || ing.unit;
+                                const tip = `${ing.name} — ${formatBaseQuantityGlobal(ri.quantity, unitLabel, { ingredient: ing })} @ ${formatCurrency(ing.average_cost)}/${ing.unit}`;
+                                return (
+                                  <tr
+                                    key={ri.id}
+                                    ref={(el) => {
+                                      rowRefs.current.set(`ing-${ri.id}`, el);
+                                    }}
+                                    className="border-b border-soot-100/80 hover:bg-white/60"
+                                  >
+                                    <td className="py-1 px-2 align-middle">
+                                      <div className="font-semibold text-soot-900 truncate max-w-[14rem] md:max-w-none leading-tight" title={tip}>
+                                        {ing.name}
+                                      </div>
+                                    </td>
+                                    <td className="py-1 px-2 align-middle font-semibold text-soot-900 tabular-nums whitespace-nowrap text-[11px]" title={tip}>
+                                      {formatBaseQuantityGlobal(ri.quantity, unitLabel, { ingredient: ing })}
+                                    </td>
+                                    <td className="py-1 px-2 align-middle text-right text-soot-600 tabular-nums whitespace-nowrap text-[11px]">
+                                      {formatCurrency(ing.average_cost)}/{ing.unit}
+                                    </td>
+                                    <td className="py-1 px-2 align-middle text-right font-semibold text-brand-800 tabular-nums whitespace-nowrap text-[11px]">
+                                      {formatCurrency(lineCost)}
+                                    </td>
+                                    <td className="py-1 px-1 align-middle text-center">
+                                      <button
+                                        type="button"
+                                        onClick={() => handleDelete(ri.id)}
+                                        className="p-1 text-soot-400 hover:text-red-600 rounded-md"
+                                        title="Remove"
+                                      >
+                                        <Trash2 className="w-4 h-4" />
+                                      </button>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                              {activeBomSection.preparedRows.map((ri) => {
+                                const prepared = preparedItems.find((i) => i.id === ri.prepared_item_id);
+                                if (!prepared) return null;
+                                const unitLabel = ri.unit || prepared.unit;
+                                const lineCost = (prepared.average_cost || 0) * ri.quantity;
+                                const components = prepared.components || [];
+                                const tip = `${prepared.name} (${prepared.kind}) — ${formatBaseQuantityGlobal(ri.quantity, unitLabel)}`;
+                                return (
+                                  <React.Fragment key={`prep-${ri.id}`}>
+                                    <tr
+                                      ref={(el) => {
+                                        rowRefs.current.set(`prep-${ri.id}`, el);
+                                      }}
+                                      className="border-b border-brand-100/80 bg-brand-50/30 hover:bg-brand-50/50"
+                                    >
+                                      <td className="py-1 px-2 align-middle">
+                                        <div className="font-semibold text-soot-900 truncate max-w-[14rem] leading-tight" title={tip}>
+                                          {prepared.name}
+                                          <span className="ml-1 text-[10px] font-normal text-brand-700">
+                                            ({prepared.kind === 'marination' ? 'Marination' : 'Sauce'})
+                                          </span>
+                                        </div>
+                                      </td>
+                                      <td className="py-1 px-2 align-middle font-semibold text-soot-900 tabular-nums whitespace-nowrap text-[11px]" title={tip}>
+                                        {formatBaseQuantityGlobal(ri.quantity, unitLabel)}
+                                      </td>
+                                      <td className="py-1 px-2 align-middle text-right tabular-nums whitespace-nowrap text-[11px]">
+                                        {formatCurrency(prepared.average_cost)}/{prepared.unit}
+                                      </td>
+                                      <td className="py-1 px-2 align-middle text-right font-semibold text-brand-800 tabular-nums text-[11px]">
+                                        {formatCurrency(lineCost)}
+                                      </td>
+                                      <td className="py-1 px-1 align-middle text-center">
+                                        <button
+                                          type="button"
+                                          onClick={() => handleDelete(ri.id, 'prepared')}
+                                          className="p-1 text-soot-400 hover:text-red-600 rounded-md"
+                                          title="Remove"
+                                        >
+                                          <Trash2 className="w-4 h-4" />
+                                        </button>
+                                      </td>
+                                    </tr>
+                                    {components.length > 0 && (
+                                      <tr className="bg-brand-50/20 border-b border-brand-100/60">
+                                        <td colSpan={5} className="py-1.5 px-3 text-[11px] text-soot-600">
+                                          <details>
+                                            <summary className="cursor-pointer font-medium text-soot-700 select-none">
+                                              Raw breakdown
+                                            </summary>
+                                            <ul className="mt-1 space-y-0.5 pl-2 border-l-2 border-brand-200/80">
+                                              {components.map((c) => {
+                                                const compIng = ingredients.find((i) => i.id === c.ingredient_id);
+                                                if (!compIng) return null;
+                                                const rawNeed = c.quantity * ri.quantity;
+                                                const subCost = rawNeed * (compIng.average_cost || 0);
+                                                const cUnit = c.unit || compIng.unit;
+                                                return (
+                                                  <li key={c.id} className="flex flex-wrap justify-between gap-1">
+                                                    <span className="truncate max-w-[55%]">{compIng.name}</span>
+                                                    <span className="text-right tabular-nums">
+                                                      {formatBaseQuantityGlobal(rawNeed, cUnit, { ingredient: compIng })}{' '}
+                                                      · {formatCurrency(subCost)}
+                                                    </span>
+                                                  </li>
+                                                );
+                                              })}
+                                            </ul>
+                                          </details>
+                                        </td>
+                                      </tr>
+                                    )}
+                                  </React.Fragment>
+                                );
+                              })}
+                              {activeBomSection.extraRows.map((ec) => (
+                                <tr key={`extra-${ec.id}`} className="border-b border-orange-100/80 bg-orange-50/40">
+                                  <td className="py-1 px-2 align-middle font-semibold text-soot-900">{ec.name}</td>
+                                  <td className="py-1 px-2 align-middle text-soot-500">—</td>
+                                  <td className="py-1 px-2 align-middle text-right text-soot-500 text-[11px]">Extra</td>
+                                  <td className="py-1 px-2 align-middle text-right font-semibold text-brand-800 tabular-nums text-[11px]">
+                                    {formatCurrency(ec.amount)}
+                                  </td>
+                                  <td className="py-1 px-1 align-middle text-center">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDeleteExtraCost(ec.id)}
+                                      className="p-1 text-soot-400 hover:text-red-600 rounded-md"
+                                      title="Remove"
+                                    >
+                                      <Trash2 className="w-4 h-4" />
+                                    </button>
+                                  </td>
+                                </tr>
+                              ))}
+                              {viewRowCount === 0 && (
+                                <tr>
+                                  <td colSpan={5} className="py-3 px-2 text-center text-soot-400 text-[11px]">
+                                    No lines for this scope yet.
+                                  </td>
+                                </tr>
+                              )}
+                            </tbody>
+                          </table>
+                  </div>
                 </div>
               )}
             </div>
 
-            {/* Bottom Add Bar */}
-            <div className="p-5 border-t border-white/20 bg-white/20 shrink-0">
+            {/* Sticky bottom actions */}
+            <div className="sticky bottom-0 z-10 shrink-0 border-t border-soot-200/80 bg-white/95 backdrop-blur-md px-2 py-2 shadow-[0_-4px_12px_rgba(0,0,0,0.06)]">
               {!showAddForm && !showExtraCostForm ? (
                 <div className="space-y-2">
                   <button
-                    onClick={() => setShowExtraCostForm(true)}
+                    type="button"
+                    onClick={() => {
+                      setShowExtraCostForm(true);
+                      requestAnimationFrame(() =>
+                        addFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+                      );
+                    }}
                     className="w-full flex items-center justify-center gap-2 py-3 rounded-lg border-2 border-dashed border-orange-300 text-orange-700 font-semibold hover:bg-orange-50 hover:border-orange-400 transition-colors touch-target"
                   >
                     <Plus className="w-5 h-5" /> Add Extra Cost
                   </button>
                   <button
-                    onClick={() => setShowAddForm(true)}
+                    type="button"
+                    onClick={() => {
+                      setShowAddForm(true);
+                      requestAnimationFrame(() =>
+                        addFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+                      );
+                    }}
                     className="w-full flex items-center justify-center gap-2 py-3 rounded-lg border-2 border-dashed border-brand-300 text-brand-700 font-semibold hover:bg-brand-50 hover:border-brand-400 transition-colors touch-target"
                   >
                     <Plus className="w-5 h-5" /> Add Ingredient or Sauce to Recipe
                   </button>
                 </div>
               ) : (
-                <form onSubmit={showExtraCostForm ? handleAddExtraCost : handleAddSubmit} className="glass-card p-4 space-y-4 shadow-sm border border-brand-200 bg-white/50">
+                <form
+                  ref={addFormRef}
+                  onSubmit={showExtraCostForm ? handleAddExtraCost : handleAddSubmit}
+                  className="glass-card p-3 space-y-3 shadow-sm border border-brand-200 bg-white/50 max-h-[70vh] overflow-y-auto overscroll-contain"
+                >
                   <div className="flex justify-between items-center mb-1">
                     <h4 className="font-bold text-soot-900 text-sm">{showExtraCostForm ? 'Add Extra Cost' : 'Add Material'}</h4>
                     <button type="button" onClick={() => { setShowAddForm(false); setShowExtraCostForm(false); }} className="text-soot-400 hover:text-soot-700 p-1">
@@ -584,53 +796,51 @@ export default function RecipesTab() {
                         className="glass-card border-0 px-3 py-2"
                       />
                     </div>
-                    <div>
-                      <label className="block text-xs font-semibold text-soot-600 uppercase tracking-wider mb-1 flex justify-between items-center">
-                        <span>Quantity per portion</span>
-                        {formMaterialType === 'ingredient' && formIngredientId && (
-                          (() => {
-                            const ing = ingredients.find(i => i.id.toString() === formIngredientId);
-                            if (ing?.purchase_unit && (ing.conversion_factor ?? 0) > 1) {
-                              return (
-                                <button
-                                  type="button"
-                                  onClick={() => setFormUsePurchaseUnit(!formUsePurchaseUnit)}
-                                  className={`text-[10px] uppercase font-bold px-1.5 py-0.5 rounded border ${
-                                    formUsePurchaseUnit ? 'bg-brand-100 text-brand-700 border-brand-200' : 'bg-neutral-100 text-neutral-500 border-neutral-200'
-                                  }`}
-                                >
-                                  {formUsePurchaseUnit ? `In ${ing.purchase_unit}` : `Use ${ing.purchase_unit}?`}
-                                </button>
-                              );
-                            }
-                            return null;
-                          })()
-                        )}
+                    <div className="sm:col-span-2">
+                      <label className="block text-xs font-semibold text-soot-600 uppercase tracking-wider mb-1">
+                        Quantity per portion
                       </label>
-                      <div className="relative">
-                        <input 
-                          type="number" 
-                          step="any" 
-                          min="0.000001"
-                          required
-                          value={formQuantity} 
-                          onChange={e => setFormQuantity(e.target.value)} 
-                          className="w-full px-3 py-2 pr-12 glass-card text-sm focus:ring-2 focus:ring-brand-500"
-                          placeholder="e.g. 0.15"
-                        />
-                        <div className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-medium text-soot-400 pointer-events-none">
-                          {formMaterialType === 'ingredient'
-                            ? (formUsePurchaseUnit 
-                                ? ingredients.find(i => i.id.toString() === formIngredientId)?.purchase_unit 
-                                : ingredients.find(i => i.id.toString() === formIngredientId)?.unit)
-                            : formPreparedItemId && preparedItems.find(i => i.id.toString() === formPreparedItemId)?.unit}
+                      <div className="flex flex-col sm:flex-row gap-2 items-stretch">
+                        <div className="relative flex-1 min-w-0">
+                          <input
+                            type="number"
+                            step="any"
+                            min="0.000001"
+                            required
+                            value={formQuantity}
+                            onChange={(e) => setFormQuantity(e.target.value)}
+                            className="w-full px-3 py-2 glass-card text-sm focus:ring-2 focus:ring-brand-500"
+                            placeholder="e.g. 0.15 or 150"
+                          />
                         </div>
+                        <select
+                          value={
+                            formMaterialType === 'ingredient' && formIngredientResolved
+                              ? (getSelectableInputUnits(formIngredientResolved).includes(formInputUnit)
+                                  ? formInputUnit
+                                  : getSelectableInputUnits(formIngredientResolved)[0] || formIngredientResolved.unit)
+                              : formMaterialType === 'prepared' && formPreparedResolved
+                                ? (getSelectableInputUnits(formPreparedResolved.unit).includes(formInputUnit)
+                                    ? formInputUnit
+                                    : getSelectableInputUnits(formPreparedResolved.unit)[0] || formPreparedResolved.unit)
+                                : formInputUnit
+                          }
+                          onChange={(e) => setFormInputUnit(e.target.value)}
+                          className="w-full sm:w-28 shrink-0 px-3 py-2 glass-card text-sm font-medium text-soot-800 focus:ring-2 focus:ring-brand-500"
+                          disabled={!formIngredientResolved && !formPreparedResolved}
+                        >
+                          {(formMaterialType === 'ingredient' && formIngredientResolved
+                            ? getSelectableInputUnits(formIngredientResolved)
+                            : formPreparedResolved
+                              ? getSelectableInputUnits(formPreparedResolved.unit)
+                              : []
+                          ).map((u) => (
+                            <option key={u} value={u}>
+                              {u}
+                            </option>
+                          ))}
+                        </select>
                       </div>
-                      {formUsePurchaseUnit && formQuantity && (
-                        <div className="mt-1 text-[10px] text-brand-600 font-medium italic">
-                          = {(parseFloat(formQuantity) * (ingredients.find(i => i.id.toString() === formIngredientId)?.conversion_factor || 1)).toFixed(4)} {ingredients.find(i => i.id.toString() === formIngredientId)?.unit}
-                        </div>
-                      )}
                     </div>
                   </div>
                   )}

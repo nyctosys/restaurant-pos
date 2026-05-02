@@ -266,7 +266,9 @@ class Ingredient(db.Model):
     sku = db.Column(db.String(100), unique=True)
     unit = db.Column(db.Enum(UnitOfMeasure), nullable=False, default=UnitOfMeasure.KG)
     purchase_unit = db.Column(db.String(50), nullable=True) # e.g. "carton", "packet"
-    conversion_factor = db.Column(db.Float, default=1.0)    # e.g. 1 carton = 10 KG
+    conversion_factor = db.Column(db.Float, default=1.0)    # legacy: base qty per 1 purchase_unit
+    # Dynamic packaging sizes: base storage units per 1 carton / 1 packet (e.g. ml per carton)
+    unit_conversions = db.Column(db.JSON, nullable=True)
     current_stock = db.Column(db.Float, default=0.0)
     minimum_stock = db.Column(db.Float, default=0.0)   # Low-stock threshold
     reorder_quantity = db.Column(db.Float, default=0.0)

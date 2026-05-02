@@ -4,6 +4,7 @@ import { get, getUserMessage, post, put } from '../../api';
 import SearchableSelect from '../SearchableSelect';
 import { showToast } from '../Toast';
 import { formatCurrency } from '../../utils/formatCurrency';
+import { formatBaseQuantityGlobal } from '../../utils/unitConversion';
 import { generateAutoSku } from '../../utils/sku';
 
 type Ingredient = {
@@ -276,8 +277,8 @@ export default function PreparedItemsTab() {
                     <div className="text-xs text-soot-500 font-mono">{item.sku}</div>
                   </td>
                   <td className="px-4 py-3 capitalize text-soot-700">{item.kind}</td>
-                  <td className="px-4 py-3 text-right font-semibold text-soot-900">
-                    {item.current_stock.toFixed(2)} {item.unit}
+                  <td className="px-4 py-3 text-right font-semibold text-soot-900 whitespace-nowrap">
+                    {formatBaseQuantityGlobal(item.current_stock, item.unit)}
                   </td>
                   <td className="px-4 py-3 text-right text-soot-700">
                     {formatCostPerYield(item.average_cost, item.unit)}

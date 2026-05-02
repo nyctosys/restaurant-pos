@@ -163,6 +163,95 @@ def test_purchase_order_flow(client, app):
     assert tom["last_purchase_price"] == 2.50
 
 
+def test_purchase_order_converts_grams_to_kg_for_receive(client, app):
+    h = _auth_headers(client, app)
+    r1 = client.post("/api/inventory-advanced/suppliers", headers=h, json={"name": "Spice Supplier"})
+    sup_id = r1.get_json()["id"]
+    r2 = client.post("/api/inventory-advanced/ingredients", headers=h, json={
+        "name": "Salt bulk",
+        "sku": "ING-SALT",
+        "unit": "kg",
+    })
+    ing_id = r2.get_json()["id"]
+
+    r3 = client.post("/api/inventory-advanced/purchase-orders", headers=h, json={
+        "supplier_id": sup_id,
+        "items": [
+            {
+                "ingredient_id": ing_id,
+                "quantity_ordered": 500,
+                "unit_price": 0.2,
+                "unit": "g",
+            }
+        ],
+    })
+    assert r3.status_code == 200
+    po_id = r3.get_json()["id"]
+
+    r4 = client.post(
+        f"/api/inventory-advanced/purchase-orders/{po_id}/receive",
+        headers=h,
+        json={"received_date": "2023-10-25T10:00:00Z"},
+    )
+    assert r4.status_code == 200
+
+    ings = client.get("/api/inventory-advanced/ingredients", headers=h).get_json()["ingredients"]
+    row = next(i for i in ings if i["id"] == ing_id)
+    assert abs(row["current_stock"] - 0.5) < 1e-6
+    assert abs(row["last_purchase_price"] - 200.0) < 0.01
+
+
+def test_purchase_order_carton_converts_to_ml_base(client, app):
+    """Packaging unit carton uses ingredient.unit_conversions (ml per 1 carton)."""
+    h = _auth_headers(client, app)
+    r1 = client.post("/api/inventory-advanced/suppliers", headers=h, json={"name": "Beverage Supplier"})
+    assert r1.status_code == 200
+    sup_id = r1.get_json()["id"]
+    r2 = client.post(
+        "/api/inventory-advanced/ingredients",
+        headers=h,
+        json={
+            "name": "Soda base",
+            "sku": "ING-SODA-CART",
+            "unit": "ml",
+            "unit_conversions": {"carton": 24000},
+        },
+    )
+    assert r2.status_code == 200
+    ing_id = r2.get_json()["id"]
+
+    r3 = client.post(
+        "/api/inventory-advanced/purchase-orders",
+        headers=h,
+        json={
+            "supplier_id": sup_id,
+            "items": [
+                {
+                    "ingredient_id": ing_id,
+                    "quantity_ordered": 2,
+                    "unit_price": 96.0,
+                    "unit": "carton",
+                }
+            ],
+        },
+    )
+    assert r3.status_code == 200
+    po_id = r3.get_json()["id"]
+
+    r4 = client.post(
+        f"/api/inventory-advanced/purchase-orders/{po_id}/receive",
+        headers=h,
+        json={"received_date": "2024-01-15T10:00:00Z"},
+    )
+    assert r4.status_code == 200
+
+    ings = client.get("/api/inventory-advanced/ingredients", headers=h).get_json()["ingredients"]
+    row = next(i for i in ings if i["id"] == ing_id)
+    assert abs(row["current_stock"] - 48000.0) < 0.01
+    # Price per carton Rs 96 → per ml = 96 / 24000 = 0.004 for line total of 2 * 96 on 48000 ml
+    assert abs(row["last_purchase_price"] - 0.004) < 1e-6
+
+
 def test_prepared_item_batch_deducts_ingredients(client, app):
     h = _auth_headers(client, app)
     r_ing = client.post("/api/inventory-advanced/ingredients", headers=h, json={
@@ -274,7 +363,7 @@ def test_recipe_rejects_ingredient_unit_mismatch(client, app):
         "unit": "kg",
     })
     assert r_map.status_code == 400
-    assert "Unit mismatch" in (r_map.get_json().get("message") or "")
+    assert "convert" in (r_map.get_json().get("message") or "").lower()
 
 
 def test_recipe_rejects_prepared_item_unit_mismatch(client, app):
@@ -309,4 +398,4 @@ def test_recipe_rejects_prepared_item_unit_mismatch(client, app):
         "unit": "kg",
     })
     assert r_map.status_code == 400
-    assert "Unit mismatch" in (r_map.get_json().get("message") or "")
+    assert "convert" in (r_map.get_json().get("message") or "").lower()

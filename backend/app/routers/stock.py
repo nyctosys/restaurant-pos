@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 from app.models import Ingredient, IngredientBranchStock, StockMovement, User, db
 from app.schemas.inventory_schemas import BulkRestockRequest
 from app.services.branch_ingredient_stock import adjust_branch_ingredient_stock
+from app.services.units import normalize_unit_token, to_base_unit
 from app.services.ingredient_costing import apply_ingredient_purchase_cost
 from app.services.ingredient_master_stock import sync_ingredient_master_total
 from app.services.branch_scope import resolve_terminal_branch_id
@@ -71,7 +72,7 @@ def update_ingredient_stock(payload: dict[str, Any] | None = None, current_user:
     ingredient_id = data.get("ingredient_id")
     stock_delta = data.get("stock_delta", 0)
     try:
-        delta = float(stock_delta)
+        raw_delta = float(stock_delta)
     except (TypeError, ValueError):
         return JSONResponse(status_code=400, content={"message": "stock_delta must be a number"})
     if not ingredient_id:
@@ -79,6 +80,15 @@ def update_ingredient_stock(payload: dict[str, Any] | None = None, current_user:
     ing = db.session.get(Ingredient, int(ingredient_id))
     if not ing:
         return JSONResponse(status_code=404, content={"message": "Ingredient not found"})
+    input_u = str(data.get("input_unit") or "").strip().lower()
+    if input_u:
+        try:
+            sign = -1.0 if raw_delta < 0 else 1.0
+            delta = sign * to_base_unit(abs(raw_delta), input_u, ing)
+        except ValueError as exc:
+            return JSONResponse(status_code=400, content={"message": str(exc)})
+    else:
+        delta = raw_delta
     try:
         _, qty_after = adjust_branch_ingredient_stock(
             int(ingredient_id),
@@ -141,8 +151,28 @@ def bulk_restock_ingredients(payload: BulkRestockRequest, current_user: User = D
     try:
         for line in payload.items:
             ingredient_id = int(line.ingredient_id)
-            qty_add = float(line.quantity)
+            qty_in = float(line.quantity)
             ing = ingredients_by_id[ingredient_id]
+
+            input_u = getattr(line, "input_unit", None)
+            if input_u and str(input_u).strip():
+                try:
+                    ing_for_conv = ing
+                    pkg_one = getattr(line, "packaging_units_per_one", None)
+                    if pkg_one is not None and float(pkg_one) > 0:
+                        u_tok = normalize_unit_token(str(input_u))
+                        if u_tok in ("carton", "packet"):
+                            raw_json = getattr(ing, "unit_conversions", None) or {}
+                            ing_for_conv = {
+                                "unit": ing.unit.value if hasattr(ing.unit, "value") else ing.unit,
+                                "unit_conversions": {**dict(raw_json), u_tok: float(pkg_one)},
+                            }
+                    qty_add = to_base_unit(qty_in, str(input_u), ing_for_conv)
+                except ValueError as exc:
+                    db.session.rollback()
+                    return JSONResponse(status_code=400, content={"message": str(exc)})
+            else:
+                qty_add = qty_in
 
             incoming_unit_cost = None if line.unit_cost is None else float(line.unit_cost)
             incoming_brand_name = str(getattr(line, "brand_name", "") or "").strip()
@@ -151,10 +181,15 @@ def bulk_restock_ingredients(payload: BulkRestockRequest, current_user: User = D
             applied_unit_cost = float(ing.average_cost or 0.0)
 
             if incoming_unit_cost is not None:
-                apply_ingredient_purchase_cost(ing, branch_id, qty_add, incoming_unit_cost)
+                if input_u and str(input_u).strip() and qty_add > 0:
+                    line_total = qty_in * float(incoming_unit_cost)
+                    unit_cost_per_base = line_total / qty_add
+                else:
+                    unit_cost_per_base = float(incoming_unit_cost)
+                apply_ingredient_purchase_cost(ing, branch_id, qty_add, unit_cost_per_base)
                 movement_type = "purchase"
                 reference_type = "bulk_restock"
-                applied_unit_cost = incoming_unit_cost
+                applied_unit_cost = unit_cost_per_base
             if incoming_brand_name and incoming_brand_name != str(getattr(ing, "brand_name", "") or "").strip():
                 ing.brand_name = incoming_brand_name
 

@@ -15,6 +15,26 @@ from app.services.recipe_variants import normalize_variant_key, prepared_recipe_
 
 menu_router = APIRouter(prefix="/api/menu-items", tags=["menu-items"])
 
+# Catalog selling unit (Product.unit) — validated separately from BOM-derived units.
+# Menu catalog: serving-style units only (not inventory packaging).
+_ALLOWED_CATALOG_UNITS = frozenset({"kg", "g", "ltr", "ml", "pcs"})
+
+
+def _normalize_catalog_unit(raw: Any) -> str | None:
+    """Persisted menu catalog unit; empty clears. Serving units only (aliases normalized)."""
+    if raw is None:
+        return None
+    s = str(raw).strip().lower()
+    if not s:
+        return None
+    if s in ("liter", "litre", "l"):
+        s = "ltr"
+    if s in ("piece", "pc"):
+        s = "pcs"
+    if s not in _ALLOWED_CATALOG_UNITS:
+        raise ValueError(f"Invalid catalog unit '{raw}'. Allowed: {', '.join(sorted(_ALLOWED_CATALOG_UNITS))}")
+    return s
+
 
 def _normalize_variants_list(raw: Any) -> list[dict[str, Any]]:
     if not isinstance(raw, list):
@@ -215,6 +235,7 @@ def _product_to_dict(product: Product) -> dict[str, Any]:
             }
         )
     default_bom = _compute_bom_summary_for_variant(product, None)
+    catalog_unit = (getattr(product, "unit", None) or "").strip() or None
     variants_raw = _variants_for_response(product)
     variants: list[dict[str, Any]] = []
     for variant in variants_raw:
@@ -231,6 +252,9 @@ def _product_to_dict(product: Product) -> dict[str, Any]:
             }
         )
 
+    bom_unit = default_bom["unit"]
+    display_unit = catalog_unit or bom_unit
+
     return {
         "id": product.id,
         "sku": product.sku,
@@ -244,8 +268,11 @@ def _product_to_dict(product: Product) -> dict[str, Any]:
         "image_url": product.image_url or "",
         "is_deal": getattr(product, "is_deal", False) or False,
         "archived_at": product.archived_at.isoformat() if getattr(product, "archived_at", None) else None,
-        "unit": default_bom["unit"],
-        "unitOfMeasure": default_bom["unit"],
+        # Catalog unit from DB (what Menu Catalog saves). BOM summary unit is separate when mixing ingredients.
+        "catalog_unit": catalog_unit,
+        "bom_summary_unit": bom_unit,
+        "unit": display_unit,
+        "unitOfMeasure": display_unit,
         "totalQuantity": default_bom["totalQuantity"],
         "recipe_items": recipe_items,
     }
@@ -282,6 +309,10 @@ def create_product(payload: dict[str, Any] | None = None, _: User = Depends(requ
     if Product.query.filter_by(sku=sku).first():
         return JSONResponse(status_code=409, content={"message": "Product with this SKU already exists"})
     try:
+        try:
+            cu = _normalize_catalog_unit(data.get("unitOfMeasure") or data.get("unit"))
+        except ValueError as exc:
+            return JSONResponse(status_code=400, content={"message": str(exc)})
         new_product = Product(
             sku=sku,
             title=title,
@@ -290,7 +321,7 @@ def create_product(payload: dict[str, Any] | None = None, _: User = Depends(requ
             section=(data.get("section") or "").strip(),
             variants=variants,
             image_url=(data.get("image_url") or "").strip() or "",
-            unit=(data.get("unitOfMeasure") or data.get("unit") or "").strip() or None,
+            unit=cu,
         )
         db.session.add(new_product)
         db.session.commit()
@@ -331,7 +362,10 @@ def update_product(product_id: int, payload: dict[str, Any] | None = None, _: Us
     if "image_url" in data:
         product.image_url = data["image_url"] or ""
     if "unitOfMeasure" in data or "unit" in data:
-        product.unit = (data.get("unitOfMeasure") or data.get("unit") or "").strip() or None
+        try:
+            product.unit = _normalize_catalog_unit(data.get("unitOfMeasure") or data.get("unit"))
+        except ValueError as exc:
+            return JSONResponse(status_code=400, content={"message": str(exc)})
     try:
         db.session.commit()
         return {"message": "Product updated!", "product": _product_to_dict(product)}

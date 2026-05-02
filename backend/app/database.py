@@ -196,6 +196,14 @@ def _init_database_core() -> None:
                 except (OperationalError, ProgrammingError):
                     db.session.rollback()
                 try:
+                    dname = db.engine.dialect.name
+                    col_sql = "JSONB" if dname == "postgresql" else "JSON"
+                    db.session.execute(text(f"ALTER TABLE ingredients ADD COLUMN unit_conversions {col_sql}"))
+                    db.session.commit()
+                    print("Added 'unit_conversions' column to 'ingredients' table.")
+                except (OperationalError, ProgrammingError):
+                    db.session.rollback()
+                try:
                     db.session.execute(text("ALTER TABLE sale_items ADD COLUMN inventory_allocations JSON"))
                     db.session.commit()
                     print("Added 'inventory_allocations' column to 'sale_items' table.")
