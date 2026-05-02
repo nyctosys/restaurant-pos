@@ -129,6 +129,7 @@ def _default_for_column(table_name: str, column_name: str) -> str | None:
         ("sales", "delivery_charge"): "0",
         ("sales", "service_charge"): "0",
         ("sales", "delivery_status"): _literal_default("pending"),
+        ("sales", "fulfillment_status"): _literal_default("pending"),
         ("sale_items", "variant_sku_suffix"): _literal_default(""),
         ("combo_items", "quantity"): "1",
         ("combo_items", "selection_type"): _literal_default("product"),
@@ -315,6 +316,18 @@ def _backfill_safe_defaults(connection: Connection, report: RepairReport) -> Non
             WHERE delivery_status IS NULL
             """,
             "Backfilled sales.delivery_status",
+        ),
+        (
+            """
+            UPDATE sales
+            SET fulfillment_status = CASE
+              WHEN COALESCE(order_type, '') = 'takeaway' AND status = 'completed' THEN 'served'
+              WHEN COALESCE(order_type, '') = 'takeaway' THEN 'pending'
+              ELSE NULL
+            END
+            WHERE fulfillment_status IS NULL
+            """,
+            "Backfilled sales.fulfillment_status",
         ),
         (
             "UPDATE ingredients SET brand_name = '' WHERE brand_name IS NULL",

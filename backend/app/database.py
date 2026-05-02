@@ -128,6 +128,26 @@ def _init_database_core() -> None:
                     db.session.rollback()
                 try:
                     db.session.execute(
+                        text("ALTER TABLE sales ADD COLUMN fulfillment_status VARCHAR(20) DEFAULT 'pending'")
+                    )
+                    db.session.execute(
+                        text(
+                            """
+                            UPDATE sales
+                            SET fulfillment_status = CASE
+                              WHEN COALESCE(order_type, '') = 'takeaway' AND status = 'completed' THEN 'served'
+                              WHEN COALESCE(order_type, '') = 'takeaway' THEN 'pending'
+                              ELSE NULL
+                            END
+                            """
+                        )
+                    )
+                    db.session.commit()
+                    print("Added 'fulfillment_status' column to 'sales' table.")
+                except (OperationalError, ProgrammingError):
+                    db.session.rollback()
+                try:
+                    db.session.execute(
                         text("ALTER TABLE products ADD COLUMN sale_price NUMERIC(12, 2) DEFAULT 0")
                     )
                     db.session.commit()

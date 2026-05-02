@@ -146,6 +146,30 @@ def _delivery_status_value(sale: Sale) -> str | None:
     return "pending"
 
 
+def _fulfillment_status_value(sale: Sale) -> str | None:
+    if (getattr(sale, "order_type", None) or "").strip().lower() != "takeaway":
+        return None
+    raw = str(getattr(sale, "fulfillment_status", "") or "").strip().lower()
+    if raw in ("pending", "served"):
+        return raw
+    return "pending"
+
+
+def _apply_order_fulfillment_defaults(sale: Sale) -> None:
+    ot = (getattr(sale, "order_type", None) or "").strip().lower()
+    if ot == "takeaway":
+        sale.fulfillment_status = getattr(sale, "fulfillment_status", None) or "pending"
+    else:
+        sale.fulfillment_status = None
+
+
+def _mark_takeaway_served(sale: Sale) -> tuple[bool, str]:
+    if (getattr(sale, "order_type", None) or "").strip().lower() != "takeaway":
+        return False, "Served action is only available for takeaway orders"
+    sale.fulfillment_status = "served"
+    return True, ""
+
+
 def _upsert_rider_assignment_for_sale(sale: Sale) -> None:
     if (getattr(sale, "order_type", None) or "").strip().lower() != "delivery":
         sale.delivery_status = None
@@ -186,6 +210,22 @@ def _mark_delivery_completed(sale: Sale) -> tuple[bool, str]:
     if snapshot:
         snapshot["rider_name"] = None
         sale.order_snapshot = snapshot
+    return True, ""
+
+
+def _assign_delivery_rider(sale: Sale, rider_name: Any) -> tuple[bool, str]:
+    if (getattr(sale, "order_type", None) or "").strip().lower() != "delivery":
+        return False, "Rider assignment is only available for delivery orders"
+    if _delivery_status_value(sale) == "delivered":
+        return False, "Delivered orders cannot be reassigned"
+    name = str(rider_name or "").strip()
+    if not name:
+        return False, "Select a rider before assigning this delivery order"
+    snapshot = sale.order_snapshot if isinstance(getattr(sale, "order_snapshot", None), dict) else {}
+    snapshot = dict(snapshot)
+    snapshot["rider_name"] = name
+    sale.order_snapshot = snapshot
+    _upsert_rider_assignment_for_sale(sale)
     return True, ""
 
 
@@ -924,6 +964,9 @@ def checkout(
             order_snapshot=order_snapshot_norm,
         )
         _upsert_rider_assignment_for_sale(new_sale)
+        _apply_order_fulfillment_defaults(new_sale)
+        if order_type_norm == "takeaway":
+            new_sale.fulfillment_status = "served"
         db.session.add(new_sale)
         db.session.flush()
         for item in items:
@@ -1652,6 +1695,7 @@ def list_active_dine_in_orders(
         has_order_type_col = "order_type" in sales_cols
         has_archived_at_col = "archived_at" in sales_cols
         has_order_snapshot_col = "order_snapshot" in sales_cols
+        has_fulfillment_status_col = "fulfillment_status" in sales_cols
 
         # Select only columns that exist in the DB schema.
         select_cols: list[tuple[str, Any]] = []
@@ -1672,6 +1716,7 @@ def list_active_dine_in_orders(
         _maybe_add("order_type", Sale.order_type)
         _maybe_add("order_snapshot", Sale.order_snapshot)
         _maybe_add("kitchen_status", Sale.kitchen_status)
+        _maybe_add("fulfillment_status", Sale.fulfillment_status)
 
         if not select_cols:
             return {"sales": []}
@@ -1679,13 +1724,19 @@ def list_active_dine_in_orders(
         query = db.session.query(*[col for _, col in select_cols])
 
         if has_status_col:
-            query = query.filter(
-                or_(
-                    Sale.status == "open",
-                    and_(Sale.order_type == "delivery", Sale.delivery_status != "delivered"),
-                    and_(Sale.order_type == "delivery", Sale.delivery_status.is_(None), Sale.status == "completed"),
+            active_status_clauses = [
+                Sale.status == "open",
+                and_(Sale.order_type == "delivery", Sale.delivery_status != "delivered"),
+                and_(Sale.order_type == "delivery", Sale.delivery_status.is_(None), Sale.status == "completed"),
+            ]
+            if has_fulfillment_status_col:
+                active_status_clauses.extend(
+                    [
+                        and_(Sale.order_type == "takeaway", Sale.fulfillment_status != "served"),
+                        and_(Sale.order_type == "takeaway", Sale.fulfillment_status.is_(None), Sale.status == "completed"),
+                    ]
                 )
-            )
+            query = query.filter(or_(*active_status_clauses))
 
         if has_order_type_col:
             query = query.filter(
@@ -1746,6 +1797,7 @@ def list_active_dine_in_orders(
                 "order_snapshot": snap,
                 "table_name": table_name,
                 "kitchen_status": kitchen_status,
+                "fulfillment_status": data.get("fulfillment_status") if has_fulfillment_status_col else None,
             }
             out.append(out_row)
             sale_ids.append(sale_id_val)
@@ -1757,6 +1809,7 @@ def list_active_dine_in_orders(
         for out_row in out:
             sale_obj = sales_by_id.get(int(out_row["id"]))
             out_row["delivery_status"] = _delivery_status_value(sale_obj) if sale_obj else None
+            out_row["fulfillment_status"] = _fulfillment_status_value(sale_obj) if sale_obj else out_row.get("fulfillment_status")
             out_row["assigned_rider_id"] = int(sale_obj.assigned_rider_id) if sale_obj and sale_obj.assigned_rider_id else None
             out_row["orderStatus"] = "paid" if (out_row.get("status") or "completed") != "open" else "open"
 
@@ -2141,6 +2194,56 @@ def mark_delivery_complete(
     }
 
 
+@orders_router.patch("/{sale_id}/assign-rider")
+def assign_delivery_rider(
+    sale_id: int,
+    payload: dict[str, Any] | None = None,
+    current_user: User = Depends(get_current_user),
+):
+    sale = db.session.get(Sale, sale_id)
+    if not sale:
+        raise HTTPException(status_code=404, detail="Not Found")
+    fb = _forbidden_unless_sale_branch(sale, current_user)
+    if fb:
+        return fb
+    ok, message = _assign_delivery_rider(sale, (payload or {}).get("rider_name"))
+    if not ok:
+        return _json_error("Bad Request", message, 400)
+    db.session.commit()
+    _schedule_order_event(RealtimeEvents.ORDER_UPDATED, sale, delivery_status="assigned")
+    snapshot = sale.order_snapshot if isinstance(getattr(sale, "order_snapshot", None), dict) else {}
+    return {
+        "message": "Rider assigned",
+        "sale_id": sale.id,
+        "delivery_status": _delivery_status_value(sale),
+        "assigned_rider_id": int(sale.assigned_rider_id) if sale.assigned_rider_id else None,
+        "rider_name": snapshot.get("rider_name"),
+    }
+
+
+@orders_router.patch("/{sale_id}/takeaway-served")
+def mark_takeaway_served(
+    sale_id: int,
+    current_user: User = Depends(get_current_user),
+):
+    sale = db.session.get(Sale, sale_id)
+    if not sale:
+        return _json_error("Not Found", "Order not found", 404)
+    fb = _forbidden_unless_sale_branch(sale, current_user)
+    if fb:
+        return fb
+    ok, message = _mark_takeaway_served(sale)
+    if not ok:
+        return _json_error("Bad Request", message, 400)
+    db.session.commit()
+    _schedule_order_event(RealtimeEvents.ORDER_UPDATED, sale, fulfillment_status="served")
+    return {
+        "ok": True,
+        "id": sale.id,
+        "fulfillment_status": "served",
+    }
+
+
 def _create_open_kot_response(
     data: dict[str, Any],
     current_user: User,
@@ -2183,6 +2286,7 @@ def _create_open_kot_response(
             order_snapshot=order_snapshot_norm,
         )
         _upsert_rider_assignment_for_sale(new_sale)
+        _apply_order_fulfillment_defaults(new_sale)
         db.session.add(new_sale)
         db.session.flush()
         total_amount = 0.0
@@ -2401,6 +2505,7 @@ def update_open_sale_items(
         sale.order_type = order_type_norm
         sale.order_snapshot = order_snapshot_norm
         _upsert_rider_assignment_for_sale(sale)
+        _apply_order_fulfillment_defaults(sale)
         new_rows = (
             db.session.query(
                 SaleItem.id,

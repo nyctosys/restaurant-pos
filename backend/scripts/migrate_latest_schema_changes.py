@@ -302,6 +302,11 @@ def main() -> None:
                 column="assigned_rider_id",
                 ddl="ALTER TABLE sales ADD COLUMN assigned_rider_id INTEGER REFERENCES riders(id)",
             ),
+            ColumnMigration(
+                table="sales",
+                column="fulfillment_status",
+                ddl="ALTER TABLE sales ADD COLUMN fulfillment_status VARCHAR(20) DEFAULT 'pending'",
+            ),
         ]
 
         print("migrate_latest_schema_changes: starting ...")
@@ -346,6 +351,19 @@ def main() -> None:
                       ELSE 'pending'
                     END
                     WHERE delivery_status IS NULL
+                    """
+                )
+            )
+            db.session.execute(
+                text(
+                    """
+                    UPDATE sales
+                    SET fulfillment_status = CASE
+                      WHEN COALESCE(order_type, '') = 'takeaway' AND status = 'completed' THEN 'served'
+                      WHEN COALESCE(order_type, '') = 'takeaway' THEN 'pending'
+                      ELSE NULL
+                    END
+                    WHERE fulfillment_status IS NULL
                     """
                 )
             )

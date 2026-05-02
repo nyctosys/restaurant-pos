@@ -796,7 +796,7 @@ export default function Dashboard() {
 
   type OrderSnapshotPayload =
     | { table_name: string }
-    | { customer_name: string; phone: string; address: string; rider_name: string; distance_km?: number; distance_source?: string };
+    | { customer_name: string; phone: string; address: string; rider_name?: string; distance_km?: number; distance_source?: string };
 
   const submitCheckout = async (orderSnapshot: OrderSnapshotPayload | null) => {
     const items = cart.map(item => ({
@@ -863,14 +863,6 @@ export default function Dashboard() {
 
   const finalizeOpenOrder = async () => {
     if (!editingOpenSaleId || cart.length === 0 || checkoutSubmitting) return;
-    if (orderType === 'delivery' && !deliveryRiderName.trim()) {
-      setNotification({
-        type: 'error',
-        msg: 'Assign a rider before saving this delivery order.',
-      });
-      setTimeout(() => setNotification(null), 5000);
-      return;
-    }
     const items = cart.map(item => ({
       product_id: item.id,
       quantity: item.quantity,
@@ -894,7 +886,7 @@ export default function Dashboard() {
               customer_name: deliveryCustomerName.trim(),
               phone: deliveryPhone.trim(),
               address: deliveryAddress.trim(),
-              rider_name: deliveryRiderName.trim(),
+              ...(deliveryRiderName.trim() ? { rider_name: deliveryRiderName.trim() } : {}),
               ...(deliveryDistance.km != null ? { distance_km: deliveryDistance.km } : {}),
               ...(deliveryDistance.source ? { distance_source: deliveryDistance.source } : {}),
             }
@@ -949,14 +941,6 @@ export default function Dashboard() {
 
   const submitUpdateOrder = async () => {
     if (!editingOpenSaleId || checkoutSubmitting || cart.length === 0) return;
-    if (orderType === 'delivery' && !deliveryRiderName.trim()) {
-      setNotification({
-        type: 'error',
-        msg: 'Assign a rider before saving this delivery order.',
-      });
-      setTimeout(() => setNotification(null), 5000);
-      return;
-    }
     const items = cart.map(item => ({
       product_id: item.id,
       quantity: item.quantity,
@@ -980,7 +964,7 @@ export default function Dashboard() {
               customer_name: deliveryCustomerName.trim(),
               phone: deliveryPhone.trim(),
               address: deliveryAddress.trim(),
-              rider_name: deliveryRiderName.trim(),
+              ...(deliveryRiderName.trim() ? { rider_name: deliveryRiderName.trim() } : {}),
               ...(deliveryDistance.km != null ? { distance_km: deliveryDistance.km } : {}),
               ...(deliveryDistance.source ? { distance_source: deliveryDistance.source } : {}),
             }
@@ -1092,19 +1076,10 @@ export default function Dashboard() {
       const name = deliveryCustomerName.trim();
       const phone = deliveryPhone.trim();
       const address = deliveryAddress.trim();
-      const rider = deliveryRiderName.trim();
       if (!name || !phone || !address) {
         setNotification({
           type: 'error',
           msg: 'Enter customer name, phone, and delivery address to complete this order.',
-        });
-        setTimeout(() => setNotification(null), 5000);
-        return;
-      }
-      if (!rider) {
-        setNotification({
-          type: 'error',
-          msg: 'Assign a rider before creating this delivery order.',
         });
         setTimeout(() => setNotification(null), 5000);
         return;
@@ -1133,7 +1108,7 @@ export default function Dashboard() {
           customer_name: deliveryCustomerName.trim(),
           phone: deliveryPhone.trim(),
           address: deliveryAddress.trim(),
-          rider_name: deliveryRiderName.trim(),
+          ...(deliveryRiderName.trim() ? { rider_name: deliveryRiderName.trim() } : {}),
           ...(deliveryDistance.km != null ? { distance_km: deliveryDistance.km } : {}),
           ...(deliveryDistance.source ? { distance_source: deliveryDistance.source } : {}),
         };
@@ -1143,7 +1118,6 @@ export default function Dashboard() {
       const data = await post<{ sale_id?: number; print_success?: boolean; message?: string }>('/orders/kot', {
         items,
         order_type: orderType,
-        skip_kot_print: true,
         ...(order_snapshot ? { order_snapshot } : {}),
       });
       const saleId = data?.sale_id ?? 0;
@@ -1210,7 +1184,6 @@ export default function Dashboard() {
       const name = deliveryCustomerName.trim();
       const phone = deliveryPhone.trim();
       const address = deliveryAddress.trim();
-      const rider = deliveryRiderName.trim();
       if (!name || !phone || !address) {
         setNotification({
           type: 'error',
@@ -1219,19 +1192,11 @@ export default function Dashboard() {
         setTimeout(() => setNotification(null), 5000);
         return;
       }
-      if (!rider) {
-        setNotification({
-          type: 'error',
-          msg: 'Assign a rider before creating this delivery order.',
-        });
-        setTimeout(() => setNotification(null), 5000);
-        return;
-      }
       void submitCheckout({
         customer_name: name,
         phone,
         address,
-        rider_name: rider,
+        ...(deliveryRiderName.trim() ? { rider_name: deliveryRiderName.trim() } : {}),
         ...(deliveryDistance.km != null ? { distance_km: deliveryDistance.km } : {}),
         ...(deliveryDistance.source ? { distance_source: deliveryDistance.source } : {}),
       });

@@ -169,6 +169,8 @@ class Sale(db.Model):
     # Delivery workflow (pending -> assigned -> delivered) with rider ownership.
     delivery_status = db.Column(db.String(20), nullable=True, default="pending")
     assigned_rider_id = db.Column(db.Integer, db.ForeignKey("riders.id"), nullable=True)
+    # Counter handoff workflow for takeaway open orders (pending -> served).
+    fulfillment_status = db.Column(db.String(20), nullable=True, default="pending")
 
     items = db.relationship('SaleItem', backref='sale', lazy=True, cascade="all, delete-orphan")
     assigned_rider = db.relationship("Rider", foreign_keys=[assigned_rider_id], lazy=True)

@@ -68,8 +68,10 @@ def test_finalize_open_order_always_triggers_receipt_print(client, app, monkeypa
     headers = {"Authorization": f"Bearer {token}"}
 
     receipt_calls: list[dict] = []
+    kot_calls: list[dict] = []
 
     def _fake_print_kot(self, kot_data):
+        kot_calls.append(kot_data)
         return True
 
     def _fake_print_receipt(self, receipt_data):
@@ -89,6 +91,8 @@ def test_finalize_open_order_always_triggers_receipt_print(client, app, monkeypa
     create = client.post("/api/orders/kot", headers=headers, json=kot_payload)
     assert create.status_code == 201
     sale_id = create.get_json()["sale_id"]
+    assert len(kot_calls) == 1
+    assert kot_calls[0].get("order_type") == order_type
 
     finalize_payload = {"payment_method": "Cash", "discount": None}
     if order_type == "delivery":

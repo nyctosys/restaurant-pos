@@ -41,8 +41,6 @@ def normalize_order_type_and_snapshot(data: dict[str, Any]) -> tuple[str | None,
         rider_name = (snap_in.get("rider_name") or "").strip()
         if not name or not phone or (not address and not landmark):
             return None, None, "Delivery orders require customer_name, phone, and address or nearest_landmark"
-        if not rider_name:
-            return None, None, "Delivery orders require an assigned rider"
         if (
             len(name) > MAX_FIELD
             or len(address) > MAX_FIELD

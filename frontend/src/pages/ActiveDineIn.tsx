@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { LucideIcon } from 'lucide-react';
-import { Loader2, RefreshCw, UtensilsCrossed, Pencil, CreditCard, Ban, ChefHat, CheckCircle2, Bell, X, ShoppingBag, Truck } from 'lucide-react';
+import { Loader2, RefreshCw, UtensilsCrossed, Pencil, CreditCard, Ban, ChefHat, CheckCircle2, Bell, X, ShoppingBag, Truck, UserPlus } from 'lucide-react';
 import { get, post, patch, getUserMessage } from '../api';
 import { getSocket } from '../realtime/socket';
 import { getTerminalBranchIdString, parseUserFromStorage } from '../utils/branchContext';
@@ -26,6 +26,7 @@ type ActiveSale = {
   status: string;
   order_type: string | null;
   delivery_status?: 'pending' | 'assigned' | 'delivered' | null;
+  fulfillment_status?: 'pending' | 'served' | null;
   assigned_rider_id?: number | null;
   kitchen_status: 'placed' | 'preparing' | 'ready' | null;
   table_name?: string | null;
@@ -63,6 +64,48 @@ const deliveryRiderLabel = (s: ActiveSale) => {
   return (s.order_snapshot?.rider_name || '').trim();
 };
 
+const kitchenStatusConfig: Record<
+  NonNullable<ActiveSale['kitchen_status']>,
+  {
+    label: string;
+    Icon: LucideIcon;
+    cardClass: string;
+    badgeClass: string;
+    itemPanelClass: string;
+    quantityClass: string;
+  }
+> = {
+  placed: {
+    label: 'Sent',
+    Icon: Bell,
+    cardClass: 'bg-sky-50/70 border-sky-200/80 shadow-sky-900/5',
+    badgeClass: 'bg-sky-100 text-sky-800 border-sky-300',
+    itemPanelClass: 'bg-sky-50/55 border-sky-100/80',
+    quantityClass: 'bg-sky-100 text-sky-900',
+  },
+  preparing: {
+    label: 'Preparing',
+    Icon: ChefHat,
+    cardClass: 'bg-amber-50/75 border-amber-300/80 shadow-amber-900/10',
+    badgeClass: 'bg-amber-100 text-amber-800 border-amber-300',
+    itemPanelClass: 'bg-amber-50/60 border-amber-100/90',
+    quantityClass: 'bg-amber-100 text-amber-900',
+  },
+  ready: {
+    label: 'Ready',
+    Icon: CheckCircle2,
+    cardClass: 'bg-emerald-50/80 border-emerald-300/85 shadow-emerald-900/10',
+    badgeClass: 'bg-emerald-100 text-emerald-800 border-emerald-300',
+    itemPanelClass: 'bg-emerald-50/60 border-emerald-100/90',
+    quantityClass: 'bg-emerald-100 text-emerald-900',
+  },
+};
+
+const kitchenStatusFor = (sale: ActiveSale) => {
+  const raw = sale.kitchen_status || 'placed';
+  return kitchenStatusConfig[raw] ?? kitchenStatusConfig.placed;
+};
+
 function ModifierPills({ modifiers }: { modifiers?: string[] }) {
   if (!modifiers || modifiers.length === 0) return null;
 
@@ -83,23 +126,31 @@ function ModifierPills({ modifiers }: { modifiers?: string[] }) {
 function OpenOrderCard({
   sale,
   deliveringSaleId,
+  servingSaleId,
   onPay,
   onModify,
   onVoid,
   onDelivered,
+  onAssignRider,
+  onServed,
 }: {
   sale: ActiveSale;
   deliveringSaleId: number | null;
+  servingSaleId: number | null;
   onPay: (sale: ActiveSale) => void;
   onModify: (sale: ActiveSale) => void;
   onVoid: (sale: ActiveSale) => void;
   onDelivered: (sale: ActiveSale) => void;
+  onAssignRider: (sale: ActiveSale) => void;
+  onServed: (sale: ActiveSale) => void;
 }) {
   const modifyDisabled = sale.kitchen_status === 'preparing' || sale.kitchen_status === 'ready';
   const riderLabel = deliveryRiderLabel(sale);
+  const kitchenStatus = kitchenStatusFor(sale);
+  const KitchenStatusIcon = kitchenStatus.Icon;
 
   return (
-    <li className="glass-card rounded-xl p-3 flex flex-col gap-2 border border-white/40 min-h-[210px]">
+    <li className={`glass-card rounded-xl p-3 flex flex-col gap-2 border min-h-[210px] shadow-sm transition-colors duration-300 ${kitchenStatus.cardClass}`}>
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <p className="text-[10px] font-semibold text-neutral-500 uppercase tracking-wide">{orderKindLabel(sale)}</p>
@@ -107,16 +158,9 @@ function OpenOrderCard({
         </div>
         <div className="flex flex-col items-end gap-1 shrink-0">
           <span className="text-xs font-mono text-neutral-400">#{sale.id}</span>
-          {sale.kitchen_status === 'ready' && (
-            <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
-              <CheckCircle2 className="w-3 h-3" /> Ready
-            </span>
-          )}
-          {sale.kitchen_status === 'preparing' && (
-            <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300">
-              <ChefHat className="w-3 h-3" /> Preparing
-            </span>
-          )}
+          <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full border ${kitchenStatus.badgeClass}`}>
+            <KitchenStatusIcon className="w-3 h-3" /> {kitchenStatus.label}
+          </span>
         </div>
       </div>
       <div className="text-xs text-neutral-600">
@@ -130,7 +174,7 @@ function OpenOrderCard({
         {new Date(sale.created_at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}
       </p>
       {sale.items && sale.items.length > 0 && (
-        <div className="rounded-lg bg-white/35 border border-white/40 px-2.5 py-2 space-y-1.5">
+        <div className={`rounded-lg border px-2.5 py-2 space-y-1.5 transition-colors duration-300 ${kitchenStatus.itemPanelClass}`}>
           <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-neutral-500">
             Items to prepare
           </p>
@@ -141,7 +185,7 @@ function OpenOrderCard({
                 className="border-b border-black/5 pb-1.5 last:border-0 last:pb-0"
               >
                 <div className="flex gap-2 items-start">
-                  <span className="shrink-0 min-w-[2rem] text-center text-[11px] font-bold tabular-nums px-1.5 py-0.5 rounded-full bg-brand-100 text-brand-900">
+                  <span className={`shrink-0 min-w-[2rem] text-center text-[11px] font-bold tabular-nums px-1.5 py-0.5 rounded-full ${kitchenStatus.quantityClass}`}>
                     {line.quantity}x
                   </span>
                   <div className="min-w-0 flex-1">
@@ -224,6 +268,27 @@ function OpenOrderCard({
             {deliveringSaleId === sale.id ? 'Updating…' : 'Delivered'}
           </button>
         ) : null}
+        {sale.order_type === 'delivery' && !(sale.delivery_status === 'assigned' && sale.assigned_rider_id) ? (
+          <button
+            type="button"
+            onClick={() => onAssignRider(sale)}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-amber-200 text-amber-800 text-xs font-semibold hover:bg-amber-50"
+          >
+            <UserPlus className="w-3.5 h-3.5" />
+            Assign rider
+          </button>
+        ) : null}
+        {sale.order_type === 'takeaway' && sale.fulfillment_status !== 'served' ? (
+          <button
+            type="button"
+            onClick={() => onServed(sale)}
+            disabled={servingSaleId === sale.id}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-emerald-200 text-emerald-700 text-xs font-semibold hover:bg-emerald-50 disabled:opacity-60"
+          >
+            <CheckCircle2 className="w-3.5 h-3.5" />
+            {servingSaleId === sale.id ? 'Updating…' : 'Served'}
+          </button>
+        ) : null}
       </div>
     </li>
   );
@@ -238,6 +303,11 @@ export default function ActiveDineIn() {
   const [paymentMethod, setPaymentMethod] = useState<'Card' | 'Cash' | 'Online Transfer'>('Card');
   const [paySubmitting, setPaySubmitting] = useState(false);
   const [deliveringSaleId, setDeliveringSaleId] = useState<number | null>(null);
+  const [servingSaleId, setServingSaleId] = useState<number | null>(null);
+  const [assignModalSale, setAssignModalSale] = useState<ActiveSale | null>(null);
+  const [assignRiderName, setAssignRiderName] = useState('');
+  const [assigningSaleId, setAssigningSaleId] = useState<number | null>(null);
+  const [riders, setRiders] = useState<string[]>([]);
   const [readyAlerts, setReadyAlerts] = useState<{ id: string; sale_id: number; label: string }[]>([]);
 
   const terminalBranchId = getTerminalBranchIdString(parseUserFromStorage());
@@ -249,8 +319,17 @@ export default function ActiveDineIn() {
       const q = terminalBranchId
         ? `?branch_id=${terminalBranchId}&include_items=1`
         : '?include_items=1';
-      const data = await get<{ sales?: ActiveSale[] }>(`/orders/active${q}`);
-      setSales(data.sales ?? []);
+      const settingsPath = terminalBranchId ? `/settings/?branch_id=${terminalBranchId}` : '/settings/';
+      const [activeResult, settingsResult] = await Promise.allSettled([
+        get<{ sales?: ActiveSale[] }>(`/orders/active${q}`),
+        get<{ config?: Record<string, unknown> }>(settingsPath),
+      ]);
+      if (activeResult.status !== 'fulfilled') throw activeResult.reason;
+      setSales(activeResult.value.sales ?? []);
+      if (settingsResult.status === 'fulfilled') {
+        const configuredRiders = settingsResult.value.config?.riders;
+        setRiders(Array.isArray(configuredRiders) ? (configuredRiders as string[]) : []);
+      }
     } catch (e) {
       setError(getUserMessage(e));
     } finally {
@@ -321,6 +400,24 @@ export default function ActiveDineIn() {
     return totals;
   }, [groupedSales]);
 
+  const assignRiderOptions = useMemo(() => {
+    const currentSaleId = assignModalSale?.id ?? null;
+    const busy = new Set(
+      sales
+        .filter(sale => sale.id !== currentSaleId && sale.order_type === 'delivery' && sale.delivery_status === 'assigned')
+        .map(sale => deliveryRiderLabel(sale).toLowerCase())
+        .filter(Boolean)
+    );
+    const current = assignModalSale ? deliveryRiderLabel(assignModalSale) : '';
+    const available = riders.filter(name => {
+      const key = name.trim().toLowerCase();
+      return key && (!busy.has(key) || key === current.toLowerCase());
+    });
+    return current && !available.some(name => name.toLowerCase() === current.toLowerCase())
+      ? [current, ...available]
+      : available;
+  }, [assignModalSale, riders, sales]);
+
   const openPay = (s: ActiveSale) => {
     setPayModalSale(s);
     setPaymentMethod('Card');
@@ -381,6 +478,44 @@ export default function ActiveDineIn() {
       setError(getUserMessage(e));
     } finally {
       setDeliveringSaleId(null);
+    }
+  };
+
+  const openAssignRider = (sale: ActiveSale) => {
+    setAssignModalSale(sale);
+    setAssignRiderName(deliveryRiderLabel(sale));
+  };
+
+  const submitAssignRider = async () => {
+    if (!assignModalSale || assigningSaleId === assignModalSale.id) return;
+    const riderName = assignRiderName.trim();
+    if (!riderName) {
+      setError('Select a rider before assigning this delivery order.');
+      return;
+    }
+    setAssigningSaleId(assignModalSale.id);
+    try {
+      await patch(`/orders/${assignModalSale.id}/assign-rider`, { rider_name: riderName });
+      setAssignModalSale(null);
+      setAssignRiderName('');
+      await load();
+    } catch (e) {
+      setError(getUserMessage(e));
+    } finally {
+      setAssigningSaleId(null);
+    }
+  };
+
+  const handleServed = async (sale: ActiveSale) => {
+    if (servingSaleId === sale.id) return;
+    setServingSaleId(sale.id);
+    try {
+      await patch(`/orders/${sale.id}/takeaway-served`, {});
+      await load();
+    } catch (e) {
+      setError(getUserMessage(e));
+    } finally {
+      setServingSaleId(null);
     }
   };
 
@@ -486,16 +621,77 @@ export default function ActiveDineIn() {
                         key={sale.id}
                         sale={sale}
                         deliveringSaleId={deliveringSaleId}
+                        servingSaleId={servingSaleId}
                         onPay={openPay}
                         onModify={goModify}
                         onVoid={saleToVoid => void handleVoid(saleToVoid)}
                         onDelivered={saleToDeliver => void handleDelivered(saleToDeliver)}
+                        onAssignRider={openAssignRider}
+                        onServed={saleToServe => void handleServed(saleToServe)}
                       />
                     ))}
                   </ul>
                 )}
               </section>
             ))}
+          </div>
+        </div>
+      )}
+
+      {assignModalSale && (
+        <div className="fixed inset-0 z-[200] flex items-end sm:items-center justify-center glass-overlay px-4 pb-8 sm:p-6">
+          <div
+            className="glass-floating rounded-t-3xl sm:rounded-2xl w-full max-w-md p-6 space-y-4"
+            role="dialog"
+            aria-labelledby="assign-rider-title"
+          >
+            <h2 id="assign-rider-title" className="text-lg font-bold text-neutral-900">
+              Assign rider — {orderLabel(assignModalSale)}
+            </h2>
+            <p className="text-sm text-neutral-600">
+              Order #{assignModalSale.id} · rider must be assigned before this delivery can be marked delivered.
+            </p>
+            <div>
+              <label htmlFor="assign-rider-name" className="block text-xs font-semibold text-neutral-500 uppercase mb-2">
+                Rider
+              </label>
+              <input
+                id="assign-rider-name"
+                list="assign-rider-options"
+                value={assignRiderName}
+                onChange={event => setAssignRiderName(event.target.value)}
+                placeholder="Select or type rider name"
+                className="w-full px-3 py-2.5 rounded-xl border border-neutral-200 bg-white/80 text-sm font-semibold text-neutral-900 focus:outline-none focus:ring-2 focus:ring-brand-500"
+              />
+              <datalist id="assign-rider-options">
+                {assignRiderOptions.map(rider => (
+                  <option key={rider} value={rider} />
+                ))}
+              </datalist>
+              {riders.length > 0 && assignRiderOptions.length === 0 && (
+                <p className="mt-2 text-xs text-amber-700">All saved riders are assigned. Type a rider name to continue.</p>
+              )}
+            </div>
+            <div className="flex gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setAssignModalSale(null);
+                  setAssignRiderName('');
+                }}
+                className="flex-1 py-3 rounded-xl border border-neutral-200 font-semibold text-neutral-700"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={assigningSaleId === assignModalSale.id || !assignRiderName.trim()}
+                onClick={() => void submitAssignRider()}
+                className="flex-1 py-3 rounded-xl bg-brand-700 text-white font-bold disabled:opacity-50"
+              >
+                {assigningSaleId === assignModalSale.id ? 'Assigning…' : 'Assign rider'}
+              </button>
+            </div>
           </div>
         </div>
       )}

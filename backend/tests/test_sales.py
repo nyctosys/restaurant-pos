@@ -925,7 +925,95 @@ def test_update_open_delivery_order_can_change_rider_name(client, app):
     assert active.get_json()["sales"][0]["assigned_rider_id"] is not None
 
 
-def test_delivery_kot_requires_assigned_rider(client, app):
+def test_takeaway_order_requires_payment_and_served_before_leaving_open_orders(client, app):
+    client.post(
+        "/api/auth/setup",
+        json={"username": "owner1", "password": "pass", "branch_name": "Main"},
+    )
+    token = _get_token(client)
+    headers = {"Authorization": f"Bearer {token}"}
+    with app.app_context():
+        b = Branch.query.filter_by(name="Main").first()
+        bid = b.id
+    pid, _ = _create_menu_item_with_recipe(app, bid, "Served Takeaway Burger", stock=50.0)
+
+    create = client.post(
+        "/api/orders/kot",
+        headers=headers,
+        json={
+            "items": [{"product_id": pid, "quantity": 1}],
+            "order_type": "takeaway",
+            "skip_kot_print": True,
+        },
+    )
+    assert create.status_code == 201
+    sale_id = create.get_json()["sale_id"]
+
+    served = client.patch(f"/api/orders/{sale_id}/takeaway-served", headers=headers)
+    assert served.status_code == 200
+
+    active_after_served = client.get("/api/orders/active", headers=headers)
+    assert active_after_served.status_code == 200
+    assert [row["id"] for row in active_after_served.get_json()["sales"]] == [sale_id]
+    assert active_after_served.get_json()["sales"][0]["fulfillment_status"] == "served"
+
+    paid = client.post(
+        f"/api/orders/{sale_id}/finalize",
+        headers=headers,
+        json={"payment_method": "Cash", "discount": None},
+    )
+    assert paid.status_code == 200
+
+    active_after_paid_and_served = client.get("/api/orders/active", headers=headers)
+    assert active_after_paid_and_served.status_code == 200
+    assert active_after_paid_and_served.get_json()["sales"] == []
+
+
+def test_paid_takeaway_stays_open_until_served(client, app):
+    client.post(
+        "/api/auth/setup",
+        json={"username": "owner1", "password": "pass", "branch_name": "Main"},
+    )
+    token = _get_token(client)
+    headers = {"Authorization": f"Bearer {token}"}
+    with app.app_context():
+        b = Branch.query.filter_by(name="Main").first()
+        bid = b.id
+    pid, _ = _create_menu_item_with_recipe(app, bid, "Paid Takeaway Burger", stock=50.0)
+
+    create = client.post(
+        "/api/orders/kot",
+        headers=headers,
+        json={
+            "items": [{"product_id": pid, "quantity": 1}],
+            "order_type": "takeaway",
+            "skip_kot_print": True,
+        },
+    )
+    assert create.status_code == 201
+    sale_id = create.get_json()["sale_id"]
+
+    paid = client.post(
+        f"/api/orders/{sale_id}/finalize",
+        headers=headers,
+        json={"payment_method": "Cash", "discount": None},
+    )
+    assert paid.status_code == 200
+
+    active_after_paid = client.get("/api/orders/active", headers=headers)
+    assert active_after_paid.status_code == 200
+    assert [row["id"] for row in active_after_paid.get_json()["sales"]] == [sale_id]
+    assert active_after_paid.get_json()["sales"][0]["orderStatus"] == "paid"
+
+    served = client.patch(f"/api/orders/{sale_id}/takeaway-served", headers=headers)
+    assert served.status_code == 200
+
+    active_after_served = client.get("/api/orders/active", headers=headers)
+    assert active_after_served.status_code == 200
+    assert active_after_served.get_json()["sales"] == []
+
+
+def test_delivery_kot_can_wait_for_rider_assignment(client, app):
     client.post(
         "/api/auth/setup",
         json={"username": "owner1", "password": "pass", "branch_name": "Main"},
@@ -950,11 +1038,36 @@ def test_delivery_kot_requires_assigned_rider(client, app):
             },
         },
     )
-    assert res.status_code == 400
-    assert "assigned rider" in res.get_json()["message"].lower()
+    assert res.status_code == 201
+    sale_id = res.get_json()["sale_id"]
+
+    active = client.get("/api/orders/active?include_items=1", headers={"Authorization": f"Bearer {token}"})
+    assert active.status_code == 200
+    sale = active.get_json()["sales"][0]
+    assert sale["id"] == sale_id
+    assert sale["delivery_status"] == "pending"
+    assert sale["assigned_rider_id"] is None
+
+    assign = client.patch(
+        f"/api/orders/{sale_id}/assign-rider",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"rider_name": "Hamza"},
+    )
+    assert assign.status_code == 200
+    body = assign.get_json()
+    assert body["delivery_status"] == "assigned"
+    assert body["assigned_rider_id"] is not None
+    assert body["rider_name"] == "Hamza"
+
+    active_after_assign = client.get("/api/orders/active", headers={"Authorization": f"Bearer {token}"})
+    assert active_after_assign.status_code == 200
+    sale_after_assign = active_after_assign.get_json()["sales"][0]
+    assert sale_after_assign["delivery_status"] == "assigned"
+    assert sale_after_assign["assigned_rider_id"] == body["assigned_rider_id"]
+    assert sale_after_assign["order_snapshot"]["rider_name"] == "Hamza"
 
 
-def test_delivery_checkout_requires_assigned_rider(client, app):
+def test_delivery_checkout_can_wait_for_rider_assignment(client, app):
     client.post(
         "/api/auth/setup",
         json={"username": "owner1", "password": "pass", "branch_name": "Main"},
@@ -980,8 +1093,16 @@ def test_delivery_checkout_requires_assigned_rider(client, app):
             },
         },
     )
-    assert res.status_code == 400
-    assert "assigned rider" in res.get_json()["message"].lower()
+    assert res.status_code == 201
+    sale_id = res.get_json()["sale_id"]
+
+    active = client.get("/api/orders/active", headers={"Authorization": f"Bearer {token}"})
+    assert active.status_code == 200
+    sale = active.get_json()["sales"][0]
+    assert sale["id"] == sale_id
+    assert sale["status"] == "completed"
+    assert sale["delivery_status"] == "pending"
+    assert sale["assigned_rider_id"] is None
 
 
 def test_checkout_accepts_object_variants_and_uses_variant_bom(client, app):
