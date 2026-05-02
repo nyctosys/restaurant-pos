@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { get } from '../api';
+import { preloadAppRoute } from '../routes/preload';
 import { getTerminalBranchIdString, parseUserFromStorage } from '../utils/branchContext';
 import { 
   Package, 
@@ -144,6 +145,9 @@ export default function BaseLayout() {
                 key={item.path}
                 to={item.path}
                 aria-label={navLabel}
+                onMouseEnter={() => preloadAppRoute(item.path)}
+                onFocus={() => preloadAppRoute(item.path)}
+                onTouchStart={() => preloadAppRoute(item.path)}
                 className={`touch-target flex flex-col items-center justify-center gap-0.5 rounded-xl transition-all duration-200 relative ${
                   isActive
                     ? 'glass-card text-brand-900 shadow-lg shadow-gold-500/20 border-gold-300/70 p-3 xl:p-2 w-14 h-14 xl:w-full xl:h-auto'

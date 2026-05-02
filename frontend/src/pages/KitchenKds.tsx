@@ -399,15 +399,20 @@ export default function KitchenKds() {
 
   const updateStatus = useCallback(async (saleId: number, newStatus: KitchenStatus) => {
     setBusyIds(s => new Set(s).add(saleId));
+    const previousOrders = orders;
+    setOrders(prev => prev.map(order => (
+      order.id === saleId ? { ...order, kitchen_status: newStatus } : order
+    )));
     try {
       await patch(`/orders/${saleId}/kitchen-status`, { kitchen_status: newStatus });
       await load();
     } catch (e) {
+      setOrders(previousOrders);
       setError(getUserMessage(e));
     } finally {
       setBusyIds(s => { const n = new Set(s); n.delete(saleId); return n; });
     }
-  }, [load]);
+  }, [load, orders]);
 
   const filtered = orders.filter(o => {
     const ks = normalizeKitchenStatus(o.kitchen_status);

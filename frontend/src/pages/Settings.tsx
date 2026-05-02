@@ -514,21 +514,21 @@ export default function Settings() {
   };
 
   return (
-    <div className="flex flex-col lg:flex-row h-full min-h-0 bg-transparent overflow-hidden">
+    <div className="flex h-full max-h-full min-h-0 flex-col overflow-hidden bg-transparent 2xl:flex-row">
       
       {/* Sidebar Nav — scrollable on short viewports; xl+ wider rail */}
       <div
         ref={settingsNavScrollRef}
-        className="w-full lg:w-56 xl:w-64 shrink-0 glass-card border-b lg:border-b-0 lg:border-r border-white/20 p-3 lg:p-4 overflow-y-auto max-h-[min(50vh,420px)] lg:max-h-none lg:min-h-0 m-0 lg:m-2"
+        className="w-full shrink-0 overflow-x-auto border-b border-white/20 p-3 2xl:m-2 2xl:min-h-0 2xl:w-64 2xl:min-w-64 2xl:overflow-x-hidden 2xl:overflow-y-auto 2xl:border-b-0 2xl:border-r 2xl:p-4 glass-card"
       >
-        <h2 className="text-lg font-bold text-soot-900 mb-4 lg:mb-6 px-2 lg:px-4">System Settings</h2>
-        <nav className="space-y-1">
+        <h2 className="sr-only 2xl:not-sr-only 2xl:text-lg 2xl:font-bold 2xl:text-soot-900 2xl:mb-6 2xl:px-4">System Settings</h2>
+        <nav className="flex min-w-max gap-2 2xl:min-w-0 2xl:flex-col 2xl:gap-1" aria-label="System settings sections">
           {tabs.map(tab => (
             <button
               key={tab}
               type="button"
               onClick={() => setActiveTab(tab.toLowerCase().replace(/ & | /g, ''))}
-              className={`w-full text-left px-4 py-3 min-h-[44px] rounded-lg font-medium transition-colors ${
+              className={`min-h-[44px] whitespace-nowrap rounded-lg px-3 py-2.5 text-center font-medium transition-colors sm:px-4 2xl:w-full 2xl:text-left 2xl:py-3 ${
                 activeTab === tab.toLowerCase().replace(/ & | /g, '')
                   ? 'bg-soot-200 text-soot-900'
                   : 'text-soot-600 hover:bg-soot-100'
@@ -541,13 +541,13 @@ export default function Settings() {
       </div>
 
       {/* Main Settings Area */}
-      <div className="flex-1 min-w-0 min-h-0 page-padding lg:py-6 xl:py-8 overflow-auto">
+      <div className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain page-padding 2xl:py-8">
         
         {activeTab === 'general' && (
           <div className="max-w-2xl xl:max-w-3xl">
             <h3 className="text-2xl font-bold text-soot-900 mb-6">General Settings</h3>
             <div className="space-y-6">
-              <div className="glass-card p-6 flex items-center justify-between">
+              <div className="glass-card p-4 sm:p-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <h4 className="font-semibold text-soot-900 mb-1">Global Theme</h4>
                   <p className="text-sm text-soot-500">Toggle between light and dark modes across the app.</p>
@@ -572,8 +572,8 @@ export default function Settings() {
                 </button>
               </div>
 
-              <div className="glass-card p-6">
-                <div className="flex items-start justify-between gap-4 mb-4">
+              <div className="glass-card p-4 sm:p-6">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4 mb-4">
                   <div>
                     <h4 className="font-semibold text-soot-900 mb-1">Dashboard Menu Layout</h4>
                     <p className="text-sm text-soot-500">Choose the default menu presentation for the Dashboard.</p>
@@ -586,7 +586,7 @@ export default function Settings() {
                   )}
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <button
                     type="button"
                     onClick={() => setDashboardMenuLayout('list')}
@@ -611,7 +611,7 @@ export default function Settings() {
                   </button>
                 </div>
 
-                <div className="mt-4 flex items-center justify-between gap-3">
+                <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div className={`text-sm ${generalFeedback.startsWith('error:') ? 'text-red-600' : 'text-soot-500'}`}>
                     {generalFeedback ? (generalFeedback.startsWith('error:') ? generalFeedback.replace(/^error:/, '') : generalFeedback) : 'Saved per branch terminal settings.'}
                   </div>
@@ -619,7 +619,7 @@ export default function Settings() {
                     type="button"
                     onClick={saveGeneralSettings}
                     disabled={generalSaving || generalLoading}
-                    className="px-4 py-2.5 rounded-lg bg-brand-600 text-white font-semibold hover:bg-brand-700 disabled:opacity-60 transition-colors"
+                    className="min-h-[44px] px-4 py-2.5 rounded-lg bg-brand-600 text-white font-semibold hover:bg-brand-700 disabled:opacity-60 transition-colors"
                   >
                     {generalSaving ? 'Saving…' : 'Save layout'}
                   </button>
@@ -639,7 +639,7 @@ export default function Settings() {
           <div className="max-w-2xl xl:max-w-3xl">
             <h3 className="text-2xl font-bold text-soot-900 mb-6">Hardware Configuration</h3>
             <div className="space-y-6">
-              <div className="glass-card p-6">
+              <div className="glass-card p-4 sm:p-6">
                 <h4 className="font-semibold text-soot-900 mb-4">Thermal Printers (Receipt + KOT)</h4>
                 
                 {hardwareLoading ? (
@@ -670,7 +670,7 @@ export default function Settings() {
                       </div>
 
                       {hardware.receipt_printer_mode === 'lan' ? (
-                        <div className="grid grid-cols-2 gap-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                           <div>
                             <label className="block text-sm font-medium text-soot-800 mb-1">Printer IP / Host</label>
                             <input
@@ -696,7 +696,7 @@ export default function Settings() {
                           </div>
                         </div>
                       ) : (
-                        <div className="grid grid-cols-2 gap-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                           <div>
                             <label className="block text-sm font-medium text-soot-800 mb-1">USB Vendor ID</label>
                             <input
@@ -740,7 +740,7 @@ export default function Settings() {
                       </div>
 
                       {hardware.kot_printer_mode === 'lan' ? (
-                        <div className="grid grid-cols-2 gap-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                           <div>
                             <label className="block text-sm font-medium text-soot-800 mb-1">Printer IP / Host</label>
                             <input
@@ -766,7 +766,7 @@ export default function Settings() {
                           </div>
                         </div>
                       ) : (
-                        <div className="grid grid-cols-2 gap-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                           <div>
                             <label className="block text-sm font-medium text-soot-800 mb-1">USB Vendor ID</label>
                             <input
@@ -819,11 +819,11 @@ export default function Settings() {
                   </div>
                 )}
 
-                <div className="mt-6 flex flex-wrap gap-3">
+                <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
                   <button 
                     onClick={saveHardwareSettings}
                     disabled={hardwareSaving}
-                    className="bg-brand-700 text-white px-6 py-2 rounded-lg text-sm font-medium hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm flex items-center gap-2"
+                    className="min-h-[44px] justify-center bg-brand-700 text-white px-6 py-2 rounded-lg text-sm font-medium hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm flex items-center gap-2"
                   >
                     {hardwareSaving && <Loader2 className="w-4 h-4 animate-spin" />}
                     Save Hardware Config
@@ -831,7 +831,7 @@ export default function Settings() {
                   <button 
                     onClick={handleTestPrint}
                     disabled={testPrintLoading || testKotPrintLoading || hardwareSaving}
-                    className="bg-white border text-soot-700 border-soot-300 px-6 py-2 rounded-lg text-sm font-medium hover:bg-soot-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+                    className="min-h-[44px] justify-center bg-white border text-soot-700 border-soot-300 px-6 py-2 rounded-lg text-sm font-medium hover:bg-soot-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
                   >
                     {testPrintLoading && <Loader2 className="w-4 h-4 animate-spin text-soot-500" />}
                     Test Receipt Printer
@@ -839,7 +839,7 @@ export default function Settings() {
                   <button 
                     onClick={handleTestKotPrint}
                     disabled={testKotPrintLoading || testPrintLoading || hardwareSaving}
-                    className="bg-white border text-soot-700 border-soot-300 px-6 py-2 rounded-lg text-sm font-medium hover:bg-soot-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+                    className="min-h-[44px] justify-center bg-white border text-soot-700 border-soot-300 px-6 py-2 rounded-lg text-sm font-medium hover:bg-soot-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
                   >
                     {testKotPrintLoading && <Loader2 className="w-4 h-4 animate-spin text-soot-500" />}
                     Test KOT Printer
@@ -849,7 +849,7 @@ export default function Settings() {
               )}
               </div>
 
-              <div className="glass-card p-6 text-sm">
+              <div className="glass-card p-4 sm:p-6 text-sm">
                 <h4 className="font-semibold text-soot-900 mb-2 border-b border-soot-200 pb-2">Barcode Scanner Tips</h4>
                 <p className="text-soot-600 mb-3">
                   This POS supports standard USB barcode scanners acting as a <strong>keyboard wedge</strong>. 
@@ -871,7 +871,7 @@ export default function Settings() {
             <p className="text-sm text-soot-500 mb-6">Manage the menu categories that appear on the Order and Stock pages.</p>
 
             {/* Add new category */}
-            <div className="flex gap-2 mb-6">
+            <div className="flex flex-col gap-2 mb-6 sm:flex-row">
               <input
                 type="text"
                 inputMode="text"
@@ -884,7 +884,7 @@ export default function Settings() {
               <button
                 onClick={handleAddSection}
                 disabled={!newSection.trim() || sectionsSaving}
-                className="flex items-center gap-2 bg-brand-700 text-white px-5 py-3 rounded-lg font-medium hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm"
+                className="flex min-h-[44px] items-center justify-center gap-2 bg-brand-700 text-white px-5 py-3 rounded-lg font-medium hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm"
               >
                 <Plus className="w-4 h-4" />
                 Add
@@ -917,7 +917,7 @@ export default function Settings() {
                 {sections.map(sec => (
                   <div
                     key={sec}
-                    className="flex items-center justify-between px-4 py-3 glass-card group hover:border-soot-200 transition-colors"
+                    className="flex items-center justify-between gap-3 px-4 py-3 glass-card group hover:border-soot-200 transition-colors"
                   >
                     <span className="font-medium text-soot-800">{sec}</span>
                     <button
@@ -941,7 +941,7 @@ export default function Settings() {
             <h3 className="text-2xl font-bold text-soot-900 mb-2">Product Variants (Options)</h3>
             <p className="text-sm text-soot-500 mb-6">Manage variant names (e.g. Small, Medium, Large) used when adding or editing menu items. These options appear in Inventory when assigning variants to products.</p>
 
-            <div className="flex gap-2 mb-6">
+            <div className="flex flex-col gap-2 mb-6 sm:flex-row">
               <input
                 type="text"
                 inputMode="text"
@@ -954,7 +954,7 @@ export default function Settings() {
               <button
                 onClick={handleAddVariant}
                 disabled={!newVariant.trim() || variantsSaving || variants.includes(newVariant.trim())}
-                className="flex items-center gap-2 bg-brand-700 text-white px-5 py-3 rounded-lg font-medium hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm"
+                className="flex min-h-[44px] items-center justify-center gap-2 bg-brand-700 text-white px-5 py-3 rounded-lg font-medium hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm"
               >
                 <Plus className="w-4 h-4" />
                 Add
@@ -985,7 +985,7 @@ export default function Settings() {
                 {variants.map((v, index) => (
                   <div
                     key={`${v}-${index}`}
-                    className="flex items-center justify-between px-4 py-3 glass-card group hover:border-soot-200 transition-colors"
+                    className="flex items-center justify-between gap-3 px-4 py-3 glass-card group hover:border-soot-200 transition-colors"
                   >
                     {editingVariantIndex === index ? (
                       <div className="flex items-center gap-2 flex-1">
@@ -1059,8 +1059,8 @@ export default function Settings() {
             ) : (
               <div className="space-y-6">
                 {/* Taxes on/off toggle */}
-                <div className="glass-card p-6">
-                  <div className="flex items-center justify-between">
+                <div className="glass-card p-4 sm:p-6">
+                  <div className="flex items-center justify-between gap-4">
                     <div>
                       <p className="text-sm font-semibold text-soot-800">Taxes enabled</p>
                       <p className="text-xs text-soot-500 mt-0.5">When off, no tax is applied or shown on receipts.</p>
@@ -1086,13 +1086,13 @@ export default function Settings() {
 
                 {/* Per–payment method rates (only when tax enabled) */}
                 {taxEnabled && (
-                  <div className="glass-card p-6 space-y-4">
+                  <div className="glass-card p-4 sm:p-6 space-y-4">
                     <label className="block text-sm font-semibold text-soot-800">Tax rate by payment method (%)</label>
                     <p className="text-xs text-soot-500 -mt-2">Each payment method can have a different tax percentage.</p>
                     {PAYMENT_METHODS.map(method => (
-                      <div key={method} className="flex items-center justify-between gap-4">
+                      <div key={method} className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                         <span className="text-sm font-medium text-soot-700">{method}</span>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 sm:justify-end">
                           <input
                             type="number"
                             inputMode="decimal"
@@ -1100,7 +1100,7 @@ export default function Settings() {
                             min="0"
                             value={taxRatesByPaymentMethod[method] ?? 0}
                             onChange={(e) => setTaxRatesByPaymentMethod(prev => ({ ...prev, [method]: parseFloat(e.target.value) || 0 }))}
-                            className="w-24 px-3 py-2 border border-soot-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:outline-none text-right font-medium"
+                            className="w-full sm:w-24 px-3 py-2 border border-soot-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:outline-none text-right font-medium"
                           />
                           <span className="text-soot-400 font-medium">%</span>
                         </div>
@@ -1122,7 +1122,7 @@ export default function Settings() {
                 <button 
                   onClick={saveTaxSettings}
                   disabled={taxSaving}
-                  className="bg-brand-700 text-white px-8 py-3 rounded-lg font-bold hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all active:scale-[0.98] shadow-sm flex items-center gap-2"
+                  className="min-h-[44px] justify-center bg-brand-700 text-white px-8 py-3 rounded-lg font-bold hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all active:scale-[0.98] shadow-sm flex items-center gap-2"
                 >
                   {taxSaving && <Loader2 className="w-4 h-4 animate-spin" />}
                   Save Tax Configuration
@@ -1216,7 +1216,7 @@ export default function Settings() {
                   {displayList.map(d => (
                     <div
                       key={d.id}
-                      className={`flex items-center justify-between px-4 py-3 rounded-lg border transition-colors ${d.archived ? 'bg-soot-50/70 border-soot-100 opacity-90' : 'bg-soot-50 border-soot-100 group hover:border-soot-200'}`}
+                    className={`flex flex-col gap-3 px-4 py-3 rounded-lg border transition-colors sm:flex-row sm:items-center sm:justify-between ${d.archived ? 'bg-soot-50/70 border-soot-100 opacity-90' : 'bg-soot-50 border-soot-100 group hover:border-soot-200'}`}
                     >
                       {editingId === d.id && editingDraft ? (
                         <div className="flex flex-wrap gap-2 items-center flex-1">
@@ -1259,7 +1259,7 @@ export default function Settings() {
                         </div>
                       ) : (
                         <>
-                          <div className="flex items-center gap-3">
+                          <div className="flex flex-wrap items-center gap-3">
                             <span className="font-medium text-soot-800">{d.name}</span>
                             <span className="text-sm text-soot-500">
                               {d.type === 'percent' ? `${d.value}%` : `Rs.${d.value}`}
@@ -1471,7 +1471,7 @@ function AppLogsPanel() {
 
   return (
     <div className="max-w-4xl xl:max-w-5xl">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+      <div className="flex flex-col gap-4 mb-6 xl:flex-row xl:items-center xl:justify-between">
         <div>
           <h3 className="text-2xl font-bold text-soot-900 flex items-center gap-2">
             <ScrollText className="w-6 h-6 text-soot-400" />
@@ -1486,7 +1486,7 @@ function AppLogsPanel() {
           )}
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
           <button
             type="button"
             onClick={() => loadServer()}
@@ -1599,7 +1599,7 @@ function LogRow({ entry, expanded, onToggle, formatTime }: { entry: LogEntry; ex
   const levelPillClass = LEVEL_STYLES[entry.level] ?? LEVEL_STYLES.error;
   return (
     <div className="group">
-      <button type="button" onClick={onToggle} className="w-full text-left px-4 py-2.5 flex items-start gap-2 hover:bg-white/60 transition-colors">
+      <button type="button" onClick={onToggle} className="w-full text-left px-3 py-2.5 flex min-w-0 flex-wrap items-start gap-2 hover:bg-white/60 transition-colors sm:flex-nowrap sm:px-4">
         <div className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${dotClass}`} />
         <span className="text-[11px] font-mono text-soot-400 shrink-0 mt-0.5 w-16">{formatTime(entry.timestamp)}</span>
         <span className={`text-[11px] font-bold uppercase shrink-0 mt-0.5 px-1.5 py-0.5 rounded border ${levelPillClass}`}>{entry.level}</span>
@@ -1612,7 +1612,7 @@ function LogRow({ entry, expanded, onToggle, formatTime }: { entry: LogEntry; ex
           </span>
         )}
         <span className="text-xs font-semibold text-soot-600 shrink-0 mt-0.5">[{entry.source}]</span>
-        <span className="text-xs text-soot-700 flex-1 mt-0.5 truncate">{entry.message}</span>
+        <span className="min-w-[12rem] flex-1 text-xs text-soot-700 mt-0.5 break-words sm:truncate">{entry.message}</span>
         {hasData && (
           expanded ? <ChevronUp className="w-3.5 h-3.5 text-soot-400 shrink-0 mt-0.5" /> : <ChevronDown className="w-3.5 h-3.5 text-soot-400 shrink-0 mt-0.5" />
         )}

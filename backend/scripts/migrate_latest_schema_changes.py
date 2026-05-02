@@ -52,6 +52,22 @@ def _table_exists(table: str) -> bool:
         return False
 
 
+def _index_exists(table: str, index_name: str) -> bool:
+    inspector = inspect(db.engine)
+    try:
+        return any(index.get("name") == index_name for index in inspector.get_indexes(table))
+    except Exception:
+        return False
+
+
+def _ensure_index(table: str, index_name: str, ddl: str) -> None:
+    if _index_exists(table, index_name):
+        print(f"  - {index_name} already exists")
+        return
+    db.session.execute(text(ddl))
+    print(f"  + Created {index_name}")
+
+
 def _ensure_stock_movement_preparation_value(dialect: str) -> None:
     if dialect != "postgresql":
         return
@@ -153,6 +169,93 @@ def _ensure_prepared_item_tables(dialect: str) -> None:
         print(f"  + Created {table}")
 
 
+def _ensure_combo_product_id_nullable(dialect: str) -> None:
+    if dialect != "postgresql":
+        print("  - Skipping combo_items.product_id nullability change on non-PostgreSQL DB")
+        return
+    db.session.execute(text("ALTER TABLE combo_items ALTER COLUMN product_id DROP NOT NULL"))
+    print("  + combo_items.product_id now allows NULL for category-choice deal rows")
+
+
+def _ensure_recipe_extra_costs_table(dialect: str) -> None:
+    float_type = "DOUBLE PRECISION" if dialect == "postgresql" else "FLOAT"
+    id_type = "SERIAL PRIMARY KEY" if dialect == "postgresql" else "INTEGER PRIMARY KEY AUTOINCREMENT"
+    ts_type = "TIMESTAMPTZ" if dialect == "postgresql" else "TIMESTAMP"
+    if _table_exists("recipe_extra_costs"):
+        print("  - recipe_extra_costs already exists")
+        return
+    db.session.execute(
+        text(
+            f"""
+            CREATE TABLE recipe_extra_costs (
+              id {id_type},
+              product_id INTEGER NOT NULL REFERENCES products(id),
+              name VARCHAR(120) NOT NULL,
+              amount {float_type} NOT NULL DEFAULT 0,
+              variant_key VARCHAR(100) NOT NULL DEFAULT '',
+              created_at {ts_type},
+              CONSTRAINT ck_recipe_extra_cost_amount_nonneg CHECK (amount >= 0)
+            )
+            """
+        )
+    )
+    print("  + Created recipe_extra_costs")
+
+
+def _ensure_riders_table(dialect: str) -> None:
+    id_type = "SERIAL PRIMARY KEY" if dialect == "postgresql" else "INTEGER PRIMARY KEY AUTOINCREMENT"
+    ts_type = "TIMESTAMPTZ" if dialect == "postgresql" else "TIMESTAMP"
+    if _table_exists("riders"):
+        print("  - riders already exists")
+        return
+    db.session.execute(
+        text(
+            f"""
+            CREATE TABLE riders (
+              id {id_type},
+              branch_id INTEGER NOT NULL REFERENCES branches(id),
+              name VARCHAR(120) NOT NULL,
+              is_available BOOLEAN NOT NULL DEFAULT TRUE,
+              created_at {ts_type},
+              archived_at {ts_type},
+              CONSTRAINT uq_rider_branch_name UNIQUE (branch_id, name)
+            )
+            """
+        )
+    )
+    print("  + Created riders")
+
+
+def _ensure_idempotency_records_table(dialect: str) -> None:
+    id_type = "SERIAL PRIMARY KEY" if dialect == "postgresql" else "INTEGER PRIMARY KEY AUTOINCREMENT"
+    ts_type = "TIMESTAMPTZ" if dialect == "postgresql" else "TIMESTAMP"
+    json_type = "JSONB" if dialect == "postgresql" else "JSON"
+    if _table_exists("idempotency_records"):
+        print("  - idempotency_records already exists")
+        return
+    db.session.execute(
+        text(
+            f"""
+            CREATE TABLE idempotency_records (
+              id {id_type},
+              idempotency_key VARCHAR(128) NOT NULL UNIQUE,
+              method VARCHAR(10) NOT NULL,
+              path VARCHAR(255) NOT NULL,
+              request_hash VARCHAR(64) NOT NULL,
+              user_id INTEGER REFERENCES users(id),
+              branch_id VARCHAR(32) REFERENCES branches(id),
+              response_status INTEGER,
+              response_body {json_type},
+              state VARCHAR(20) NOT NULL DEFAULT 'processing',
+              created_at {ts_type},
+              updated_at {ts_type}
+            )
+            """
+        )
+    )
+    print("  + Created idempotency_records")
+
+
 def main() -> None:
     app = create_app()
     with app.app_context():
@@ -183,11 +286,56 @@ def main() -> None:
                 column="kitchen_ready_at",
                 ddl=f"ALTER TABLE sales ADD COLUMN kitchen_ready_at {ts_type}",
             ),
+            ColumnMigration(
+                table="sales",
+                column="kds_ticket_printed_at",
+                ddl=f"ALTER TABLE sales ADD COLUMN kds_ticket_printed_at {ts_type}",
+            ),
+            ColumnMigration(
+                table="sales",
+                column="modified_at",
+                ddl=f"ALTER TABLE sales ADD COLUMN modified_at {ts_type}",
+            ),
+            ColumnMigration(
+                table="sales",
+                column="modification_snapshot",
+                ddl=f"ALTER TABLE sales ADD COLUMN modification_snapshot {json_type}",
+            ),
             # Menu combo variant support.
             ColumnMigration(
                 table="combo_items",
                 column="variant_key",
                 ddl="ALTER TABLE combo_items ADD COLUMN variant_key VARCHAR(100) NOT NULL DEFAULT ''",
+            ),
+            ColumnMigration(
+                table="combo_items",
+                column="selection_type",
+                ddl="ALTER TABLE combo_items ADD COLUMN selection_type VARCHAR(20) NOT NULL DEFAULT 'product'",
+            ),
+            ColumnMigration(
+                table="combo_items",
+                column="category_name",
+                ddl="ALTER TABLE combo_items ADD COLUMN category_name VARCHAR(100)",
+            ),
+            ColumnMigration(
+                table="products",
+                column="sale_price",
+                ddl="ALTER TABLE products ADD COLUMN sale_price NUMERIC(12, 2) DEFAULT 0",
+            ),
+            ColumnMigration(
+                table="ingredients",
+                column="brand_name",
+                ddl="ALTER TABLE ingredients ADD COLUMN brand_name VARCHAR(120) NOT NULL DEFAULT ''",
+            ),
+            ColumnMigration(
+                table="sales",
+                column="delivery_status",
+                ddl="ALTER TABLE sales ADD COLUMN delivery_status VARCHAR(20) DEFAULT 'pending'",
+            ),
+            ColumnMigration(
+                table="sales",
+                column="assigned_rider_id",
+                ddl="ALTER TABLE sales ADD COLUMN assigned_rider_id INTEGER REFERENCES riders(id)",
             ),
         ]
 
@@ -195,8 +343,69 @@ def main() -> None:
         try:
             _ensure_stock_movement_preparation_value(dialect)
             _ensure_prepared_item_tables(dialect)
+            _ensure_recipe_extra_costs_table(dialect)
+            _ensure_riders_table(dialect)
+            _ensure_idempotency_records_table(dialect)
             for migration in migrations:
                 _apply_column_migration(migration)
+            # Backward compatibility: old base_price was sale price.
+            db.session.execute(
+                text("UPDATE products SET sale_price = base_price WHERE sale_price IS NULL OR sale_price = 0")
+            )
+            from app.models import Product  # local import to avoid script startup side effects
+
+            for product in Product.query.all():
+                raw_variants = getattr(product, "variants", None)
+                if isinstance(raw_variants, list) and len(raw_variants) > 0:
+                    continue
+                base_price = float(getattr(product, "base_price", 0) or 0)
+                sale_price = float(getattr(product, "sale_price", base_price) or base_price)
+                if sale_price <= 0:
+                    sale_price = base_price if base_price > 0 else 1.0
+                if base_price <= 0:
+                    base_price = sale_price if sale_price > 0 else 1.0
+                product.variants = [
+                    {
+                        "name": "Default",
+                        "basePrice": round(base_price, 2),
+                        "salePrice": round(sale_price, 2),
+                        "sku": "",
+                    }
+                ]
+            db.session.execute(
+                text(
+                    """
+                    UPDATE sales
+                    SET delivery_status = CASE
+                      WHEN COALESCE(order_type, '') <> 'delivery' THEN NULL
+                      WHEN status = 'completed' THEN 'assigned'
+                      ELSE 'pending'
+                    END
+                    WHERE delivery_status IS NULL
+                    """
+                )
+            )
+            _ensure_combo_product_id_nullable(dialect)
+            _ensure_index(
+                "sales",
+                "ix_sales_report_branch_created_status",
+                "CREATE INDEX IF NOT EXISTS ix_sales_report_branch_created_status ON sales (branch_id, created_at, status)",
+            )
+            _ensure_index(
+                "sales",
+                "ix_sales_report_branch_created_payment",
+                "CREATE INDEX IF NOT EXISTS ix_sales_report_branch_created_payment ON sales (branch_id, created_at, payment_method)",
+            )
+            _ensure_index(
+                "sales",
+                "ix_sales_report_branch_created_order_type",
+                "CREATE INDEX IF NOT EXISTS ix_sales_report_branch_created_order_type ON sales (branch_id, created_at, order_type)",
+            )
+            _ensure_index(
+                "idempotency_records",
+                "ix_idempotency_records_user_path",
+                "CREATE INDEX IF NOT EXISTS ix_idempotency_records_user_path ON idempotency_records (user_id, method, path)",
+            )
             db.session.commit()
             print("migrate_latest_schema_changes: complete.")
         except Exception:

@@ -216,7 +216,7 @@ export default function UsersSettings() {
         </div>
       </div>
 
-      <div className="glass-card overflow-hidden">
+      <div className="glass-card overflow-x-auto">
         {loading ? (
           <div className="p-8 flex justify-center text-soot-400">
             <Loader2 className="w-6 h-6 animate-spin" />
@@ -226,7 +226,7 @@ export default function UsersSettings() {
             No users found.
           </div>
         ) : (
-          <table className="w-full text-left">
+          <table className="min-w-[720px] w-full text-left">
             <thead className="bg-white/20 border-b border-soot-200">
               <tr>
                 <th aria-sort={sortKey === 'username' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'} className="px-6 py-3 text-xs font-semibold text-soot-500 uppercase tracking-wider">

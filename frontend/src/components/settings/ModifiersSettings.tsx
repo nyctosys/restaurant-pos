@@ -259,12 +259,12 @@ export default function ModifiersSettings() {
           {sorted.map(m => (
             <div
               key={m.id}
-              className="flex items-center justify-between px-4 py-3 glass-card group hover:border-soot-200 transition-colors"
+              className="flex flex-col gap-3 px-4 py-3 glass-card group hover:border-soot-200 transition-colors sm:flex-row sm:items-center sm:justify-between"
             >
               {editingId === m.id ? (
                 <div className="flex flex-col gap-3 flex-1 w-full">
-                  <div className="flex flex-wrap gap-2 items-end">
-                    <div className="flex-1 min-w-[160px]">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end">
+                    <div className="w-full sm:min-w-[160px] sm:flex-1">
                       <label className="block text-[10px] font-bold text-neutral-500 uppercase mb-1">Name</label>
                       <input
                         value={editingName}
@@ -274,7 +274,7 @@ export default function ModifiersSettings() {
                         autoFocus
                       />
                     </div>
-                    <div className="w-40">
+                    <div className="w-full sm:w-40">
                       <label className="block text-[10px] font-bold text-neutral-500 uppercase mb-1">Price</label>
                       <input
                         value={editingPrice}
@@ -285,8 +285,8 @@ export default function ModifiersSettings() {
                       />
                     </div>
                   </div>
-                  <div className="flex flex-wrap gap-2 items-end">
-                    <div className="flex-1 min-w-[200px]">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end">
+                    <div className="w-full sm:min-w-[200px] sm:flex-1">
                       <label className="block text-[10px] font-bold text-neutral-500 uppercase mb-1">Ingredient</label>
                       <SearchableSelect
                         value={editingIngredientId}
@@ -300,7 +300,7 @@ export default function ModifiersSettings() {
                         className="border-soot-200 bg-white px-3 py-2"
                       />
                     </div>
-                    <div className="w-36">
+                    <div className="w-full sm:w-36">
                       <label className="block text-[10px] font-bold text-neutral-500 uppercase mb-1">Qty / unit</label>
                       <input
                         value={editingDepletion}
@@ -310,7 +310,7 @@ export default function ModifiersSettings() {
                       />
                     </div>
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex flex-col gap-2 sm:flex-row">
                     <button
                       type="button"
                       onClick={() => void saveEdit()}

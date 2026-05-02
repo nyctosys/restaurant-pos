@@ -148,7 +148,7 @@ def bulk_restock_ingredients(payload: BulkRestockRequest, current_user: User = D
             reference_type = "manual_adjustment"
             applied_unit_cost = float(ing.average_cost or 0.0)
 
-            if incoming_unit_cost is not None and incoming_unit_cost > 0:
+            if incoming_unit_cost is not None:
                 qty_before = get_branch_stock(ingredient_id, branch_id)
                 total_value_before = qty_before * float(ing.average_cost or 0.0)
                 new_total_qty = qty_before + qty_add
@@ -194,6 +194,8 @@ def bulk_restock_ingredients(payload: BulkRestockRequest, current_user: User = D
                     "ingredient_id": ingredient_id,
                     "quantity_added": qty_add,
                     "quantity_after": qty_after,
+                    "average_cost": float(ing.average_cost or 0.0),
+                    "last_purchase_price": float(ing.last_purchase_price or 0.0),
                 }
             )
 

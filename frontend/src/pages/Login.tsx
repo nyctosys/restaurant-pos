@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import log from '../utils/logger';
 import { post, getUserMessage } from '../api';
+import { preloadAfterLogin } from '../routes/preload';
 
 type LoginResponse = { token: string; user: { id: number; username: string; role: string; branch_id?: number; branch_name?: string } };
 
@@ -30,6 +31,7 @@ export default function Login() {
       log.info('Login', 'Login successful', { userId: data?.user?.id, role: data?.user?.role });
       if (data?.token) localStorage.setItem('auth_token', data.token);
       if (data?.user) localStorage.setItem('user', JSON.stringify(data.user));
+      preloadAfterLogin(data?.user?.role);
       navigate(data?.user?.role === 'kitchen' ? '/kitchen' : '/dashboard');
     } catch (err) {
       const msg = getUserMessage(err);

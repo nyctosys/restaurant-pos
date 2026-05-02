@@ -13,11 +13,13 @@ from app.models import (
     PurchaseOrder,
     PurchaseOrderItem,
     RecipeItem,
+    RecipeExtraCost,
     RecipePreparedItem,
     Supplier,
     User,
     db,
 )
+from sqlalchemy import distinct
 from app.services.branch_ingredient_stock import (
     InsufficientIngredientStock,
     adjust_branch_ingredient_stock,
@@ -31,23 +33,48 @@ from app.services.prepared_item_stock import (
     seed_prepared_branch_stocks_for_new_item,
     sync_prepared_master_total,
 )
+from app.services.product_pricing import recalculate_product_cost
 from app.services.branch_scope import resolve_terminal_branch_id
 from app.deps import get_current_user
 from app.schemas.inventory_schemas import (
     SupplierCreate, SupplierUpdate, IngredientCreate, IngredientUpdate, IngredientBulkCreate,
     RecipeItemCreate, PurchaseOrderCreate, PurchaseOrderReceive, StockMovementCreate,
-    PreparedItemCreate, PreparedItemUpdate, PreparedItemBatchCreate, RecipePreparedItemCreate,
+    PreparedItemCreate, PreparedItemUpdate, PreparedItemBatchCreate, RecipePreparedItemCreate, RecipeExtraCostCreate,
 )
 
 inventory_advanced_router = APIRouter(prefix="/api/inventory-advanced", tags=["inventory-advanced"])
 
 
-def _resolve_inventory_branch(branch_id: int | None, current_user: User) -> int:
+def _resolve_inventory_branch(branch_id: str | None, current_user: User) -> str:
     _ = branch_id
     return resolve_terminal_branch_id(current_user)
 
 
-def _ingredient_to_dict(ingredient: Ingredient, branch_id: int) -> dict[str, Any]:
+def _recalculate_products_using_ingredient(ingredient_id: int) -> None:
+    product_ids = (
+        db.session.query(distinct(RecipeItem.product_id))
+        .filter(RecipeItem.ingredient_id == ingredient_id)
+        .all()
+    )
+    for (product_id,) in product_ids:
+        product = db.session.get(Product, int(product_id))
+        if product is not None:
+            recalculate_product_cost(product)
+
+
+def _recalculate_products_using_prepared_item(prepared_item_id: int) -> None:
+    product_ids = (
+        db.session.query(distinct(RecipePreparedItem.product_id))
+        .filter(RecipePreparedItem.prepared_item_id == prepared_item_id)
+        .all()
+    )
+    for (product_id,) in product_ids:
+        product = db.session.get(Product, int(product_id))
+        if product is not None:
+            recalculate_product_cost(product)
+
+
+def _ingredient_to_dict(ingredient: Ingredient, branch_id: str) -> dict[str, Any]:
     unit_raw = ingredient.unit or ""
     unit = unit_raw.value if hasattr(unit_raw, "value") else unit_raw
     brand_name = getattr(ingredient, "brand_name", None)
@@ -97,6 +124,30 @@ def _supplier_to_dict(supplier: Supplier, linked_materials: list[Ingredient]) ->
         "notes": supplier.notes,
         "linked_material_ids": [ingredient["id"] for ingredient in linked],
         "linked_materials": linked,
+    }
+
+
+def _po_status_value(po: PurchaseOrder) -> str:
+    return po.status.value if hasattr(po.status, "value") else str(po.status)
+
+
+def _po_item_to_dict(item: PurchaseOrderItem) -> dict[str, Any]:
+    ingredient = item.ingredient
+    unit = item.unit.value if hasattr(item.unit, "value") else item.unit
+    quantity_ordered = float(item.quantity_ordered or 0.0)
+    quantity_received = float(item.quantity_received or 0.0)
+    quantity_remaining = max(quantity_ordered - quantity_received, 0.0)
+    return {
+        "id": item.id,
+        "ingredient_id": item.ingredient_id,
+        "ingredient_name": ingredient.name if ingredient else None,
+        "quantity_ordered": quantity_ordered,
+        "quantity_received": quantity_received,
+        "quantity_remaining": quantity_remaining,
+        "unit_price": float(item.unit_price or 0.0),
+        "unit": unit,
+        "unitOfMeasure": unit,
+        "notes": item.notes,
     }
 
 
@@ -191,7 +242,7 @@ def update_supplier(
 
 @inventory_advanced_router.get("/ingredients")
 def list_ingredients(
-    branch_id: int | None = None,
+    branch_id: str | None = None,
     current_user: User = Depends(get_current_user),
 ):
     bid = _resolve_inventory_branch(branch_id, current_user)
@@ -207,8 +258,8 @@ def list_ingredients(
 @inventory_advanced_router.post("/ingredients")
 def create_ingredient(payload: IngredientCreate, current_user: User = Depends(get_current_user)):
     data = payload.model_dump()
-    data.pop("brand_name", None)
-    data.pop("brandName", None)
+    brand_name = str(data.get("brand_name") or data.get("brandName") or "").strip()
+    data["brand_name"] = brand_name
     i = Ingredient(**data)
     db.session.add(i)
     db.session.flush()
@@ -223,8 +274,8 @@ def create_ingredients_bulk(payload: IngredientBulkCreate, current_user: User = 
     results = []
     for ing_data in payload.ingredients:
         data = ing_data.model_dump()
-        data.pop("brand_name", None)
-        data.pop("brandName", None)
+        brand_name = str(data.get("brand_name") or data.get("brandName") or "").strip()
+        data["brand_name"] = brand_name
         i = Ingredient(**data)
         db.session.add(i)
         db.session.flush()
@@ -243,10 +294,15 @@ def update_ingredient(ingredient_id: int, payload: IngredientUpdate, current_use
         return JSONResponse(status_code=404, content={"message": "Not found"})
     data = payload.model_dump(exclude_unset=True)
     data.pop("current_stock", None)
-    data.pop("brand_name", None)
-    data.pop("brandName", None)
+    if "brand_name" in data or "brandName" in data:
+        brand_name = str(data.get("brand_name") or data.get("brandName") or "").strip()
+        data["brand_name"] = brand_name
+        data.pop("brandName", None)
+    should_recalculate = "average_cost" in data
     for k, v in data.items():
         setattr(i, k, v)
+    if should_recalculate:
+        _recalculate_products_using_ingredient(i.id)
     db.session.commit()
     return {"message": "Ingredient updated"}
 
@@ -263,7 +319,7 @@ def _component_payload(component: PreparedItemComponent) -> dict[str, Any]:
     }
 
 
-def _prepared_item_payload(item: PreparedItem, branch_id: int) -> dict[str, Any]:
+def _prepared_item_payload(item: PreparedItem, branch_id: str) -> dict[str, Any]:
     return {
         "id": item.id,
         "name": item.name,
@@ -296,7 +352,7 @@ def _replace_prepared_components(item: PreparedItem, components: list[Any]) -> N
 
 @inventory_advanced_router.get("/prepared-items")
 def list_prepared_items(
-    branch_id: int | None = None,
+    branch_id: str | None = None,
     current_user: User = Depends(get_current_user),
 ):
     bid = _resolve_inventory_branch(branch_id, current_user)
@@ -350,6 +406,8 @@ def update_prepared_item(
         except ValueError as exc:
             db.session.rollback()
             return JSONResponse(status_code=400, content={"message": str(exc)})
+    if "average_cost" in data:
+        _recalculate_products_using_prepared_item(item.id)
     db.session.commit()
     return {"message": "Prepared sauce/marination updated"}
 
@@ -423,6 +481,7 @@ def make_prepared_batch(
 def get_recipe(product_id: int, current_user: User = Depends(get_current_user)):
     items = RecipeItem.query.filter_by(product_id=product_id).all()
     prepared_items = RecipePreparedItem.query.filter_by(product_id=product_id).all()
+    extra_cost_items = RecipeExtraCost.query.filter_by(product_id=product_id).all()
     return {"recipe_items": [{
         "id": r.id, "ingredient_id": r.ingredient_id,
         "ingredient_name": r.ingredient.name if r.ingredient else None,
@@ -437,7 +496,14 @@ def get_recipe(product_id: int, current_user: User = Depends(get_current_user)):
         "id": r.id, "prepared_item_id": r.prepared_item_id,
         "quantity": r.quantity, "unit": r.unit.value if hasattr(r.unit, 'value') else r.unit, "notes": r.notes,
         "variant_key": getattr(r, "variant_key", None) or "",
-    } for r in prepared_items]}
+    } for r in prepared_items], "recipe_extra_costs": [{
+        "id": c.id,
+        "product_id": c.product_id,
+        "name": c.name,
+        "amount": float(c.amount or 0.0),
+        "variant_key": (c.variant_key or ""),
+        "created_at": c.created_at.isoformat() if c.created_at else None,
+    } for c in extra_cost_items]}
 
 @inventory_advanced_router.post("/recipes")
 def add_recipe_item(payload: RecipeItemCreate, current_user: User = Depends(get_current_user)):
@@ -457,6 +523,9 @@ def add_recipe_item(payload: RecipeItemCreate, current_user: User = Depends(get_
         data["variant_key"] = str(data["variant_key"]).strip()[:100]
     r = RecipeItem(**data)
     db.session.add(r)
+    product = db.session.get(Product, r.product_id)
+    if product is not None:
+        recalculate_product_cost(product)
     db.session.commit()
     return {"id": r.id, "message": "Recipe item mapped"}
 
@@ -464,7 +533,11 @@ def add_recipe_item(payload: RecipeItemCreate, current_user: User = Depends(get_
 def delete_recipe_item(recipe_item_id: int, current_user: User = Depends(get_current_user)):
     r = db.session.get(RecipeItem, recipe_item_id)
     if r:
+        product = db.session.get(Product, r.product_id)
         db.session.delete(r)
+        db.session.flush()
+        if product is not None:
+            recalculate_product_cost(product)
         db.session.commit()
     return {"message": "Deleted"}
 
@@ -484,6 +557,9 @@ def add_recipe_prepared_item(payload: RecipePreparedItemCreate, current_user: Us
     data["variant_key"] = str(data.get("variant_key") or "").strip()[:100]
     r = RecipePreparedItem(**data)
     db.session.add(r)
+    product = db.session.get(Product, r.product_id)
+    if product is not None:
+        recalculate_product_cost(product)
     db.session.commit()
     return {"id": r.id, "message": "Prepared sauce/marination mapped"}
 
@@ -492,7 +568,69 @@ def add_recipe_prepared_item(payload: RecipePreparedItemCreate, current_user: Us
 def delete_recipe_prepared_item(recipe_item_id: int, current_user: User = Depends(get_current_user)):
     r = db.session.get(RecipePreparedItem, recipe_item_id)
     if r:
+        product = db.session.get(Product, r.product_id)
         db.session.delete(r)
+        db.session.flush()
+        if product is not None:
+            recalculate_product_cost(product)
+        db.session.commit()
+    return {"message": "Deleted"}
+
+
+@inventory_advanced_router.post("/recipes/extra-costs")
+def add_recipe_extra_cost(payload: RecipeExtraCostCreate, current_user: User = Depends(get_current_user)):
+    data = payload.model_dump()
+    data["variant_key"] = str(data.get("variant_key") or "").strip()[:100]
+    row = RecipeExtraCost(**data)
+    db.session.add(row)
+    product = db.session.get(Product, row.product_id)
+    if product is not None:
+        recalculate_product_cost(product)
+    db.session.commit()
+    return {"id": row.id, "message": "Extra cost mapped"}
+
+
+@inventory_advanced_router.patch("/recipes/extra-costs/{extra_cost_id}")
+def update_recipe_extra_cost(
+    extra_cost_id: int,
+    payload: dict[str, Any] | None = None,
+    current_user: User = Depends(get_current_user),
+):
+    row = db.session.get(RecipeExtraCost, extra_cost_id)
+    if row is None:
+        return JSONResponse(status_code=404, content={"message": "Not found"})
+    data = payload or {}
+    if "name" in data:
+        name = str(data.get("name") or "").strip()[:120]
+        if not name:
+            return JSONResponse(status_code=400, content={"message": "name is required"})
+        row.name = name
+    if "amount" in data:
+        try:
+            amount = float(data.get("amount") or 0.0)
+        except (TypeError, ValueError):
+            return JSONResponse(status_code=400, content={"message": "amount must be a number"})
+        if amount < 0:
+            return JSONResponse(status_code=400, content={"message": "amount must be non-negative"})
+        row.amount = amount
+    if "variant_key" in data:
+        row.variant_key = str(data.get("variant_key") or "").strip()[:100]
+    product = db.session.get(Product, row.product_id)
+    if product is not None:
+        recalculate_product_cost(product)
+    db.session.commit()
+    return {"message": "Extra cost updated", "id": row.id}
+
+
+@inventory_advanced_router.delete("/recipes/extra-costs/{extra_cost_id}")
+def delete_recipe_extra_cost(extra_cost_id: int, current_user: User = Depends(get_current_user)):
+    row = db.session.get(RecipeExtraCost, extra_cost_id)
+    if row:
+        product = db.session.get(Product, row.product_id)
+        db.session.delete(row)
+        db.session.flush()
+        if product is not None:
+            recalculate_product_cost(product)
         db.session.commit()
     return {"message": "Deleted"}
 
@@ -504,11 +642,12 @@ def list_purchase_orders(current_user: User = Depends(get_current_user)):
     pos = PurchaseOrder.query.order_by(PurchaseOrder.created_at.desc()).all()
     return {"purchase_orders": [{
         "id": p.id, "po_number": p.po_number, "supplier_id": p.supplier_id,
-        "status": p.status.value if hasattr(p.status, 'value') else p.status, 
+        "status": _po_status_value(p),
         "total_amount": p.total_amount,
         "expected_delivery": p.expected_delivery.isoformat() if p.expected_delivery else None,
         "received_date": p.received_date.isoformat() if p.received_date else None,
-        "created_at": p.created_at.isoformat()
+        "created_at": p.created_at.isoformat(),
+        "items": [_po_item_to_dict(item) for item in p.items],
     } for p in pos]}
 
 @inventory_advanced_router.post("/purchase-orders")
@@ -537,19 +676,53 @@ def create_purchase_order(payload: PurchaseOrderCreate, current_user: User = Dep
 @inventory_advanced_router.post("/purchase-orders/{po_id}/receive")
 def receive_purchase_order(po_id: int, payload: PurchaseOrderReceive, current_user: User = Depends(get_current_user)):
     po = db.session.get(PurchaseOrder, po_id)
-    if not po or po.status == "received":
+    if not po:
+        return JSONResponse(status_code=404, content={"message": "PO not found"})
+    status = _po_status_value(po)
+    if status in {"received", "cancelled"}:
         return JSONResponse(status_code=400, content={"message": "Invalid PO or already received"})
 
-    po.status = "received"
-    po.received_date = payload.received_date or datetime.now(timezone.utc)
+    branch_id = po.branch_id or current_user.branch_id or resolve_terminal_branch_id(current_user)
+    quantities_by_item_id: dict[int, float] | None = None
+    quantities_by_ingredient_id: dict[int, float] | None = None
 
-    branch_id = int(po.branch_id or current_user.branch_id or 1)
+    if payload.items is not None:
+        quantities_by_item_id = {}
+        quantities_by_ingredient_id = {}
+        for received_item in payload.items:
+            qty = float(received_item.quantity_received or 0.0)
+            if received_item.item_id is not None:
+                quantities_by_item_id[int(received_item.item_id)] = (
+                    quantities_by_item_id.get(int(received_item.item_id), 0.0) + qty
+                )
+            elif received_item.ingredient_id is not None:
+                quantities_by_ingredient_id[int(received_item.ingredient_id)] = (
+                    quantities_by_ingredient_id.get(int(received_item.ingredient_id), 0.0) + qty
+                )
+            else:
+                return JSONResponse(status_code=400, content={"message": "Received item must include item_id or ingredient_id"})
 
+    total_received = 0.0
     for item in po.items:
         ing = item.ingredient
         if ing is None:
             continue
-        qty_add = float(item.quantity_ordered)
+        already_received = float(item.quantity_received or 0.0)
+        remaining = max(float(item.quantity_ordered or 0.0) - already_received, 0.0)
+        if payload.items is None:
+            qty_add = remaining
+        else:
+            qty_add = float((quantities_by_item_id or {}).get(item.id, 0.0))
+            if qty_add == 0.0:
+                qty_add = float((quantities_by_ingredient_id or {}).get(item.ingredient_id, 0.0))
+        if qty_add <= 0:
+            continue
+        if qty_add - remaining > 0.000001:
+            db.session.rollback()
+            return JSONResponse(
+                status_code=400,
+                content={"message": f"Received quantity for {ing.name} exceeds remaining order quantity"},
+            )
         qty_before = get_branch_stock(ing.id, branch_id)
         total_value_before = qty_before * float(ing.average_cost or 0.0)
         new_value = qty_add * float(item.unit_price)
@@ -557,7 +730,8 @@ def receive_purchase_order(po_id: int, payload: PurchaseOrderReceive, current_us
         if new_total_qty > 0:
             ing.average_cost = (total_value_before + new_value) / new_total_qty
         ing.last_purchase_price = float(item.unit_price)
-        item.quantity_received = item.quantity_ordered
+        item.quantity_received = already_received + qty_add
+        total_received += qty_add
 
         adjust_branch_ingredient_stock(
             ing.id,
@@ -573,15 +747,35 @@ def receive_purchase_order(po_id: int, payload: PurchaseOrderReceive, current_us
         )
         sync_ingredient_master_total(ing.id)
 
+    if total_received <= 0:
+        db.session.rollback()
+        return JSONResponse(status_code=400, content={"message": "Enter at least one received quantity"})
+
+    all_received = all(
+        max(float(item.quantity_ordered or 0.0) - float(item.quantity_received or 0.0), 0.0) <= 0.000001
+        for item in po.items
+    )
+    if all_received:
+        po.status = "received"
+        po.received_date = payload.received_date or datetime.now(timezone.utc)
+        message = "PO fully received, stock and costs updated"
+    else:
+        po.status = "partially_received"
+        message = "Partial stock received; remaining quantities are still open"
+
     db.session.commit()
-    return {"message": "PO fully received, stock and costs updated"}
+    return {
+        "message": message,
+        "status": _po_status_value(po),
+        "items": [_po_item_to_dict(item) for item in po.items],
+    }
 
 @inventory_advanced_router.post("/purchase-orders/{po_id}/cancel")
 def cancel_purchase_order(po_id: int, current_user: User = Depends(get_current_user)):
     po = db.session.get(PurchaseOrder, po_id)
     if not po:
         return JSONResponse(status_code=404, content={"message": "PO not found"})
-    if po.status == "received":
+    if _po_status_value(po) == "received":
         return JSONResponse(status_code=400, content={"message": "Cannot cancel a PO that has already been received. You must manually reverse the stock instead."})
     
     po.status = "cancelled"

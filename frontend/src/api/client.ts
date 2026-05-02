@@ -18,6 +18,12 @@ function newClientRequestId(): string {
 export interface RequestOptions extends Omit<RequestInit, 'body'> {
   body?: object | string | null;
   skipAuth?: boolean;
+  /** Explicit idempotency key for retry-safe critical write requests. */
+  idempotencyKey?: string;
+  /** Force idempotency on/off for this write. Defaults on for critical mutations only. */
+  idempotent?: boolean;
+  /** Semantic in-flight dedup key for duplicate write clicks/submits. */
+  mutationKey?: string;
   /** Override default GET cache TTL. `0` disables caching for this request. */
   cacheTtlMs?: number;
   /** Force bypassing cache and network-dedup for this request. */
@@ -33,6 +39,7 @@ type CacheEntry = {
 
 const responseCache = new Map<string, CacheEntry>();
 const inflightRequests = new Map<string, Promise<unknown>>();
+const inflightMutations = new Map<string, Promise<unknown>>();
 
 const DEFAULT_CACHE_TTL_MS = 20_000;
 const CACHEABLE_GET_PREFIXES = [
@@ -86,6 +93,58 @@ function shouldCacheGet(path: string): boolean {
   return CACHEABLE_GET_PREFIXES.some(prefix => normalized.startsWith(prefix));
 }
 
+function shouldUseIdempotency(method: string, path: string): boolean {
+  const normalized = normalizePath(path);
+  if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
+    return false;
+  }
+  return [
+    /^\/orders\/(checkout|kot|dine-in\/kot)$/,
+    /^\/orders\/\d+\/(items|kitchen-status|delivery-complete|finalize|cancel-open|rollback)$/,
+    /^\/stock\/(update|bulk-restock)$/,
+    /^\/inventory-advanced\/prepared-items\/\d+\/batches$/,
+    /^\/inventory-advanced\/purchase-orders\/\d+\/(receive|cancel)$/,
+    /^\/inventory-advanced\/movements$/,
+    /^\/inventory-advanced\/recipes$/,
+    /^\/inventory-advanced\/recipes\/prepared-items$/,
+    /^\/inventory-advanced\/recipes\/extra-costs$/,
+    /^\/inventory-advanced\/recipes\/extra-costs\/\d+$/,
+    /^\/inventory-advanced\/recipes\/\d+$/,
+    /^\/inventory-advanced\/recipes\/prepared-items\/\d+$/,
+  ].some(pattern => pattern.test(normalized));
+}
+
+function stableBodyForKey(body: object | string | null | undefined): string {
+  if (body == null) return '';
+  if (typeof body === 'string') return body;
+  const normalize = (value: unknown): unknown => {
+    if (Array.isArray(value)) {
+      return value.map(normalize);
+    }
+    if (value && typeof value === 'object') {
+      return Object.keys(value as Record<string, unknown>)
+        .sort()
+        .reduce<Record<string, unknown>>((acc, key) => {
+          acc[key] = normalize((value as Record<string, unknown>)[key]);
+          return acc;
+        }, {});
+    }
+    return value;
+  };
+  try {
+    return JSON.stringify(normalize(body));
+  } catch {
+    return JSON.stringify(body);
+  }
+}
+
+function buildMutationKey(method: string, path: string, token: string | null, body: object | string | null | undefined, override?: string): string {
+  const key = override?.trim();
+  if (key) return key;
+  const tokenSegment = token ? token.slice(-16) : 'anon';
+  return `${method}:${normalizePath(path)}:${stableBodyForKey(body)}:u=${tokenSegment}`;
+}
+
 function getDefaultCacheTtlMs(path: string): number {
   return shouldCacheGet(path) ? DEFAULT_CACHE_TTL_MS : 0;
 }
@@ -119,6 +178,12 @@ function clearApiCache(): void {
   responseCache.clear();
 }
 
+export function resetApiClientStateForTests(): void {
+  clearApiCache();
+  inflightRequests.clear();
+  inflightMutations.clear();
+}
+
 /**
  * Fetch with base URL, auth, logging, and consistent error handling.
  * Throws ApiError on non-2xx; logs request + response (status, duration, X-Request-ID).
@@ -134,6 +199,8 @@ export async function request<T = unknown>(
   const defaultTtl = method === 'GET' ? getDefaultCacheTtlMs(path) : 0;
   const ttlMs = options.cacheTtlMs ?? defaultTtl;
   const shouldUseCache = method === 'GET' && ttlMs > 0 && !options.forceRefresh;
+  const shouldUseMutationIdempotency =
+    method !== 'GET' && !options.skipAuth && (options.idempotent ?? shouldUseIdempotency(method, path));
 
   const clientRequestId = newClientRequestId();
   const headers: HeadersInit = {
@@ -145,11 +212,22 @@ export async function request<T = unknown>(
   if (!(headers as Record<string, string>)['X-Request-ID'] && !(headers as Record<string, string>)['x-request-id']) {
     (headers as Record<string, string>)['X-Request-ID'] = clientRequestId;
   }
+  if (shouldUseMutationIdempotency && !(headers as Record<string, string>)['X-Idempotency-Key'] && !(headers as Record<string, string>)['x-idempotency-key']) {
+    (headers as Record<string, string>)['X-Idempotency-Key'] = options.idempotencyKey?.trim() || newClientRequestId();
+  }
   if (options.body != null && typeof options.body === 'object' && !(options.body instanceof FormData)) {
     if (!headers['Content-Type']) headers['Content-Type'] = 'application/json';
   }
 
   const cacheKey = shouldUseCache ? buildCacheKey(method, path, token, options.cacheKey) : null;
+  const mutationKey = shouldUseMutationIdempotency ? buildMutationKey(method, path, token, options.body, options.mutationKey) : null;
+  if (mutationKey) {
+    const inflightMutation = inflightMutations.get(mutationKey) as Promise<T> | undefined;
+    if (inflightMutation) {
+      log.info('API', `MUTATION INFLIGHT DEDUP ${path}`, { mutationKey });
+      return inflightMutation;
+    }
+  }
   if (cacheKey) {
     const cached = getCachedResponse<T>(cacheKey);
     if (cached !== null) {
@@ -236,7 +314,16 @@ export async function request<T = unknown>(
   };
 
   if (!cacheKey) {
-    return execute();
+    if (!mutationKey) {
+      return execute();
+    }
+    const promise = execute();
+    inflightMutations.set(mutationKey, promise);
+    try {
+      return await promise;
+    } finally {
+      inflightMutations.delete(mutationKey);
+    }
   }
 
   const promise = execute();

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, X, Loader2, ArrowRightCircle, CheckCircle2, PackageCheck, Ban } from 'lucide-react';
+import { Plus, X, Loader2, ArrowRightCircle, CheckCircle2, PackageCheck, Ban, History } from 'lucide-react';
 import { get, post, getUserMessage } from '../../api';
 import { showToast } from '../Toast';
 import { showConfirm } from '../ConfirmDialog';
@@ -12,19 +12,29 @@ type Ingredient = { id: number; name: string; unit: string; last_purchase_price:
 type POItem = {
   ingredient_id: number;
   quantity_ordered: number;
+  quantity_received?: number;
+  quantity_remaining?: number;
   unit_price: number;
   unit: string;
+};
+
+type PurchaseOrderItem = POItem & {
+  id: number;
+  ingredient_name: string | null;
+  quantity_received: number;
+  quantity_remaining: number;
 };
 
 type PurchaseOrder = {
   id: number;
   po_number: string;
   supplier_id: number;
-  status: 'draft' | 'sent' | 'received' | 'cancelled';
+  status: 'draft' | 'sent' | 'partially_received' | 'received' | 'cancelled';
   total_amount: number;
   expected_delivery: string | null;
   received_date: string | null;
   created_at: string;
+  items?: PurchaseOrderItem[];
 };
 
 export default function PurchaseOrdersTab() {
@@ -32,6 +42,7 @@ export default function PurchaseOrdersTab() {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showCompleted, setShowCompleted] = useState(false);
 
   // Form State
   const [showModal, setShowModal] = useState(false);
@@ -40,6 +51,9 @@ export default function PurchaseOrdersTab() {
   const [formNotes, setFormNotes] = useState('');
   const [formItems, setFormItems] = useState<POItem[]>([]);
   const [submitting, setSubmitting] = useState(false);
+  const [partialReceivePo, setPartialReceivePo] = useState<PurchaseOrder | null>(null);
+  const [receiveQuantities, setReceiveQuantities] = useState<Record<number, string>>({});
+  const [receiving, setReceiving] = useState(false);
 
   useEffect(() => {
     fetchData();
@@ -75,7 +89,7 @@ export default function PurchaseOrdersTab() {
     setFormItems([...formItems, { ingredient_id: 0, quantity_ordered: 1, unit_price: 0, unit: 'kg' }]);
   };
 
-  const handleUpdateItem = (index: number, field: keyof POItem, value: any) => {
+  const handleUpdateItem = (index: number, field: keyof POItem, value: string | number) => {
     const newItems = [...formItems];
     newItems[index] = { ...newItems[index], [field]: value };
     
@@ -129,12 +143,22 @@ export default function PurchaseOrdersTab() {
 
   const handleReceive = async (po: PurchaseOrder) => {
     const confirmed = await showConfirm({
-      title: 'Receive Purchase Order',
-      message: `Mark ${po.po_number} as received? This will automatically update your raw material stock levels and recalculate average costs.`,
-      confirmLabel: 'Yes, receive stock',
+      title: 'Was the complete order received?',
+      message: `Confirm if every pending item on ${po.po_number} has arrived. This will update ingredient stock and costs for the full remaining order.`,
+      confirmLabel: 'Yes, receive all',
+      cancelLabel: 'No, enter quantities',
       variant: 'default'
     });
-    if (!confirmed) return;
+    if (!confirmed) {
+      const quantities = Object.fromEntries(
+        (po.items || [])
+          .filter(item => (item.quantity_remaining ?? item.quantity_ordered) > 0)
+          .map(item => [item.id, ''])
+      );
+      setReceiveQuantities(quantities);
+      setPartialReceivePo(po);
+      return;
+    }
 
     try {
       await post(`/inventory-advanced/purchase-orders/${po.id}/receive`, {
@@ -144,6 +168,48 @@ export default function PurchaseOrdersTab() {
       fetchData();
     } catch (err) {
       showToast(getUserMessage(err), 'error');
+    }
+  };
+
+  const handleSubmitPartialReceive = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!partialReceivePo) return;
+
+    const items = (partialReceivePo.items || [])
+      .map(item => {
+        const quantity = parseFloat(receiveQuantities[item.id] || '0') || 0;
+        return { item, quantity };
+      })
+      .filter(({ quantity }) => quantity > 0);
+
+    if (items.length === 0) {
+      showToast('Enter at least one received quantity', 'error');
+      return;
+    }
+
+    const invalid = items.find(({ item, quantity }) => quantity > (item.quantity_remaining ?? item.quantity_ordered));
+    if (invalid) {
+      showToast(`Received quantity for ${invalid.item.ingredient_name || 'item'} is more than the remaining order`, 'error');
+      return;
+    }
+
+    setReceiving(true);
+    try {
+      await post(`/inventory-advanced/purchase-orders/${partialReceivePo.id}/receive`, {
+        received_date: new Date().toISOString(),
+        items: items.map(({ item, quantity }) => ({
+          item_id: item.id,
+          quantity_received: quantity
+        }))
+      });
+      showToast('Received stock updated', 'success');
+      setPartialReceivePo(null);
+      setReceiveQuantities({});
+      fetchData();
+    } catch (err) {
+      showToast(getUserMessage(err), 'error');
+    } finally {
+      setReceiving(false);
     }
   };
 
@@ -168,6 +234,7 @@ export default function PurchaseOrdersTab() {
   const getStatusColor = (status: string) => {
     switch(status) {
       case 'received': return 'bg-emerald-100 text-emerald-800 border-emerald-200';
+      case 'partially_received': return 'bg-amber-100 text-amber-800 border-amber-200';
       case 'draft': return 'bg-neutral-100 text-neutral-700 border-neutral-200';
       case 'sent': return 'bg-blue-100 text-blue-800 border-blue-200';
       case 'cancelled': return 'bg-red-100 text-red-800 border-red-200';
@@ -175,17 +242,51 @@ export default function PurchaseOrdersTab() {
     }
   };
 
+  const getStatusLabel = (status: string) => {
+    if (status === 'partially_received') return 'partial';
+    return status;
+  };
+
+  const formatQuantity = (value: number) => Number(value || 0).toLocaleString('en-PK', {
+    maximumFractionDigits: 3
+  });
+
+  const completedPos = pos.filter(po => po.status === 'received');
+  const activePos = pos.filter(po => po.status !== 'received');
+  const visiblePos = showCompleted ? completedPos : activePos;
+  const emptyTitle = showCompleted ? 'No completed purchase orders' : 'No active purchase orders';
+  const emptyMessage = showCompleted
+    ? 'Received purchase orders will appear here for tracking.'
+    : 'Create a PO to restock your ingredients.';
+
   return (
     <div className="flex flex-col h-full min-h-0 bg-transparent py-4">
-      <div className="page-padding flex justify-between items-center bg-transparent shrink-0 pb-4">
-        <h3 className="text-xl font-bold text-soot-900 hidden sm:block">Purchase Orders</h3>
-        <button
-          onClick={handleOpenAdd}
-          className="flex items-center gap-2 bg-brand-700 text-white px-4 py-2 rounded-lg font-medium hover:bg-brand-600 touch-target transition-colors ml-auto"
-        >
-          <Plus className="w-4 h-4" />
-          Create PO
-        </button>
+      <div className="page-padding flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 bg-transparent shrink-0 pb-4">
+        <h3 className="text-xl font-bold text-soot-900">
+          {showCompleted ? 'Completed Purchase Orders' : 'Purchase Orders'}
+        </h3>
+        <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+          <button
+            type="button"
+            onClick={() => setShowCompleted(prev => !prev)}
+            className="flex items-center gap-2 border border-soot-200/70 bg-white/45 text-soot-700 px-4 py-2 rounded-lg font-medium hover:bg-white/70 touch-target transition-colors"
+          >
+            {showCompleted ? <PackageCheck className="w-4 h-4" /> : <History className="w-4 h-4" />}
+            {showCompleted ? 'Active POs' : 'Completed POs'}
+            {!showCompleted && completedPos.length > 0 && (
+              <span className="min-w-5 rounded-full bg-soot-900/10 px-1.5 text-xs font-bold text-soot-700">
+                {completedPos.length}
+              </span>
+            )}
+          </button>
+          <button
+            onClick={handleOpenAdd}
+            className="flex items-center gap-2 bg-brand-700 text-white px-4 py-2 rounded-lg font-medium hover:bg-brand-600 touch-target transition-colors"
+          >
+            <Plus className="w-4 h-4" />
+            Create PO
+          </button>
+        </div>
       </div>
 
       <div className="page-padding flex-1 overflow-auto">
@@ -193,18 +294,19 @@ export default function PurchaseOrdersTab() {
           <div className="flex items-center justify-center py-20 text-soot-400 gap-2">
             <Loader2 className="w-5 h-5 animate-spin" /> Loading orders...
           </div>
-        ) : pos.length === 0 ? (
+        ) : visiblePos.length === 0 ? (
            <div className="text-center py-20 text-soot-400">
              <div className="w-16 h-16 rounded-full bg-soot-100 flex items-center justify-center mx-auto mb-4">
                <PackageCheck className="w-8 h-8 text-soot-300" />
              </div>
-             <p className="text-lg font-medium mb-1">No purchase orders</p>
-             <p className="text-sm">Create a PO to restock your ingredients.</p>
+             <p className="text-lg font-medium mb-1">{emptyTitle}</p>
+             <p className="text-sm">{emptyMessage}</p>
            </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {pos.map(po => {
+            {visiblePos.map(po => {
               const supplier = suppliers.find(s => s.id === po.supplier_id);
+              const remainingCount = (po.items || []).filter(item => item.quantity_remaining > 0).length;
               return (
                  <div key={po.id} className="glass-card p-5 relative group flex flex-col justify-between hover:bg-white/40 transition-colors">
                     <div className="flex justify-between items-start mb-3">
@@ -213,7 +315,7 @@ export default function PurchaseOrdersTab() {
                         <p className="text-sm font-medium text-soot-600 mt-0.5">{supplier?.name || "Unknown Supplier"}</p>
                       </div>
                       <span className={`text-xs font-bold uppercase tracking-wider px-2 py-1 rounded border ${getStatusColor(po.status)}`}>
-                        {po.status}
+                        {getStatusLabel(po.status)}
                       </span>
                     </div>
                     
@@ -226,6 +328,12 @@ export default function PurchaseOrdersTab() {
                          <span className="text-soot-400">Date:</span>
                          <span>{new Date(po.created_at).toLocaleDateString()}</span>
                       </p>
+                      {po.status === 'partially_received' && (
+                        <p className="text-sm text-soot-600 flex justify-between">
+                           <span className="text-soot-400">Remaining:</span>
+                           <span className="font-semibold text-amber-700">{remainingCount} item{remainingCount === 1 ? '' : 's'}</span>
+                        </p>
+                      )}
                     </div>
                     
                     <div className="pt-3 border-t border-soot-200/50 flex justify-end gap-2">
@@ -368,6 +476,60 @@ export default function PurchaseOrdersTab() {
              </form>
            </div>
          </div>
+      )}
+
+      {partialReceivePo && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 glass-overlay overflow-y-auto">
+          <div className="glass-floating w-full max-w-2xl my-auto flex flex-col max-h-[90vh] overflow-hidden">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-neutral-200/60 bg-white/25 shrink-0">
+              <div>
+                <h3 className="text-lg font-bold text-neutral-900">Receive Stock</h3>
+                <p className="text-sm text-soot-500 mt-0.5">{partialReceivePo.po_number}</p>
+              </div>
+              <button onClick={() => setPartialReceivePo(null)} className="p-1.5 rounded-lg hover:bg-neutral-200 transition-colors">
+                <X className="w-5 h-5 text-neutral-500" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmitPartialReceive} className="flex flex-col flex-1 min-h-0">
+              <div className="p-6 overflow-y-auto space-y-3">
+                {(partialReceivePo.items || []).filter(item => item.quantity_remaining > 0).map(item => (
+                  <div key={item.id} className="grid grid-cols-1 sm:grid-cols-[1fr_140px] gap-3 items-end bg-white/40 p-3 rounded-lg border border-soot-200">
+                    <div className="min-w-0">
+                      <p className="font-semibold text-soot-800 truncate">{item.ingredient_name || 'Ingredient'}</p>
+                      <p className="text-sm text-soot-500">
+                        Remaining {formatQuantity(item.quantity_remaining)} {item.unit} of {formatQuantity(item.quantity_ordered)} {item.unit}
+                      </p>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-soot-500 mb-1">Received</label>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number"
+                          step="any"
+                          min="0"
+                          max={item.quantity_remaining}
+                          value={receiveQuantities[item.id] || ''}
+                          onChange={e => setReceiveQuantities(prev => ({ ...prev, [item.id]: e.target.value }))}
+                          className="w-full px-3 py-2 glass-card text-sm text-right"
+                          placeholder="0"
+                        />
+                        <span className="w-10 text-xs font-semibold text-soot-500 truncate">{item.unit}</span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="p-6 border-t border-soot-200/60 bg-white/20 shrink-0 flex justify-end gap-3">
+                <button type="button" onClick={() => setPartialReceivePo(null)} className="px-5 py-2.5 border border-neutral-200 rounded-lg text-sm font-medium text-neutral-600 hover:bg-neutral-50 transition-colors">Cancel</button>
+                <button type="submit" disabled={receiving} className="px-6 py-2.5 bg-brand-700 text-white rounded-lg text-sm font-medium hover:bg-brand-600 disabled:opacity-50 flex items-center gap-2 touch-target">
+                  {receiving && <Loader2 className="w-4 h-4 animate-spin" />} Update Stock
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
     </div>
   );

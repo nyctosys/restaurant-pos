@@ -154,7 +154,7 @@ export default function ReceiptSettings() {
   };
 
   return (
-    <div className="max-w-6xl grid grid-cols-1 lg:grid-cols-2 gap-8">
+    <div className="max-w-6xl grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_minmax(20rem,24rem)] gap-6 lg:gap-8">
       {/* Settings Form */}
       <div>
         <h3 className="text-2xl font-bold text-soot-900 mb-2">Receipt Settings</h3>
@@ -165,7 +165,7 @@ export default function ReceiptSettings() {
              <Loader2 className="w-5 h-5 animate-spin" /> Loading settings...
           </div>
         ) : (
-          <div className="space-y-5 bg-soot-50 p-6 rounded-xl border border-soot-200">
+          <div className="space-y-5 bg-soot-50 p-4 sm:p-6 rounded-xl border border-soot-200">
             <div>
               <label className="block text-sm font-semibold text-soot-800 mb-1">Business Name (optional)</label>
               <input
@@ -178,7 +178,7 @@ export default function ReceiptSettings() {
               />
             </div>
             
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                <div>
                   <label className="block text-sm font-semibold text-soot-800 mb-1">Business Address</label>
                   <textarea
@@ -204,11 +204,11 @@ export default function ReceiptSettings() {
 
             <div>
               <label className="block text-sm font-semibold text-soot-800 mb-2">Logo Upload</label>
-              <div className="flex items-center gap-4">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
                  {logoUrl && (
                    <img src={logoUrl} alt="Logo Preview" className="h-12 w-12 object-contain border border-soot-200 bg-white rounded flex-shrink-0" />
                  )}
-                 <div className="flex-1 relative">
+                 <div className="relative w-full sm:flex-1">
                     <input 
                       type="file" 
                       accept="image/*"
@@ -320,7 +320,7 @@ export default function ReceiptSettings() {
             <div className="border-t border-soot-200 pt-5">
               <p className="text-sm font-semibold text-soot-800 mb-3">Tax & legal IDs</p>
               <p className="text-xs text-soot-500 mb-2">GST#, NTN#, FBR invoice, etc. Leave blank to omit.</p>
-              <div className="grid grid-cols-2 gap-3 mb-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
                 <div>
                   <label className="block text-xs font-medium text-soot-600 mb-0.5">GST#</label>
                   <input type="text" inputMode="numeric" value={gstNumber} onChange={(e) => setGstNumber(e.target.value)} placeholder="e.g. 3277876276814" className="w-full px-4 py-2 border border-soot-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none" />
@@ -330,7 +330,7 @@ export default function ReceiptSettings() {
                   <input type="text" inputMode="text" value={ntnNumber} onChange={(e) => setNtnNumber(e.target.value)} placeholder="e.g. 4555916-4" className="w-full px-4 py-2 border border-soot-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none" />
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-3 mb-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-2">
                 <div>
                   <label className="block text-xs font-medium text-soot-600 mb-0.5">Custom 1 label</label>
                   <input type="text" inputMode="text" value={customId1Label} onChange={(e) => setCustomId1Label(e.target.value)} placeholder="e.g. FBR Invoice" className="w-full px-4 py-2 border border-soot-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none" />
@@ -340,7 +340,7 @@ export default function ReceiptSettings() {
                   <input type="text" inputMode="text" value={customId1Value} onChange={(e) => setCustomId1Value(e.target.value)} placeholder="e.g. 174747EISK5376524" className="w-full px-4 py-2 border border-soot-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none" />
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-soot-600 mb-0.5">Custom 2 label</label>
                   <input type="text" inputMode="text" value={customId2Label} onChange={(e) => setCustomId2Label(e.target.value)} placeholder="e.g. CHK" className="w-full px-4 py-2 border border-soot-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none" />
@@ -361,7 +361,7 @@ export default function ReceiptSettings() {
             <button 
               onClick={handleSave}
               disabled={saving}
-              className="mt-4 bg-brand-700 text-white px-6 py-3 rounded-lg font-bold hover:bg-brand-600 disabled:opacity-50 transition-colors flex items-center gap-2"
+              className="mt-4 min-h-[44px] bg-brand-700 text-white px-6 py-3 rounded-lg font-bold hover:bg-brand-600 disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
             >
               {saving && <Loader2 className="w-4 h-4 animate-spin" />}
               Save Receipt Layout
@@ -371,7 +371,7 @@ export default function ReceiptSettings() {
       </div>
 
       {/* Live Preview */}
-      <div className="flex items-start justify-center p-8 bg-soot-900 rounded-xl relative overflow-hidden">
+      <div className="flex items-start justify-center overflow-x-auto p-4 sm:p-8 bg-soot-900 rounded-xl relative">
         {/* Subtle patterned background or grid could go here */}
         
         <div className="receipt-paper w-72 shadow-2xl p-6 font-mono text-sm shadow-black/20 transform rotate-1 rounded-sm">

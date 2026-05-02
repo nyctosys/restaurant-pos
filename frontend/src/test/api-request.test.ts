@@ -101,4 +101,51 @@ describe('post', () => {
       })
     );
   });
+
+  it('adds an idempotency key to selected critical writes', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      text: () => Promise.resolve('{}'),
+      headers: new Headers(),
+    });
+    await post('/orders/checkout', { items: [], payment_method: 'Cash' }, { idempotencyKey: 'idem-123' });
+    expect(mockFetch).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        headers: expect.objectContaining({ 'X-Idempotency-Key': 'idem-123' }),
+      })
+    );
+  });
+
+  it('does not add idempotency keys to non-critical writes', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      text: () => Promise.resolve('{}'),
+      headers: new Headers(),
+    });
+    await post('/settings/app-events/client', { level: 'info', message: 'x' });
+    expect(mockFetch).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        headers: expect.not.objectContaining({ 'X-Idempotency-Key': expect.any(String) }),
+      })
+    );
+  });
+
+  it('dedupes duplicate in-flight critical mutations', async () => {
+    let resolveResponse: (value: unknown) => void = () => {};
+    mockFetch.mockReturnValueOnce(new Promise(resolve => { resolveResponse = resolve; }));
+
+    const first = post('/stock/bulk-restock', { items: [{ ingredient_id: 1, quantity: 2 }] });
+    const second = post('/stock/bulk-restock', { items: [{ quantity: 2, ingredient_id: 1 }] });
+
+    resolveResponse({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify({ message: 'ok' })),
+      headers: new Headers(),
+    });
+
+    await expect(Promise.all([first, second])).resolves.toEqual([{ message: 'ok' }, { message: 'ok' }]);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
 });
