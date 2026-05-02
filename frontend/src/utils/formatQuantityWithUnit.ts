@@ -1,16 +1,16 @@
-function formatQuantity(value: number): string {
-  if (!Number.isFinite(value)) return '0';
-  if (Math.abs(value - Math.round(value)) < 0.0001) {
-    return String(Math.round(value));
-  }
-  return value.toFixed(2).replace(/\.?0+$/, '');
-}
+import { formatBaseQuantityGlobal, type IngredientUnitFields } from './unitConversion';
 
-export function formatQuantityWithUnit(quantity: number, unit?: string | null): string {
+type FormatOpts = { locale?: string; ingredient?: IngredientUnitFields };
+
+/** Quantity is always in storage/base unit; gram/ml breakdown is derived for display. */
+export function formatQuantityWithUnit(
+  quantity: number,
+  unit?: string | null,
+  opts?: FormatOpts
+): string {
   const normalizedUnit = (unit || '').trim();
-  const qty = formatQuantity(quantity);
   if (!normalizedUnit) {
-    return `${qty} (unit missing)`;
+    return `${quantity} (unit missing)`;
   }
-  return `${qty} ${normalizedUnit}`;
+  return formatBaseQuantityGlobal(quantity, normalizedUnit, opts);
 }

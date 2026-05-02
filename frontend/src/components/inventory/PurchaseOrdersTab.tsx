@@ -4,10 +4,21 @@ import { get, post, getUserMessage } from '../../api';
 import { showToast } from '../Toast';
 import { showConfirm } from '../ConfirmDialog';
 import { formatCurrency } from '../../utils/formatCurrency';
+import { defaultPackagingUnitForStorage, PackagingInputForSelectedUnit } from './PackagingSection';
+import { getSelectableInputUnits, quantityToStorageBase } from '../../utils/unitConversion';
 import SearchableSelect from '../SearchableSelect';
 
 type Supplier = { id: number; name: string; linked_material_ids?: number[] };
-type Ingredient = { id: number; name: string; unit: string; last_purchase_price: number; preferred_supplier_id?: number };
+type Ingredient = {
+  id: number;
+  name: string;
+  unit: string;
+  last_purchase_price: number;
+  preferred_supplier_id?: number;
+  unit_conversions?: Record<string, number> | null;
+  purchase_unit?: string | null;
+  conversion_factor?: number | null;
+};
 
 type POItem = {
   ingredient_id: number;
@@ -16,6 +27,18 @@ type POItem = {
   quantity_remaining?: number;
   unit_price: number;
   unit: string;
+  packageQty: string;
+  packageUnit: string;
+};
+
+const ORDER_UNIT_LABELS: Record<string, string> = {
+  kg: 'Kg',
+  g: 'g',
+  ltr: 'Ltr',
+  ml: 'ml',
+  pcs: 'Pcs',
+  carton: 'Carton',
+  packet: 'Packet',
 };
 
 type PurchaseOrderItem = POItem & {
@@ -128,7 +151,10 @@ export default function PurchaseOrdersTab() {
   };
 
   const handleAddItem = () => {
-    setFormItems([...formItems, { ingredient_id: 0, quantity_ordered: 1, unit_price: 0, unit: 'kg' }]);
+    setFormItems([
+      ...formItems,
+      { ingredient_id: 0, quantity_ordered: 1, unit_price: 0, unit: '', packageQty: '', packageUnit: 'g' },
+    ]);
   };
 
   const handleUpdateItem = (index: number, field: keyof POItem, value: POItem[keyof POItem]) => {
@@ -139,9 +165,15 @@ export default function PurchaseOrdersTab() {
     if (field === 'ingredient_id') {
       const ing = ingredients.find(i => i.id === value);
       if (ing) {
-        newItems[index].unit = ing.unit;
+        const opts = getSelectableInputUnits(ing);
+        newItems[index].unit = opts[0] || ing.unit;
         newItems[index].unit_price = ing.last_purchase_price || 0;
+        newItems[index].packageQty = '';
+        newItems[index].packageUnit = defaultPackagingUnitForStorage(ing.unit);
       }
+    }
+    if (field === 'unit') {
+      newItems[index].packageQty = '';
     }
     setFormItems(newItems);
   };
@@ -168,14 +200,49 @@ export default function PurchaseOrdersTab() {
       showToast('Use only materials linked to the selected supplier', 'error');
       return;
     }
+    if (formItems.some((i) => {
+      const ing = ingredients.find((x) => x.id === i.ingredient_id);
+      return !ing || !i.unit;
+    })) {
+      showToast('Select a unit for each line', 'error');
+      return;
+    }
 
     setSubmitting(true);
     try {
+      const itemsPayload = formItems.map((it) => {
+        const lineIng = ingredients.find((x) => x.id === it.ingredient_id);
+        let packagingPerBase: number | undefined;
+        const ut = (it.unit || '').trim().toLowerCase();
+        if (lineIng && (ut === 'carton' || ut === 'packet') && it.packageQty.trim() && it.packageUnit.trim()) {
+          try {
+            const pq = parseFloat(it.packageQty);
+            if (Number.isFinite(pq) && pq > 0) {
+              packagingPerBase = quantityToStorageBase(pq, it.packageUnit, lineIng.unit);
+            }
+          } catch {
+            packagingPerBase = undefined;
+          }
+        }
+        const includePkg =
+          (ut === 'carton' || ut === 'packet') &&
+          packagingPerBase != null &&
+          Number.isFinite(packagingPerBase) &&
+          packagingPerBase > 0;
+        return {
+          ingredient_id: it.ingredient_id,
+          quantity_ordered: it.quantity_ordered,
+          unit_price: it.unit_price,
+          unit: it.unit,
+          ...(includePkg ? { packaging_units_per_one: packagingPerBase } : {}),
+        };
+      });
+
       await post('/inventory-advanced/purchase-orders', {
         supplier_id: parseInt(formSupplierId, 10),
         expected_delivery: formExpectedDate ? new Date(formExpectedDate).toISOString() : undefined,
         notes: formNotes || undefined,
-        items: formItems
+        items: itemsPayload,
       });
       showToast('Purchase Order created', 'success');
       setShowModal(false);
@@ -458,53 +525,96 @@ export default function PurchaseOrdersTab() {
                        {formSupplierId ? 'No items added yet. Click "+ Add row".' : 'Select a supplier to add their materials.'}
                      </div>
                    ) : (
-                     <div className="space-y-2">
-                       {formItems.map((item, idx) => (
-                         <div key={idx} className="flex flex-wrap sm:flex-nowrap gap-2 items-center bg-white/40 p-2 rounded-lg border border-soot-200">
-                            <div className="flex-1 min-w-[120px]">
-                              <SearchableSelect
-                                value={item.ingredient_id ? String(item.ingredient_id) : ''}
-                                onChange={(value) => handleUpdateItem(idx, 'ingredient_id', parseInt(value, 10))}
-                                placeholder="— Material —"
-                                searchPlaceholder="Search materials…"
-                                emptyMessage="No materials linked to this supplier."
-                                options={supplierIngredients.map((ingredient) => ({
-                                  value: String(ingredient.id),
-                                  label: ingredient.name,
-                                  searchText: ingredient.unit,
-                                }))}
-                                className="glass-card border-0 px-3 py-2"
-                              />
-                            </div>
-                            
-                            <input 
-                              type="number" step="any" min="0.01" required
-                              value={item.quantity_ordered}
-                              onChange={e => handleUpdateItem(idx, 'quantity_ordered', parseFloat(e.target.value) || 0)}
-                              className="w-24 px-3 py-2 glass-card text-sm text-right"
-                              placeholder="Qty"
-                            />
-                            
-                            <div className="w-16 px-2 text-xs font-semibold text-soot-500 truncate">
-                              {item.unit}
-                            </div>
-                            
-                            <div className="relative w-28">
-                              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-soot-400 text-sm">$</span>
-                              <input 
-                                type="number" step="0.01" min="0" required
-                                value={item.unit_price}
-                                onChange={e => handleUpdateItem(idx, 'unit_price', parseFloat(e.target.value) || 0)}
-                                className="w-full pl-6 pr-3 py-2 glass-card text-sm text-right"
-                                placeholder="Price"
-                              />
-                            </div>
-                            
-                            <button type="button" onClick={() => handleRemoveItem(idx)} className="p-2 text-soot-400 hover:text-red-600 transition-colors">
-                              <X className="w-4 h-4" />
-                            </button>
+                     <div className="space-y-3">
+                       {formItems.map((item, idx) => {
+                         const lineIng = ingredients.find((x) => x.id === item.ingredient_id);
+                         const unitOptions = lineIng ? getSelectableInputUnits(lineIng) : [];
+                         return (
+                         <div key={idx} className="rounded-lg border border-soot-200/80 bg-white/40 p-3 space-y-2">
+                           <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 gap-y-1 items-end">
+                             <div className="sm:col-span-5 min-w-0">
+                               <label className="block text-xs font-semibold text-neutral-600 mb-1">Item</label>
+                               <SearchableSelect
+                                 value={item.ingredient_id ? String(item.ingredient_id) : ''}
+                                 onChange={(value) => handleUpdateItem(idx, 'ingredient_id', parseInt(value, 10))}
+                                 placeholder="— Material —"
+                                 searchPlaceholder="Search materials…"
+                                 emptyMessage="No materials linked to this supplier."
+                                 options={supplierIngredients.map((ingredient) => ({
+                                   value: String(ingredient.id),
+                                   label: ingredient.name,
+                                   searchText: ingredient.unit,
+                                 }))}
+                                 className="glass-card border-0 px-3 py-2"
+                               />
+                             </div>
+                             <div className="sm:col-span-2">
+                               <label className="block text-xs font-semibold text-neutral-600 mb-1">Quantity</label>
+                               <input
+                                 type="number"
+                                 step="any"
+                                 min="0.01"
+                                 required
+                                 value={item.quantity_ordered}
+                                 onChange={(e) => handleUpdateItem(idx, 'quantity_ordered', parseFloat(e.target.value) || 0)}
+                                 className="w-full px-3 py-2 glass-card text-sm text-right tabular-nums"
+                               />
+                             </div>
+                             <div className="sm:col-span-2">
+                               <label className="block text-xs font-semibold text-neutral-600 mb-1">Unit</label>
+                               <select
+                                 value={item.unit && unitOptions.includes(item.unit) ? item.unit : (unitOptions[0] || '')}
+                                 onChange={(e) => handleUpdateItem(idx, 'unit', e.target.value)}
+                                 disabled={!lineIng}
+                                 className="w-full px-2 py-2 glass-card text-xs font-semibold text-soot-700"
+                                 aria-label="Order unit"
+                               >
+                                 {unitOptions.map((u) => (
+                                   <option key={u} value={u}>{ORDER_UNIT_LABELS[u] || u}</option>
+                                 ))}
+                               </select>
+                             </div>
+                             <div className="sm:col-span-2">
+                               <label className="block text-xs font-semibold text-neutral-600 mb-1">Price (Rs.)</label>
+                               <input
+                                 type="number"
+                                 step="0.01"
+                                 min="0"
+                                 required
+                                 value={item.unit_price}
+                                 onChange={(e) => handleUpdateItem(idx, 'unit_price', parseFloat(e.target.value) || 0)}
+                                 className="w-full px-3 py-2 glass-card text-sm text-right tabular-nums"
+                                 title="Price per selected unit"
+                               />
+                             </div>
+                             <div className="sm:col-span-1 flex justify-end pb-1">
+                               <button type="button" onClick={() => handleRemoveItem(idx)} className="p-2 text-soot-400 hover:text-red-600 transition-colors" aria-label="Remove line">
+                                 <X className="w-4 h-4" />
+                               </button>
+                             </div>
+                           </div>
+                           {lineIng && (
+                             <PackagingInputForSelectedUnit
+                               storageUnit={lineIng.unit}
+                               selectedUnit={item.unit}
+                               override={{ qty: item.packageQty, unit: item.packageUnit }}
+                               onOverrideChange={(next) => {
+                                 setFormItems((prev) => {
+                                   const nextItems = [...prev];
+                                   nextItems[idx] = {
+                                     ...nextItems[idx],
+                                     packageQty: next.qty,
+                                     packageUnit: next.unit,
+                                   };
+                                   return nextItems;
+                                 });
+                               }}
+                               idPrefix={`po-${idx}`}
+                             />
+                           )}
                          </div>
-                       ))}
+                       );
+                       })}
                      </div>
                    )}
                  </div>

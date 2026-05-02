@@ -287,7 +287,9 @@ class Ingredient(db.Model):
     sku = db.Column(db.String(100), unique=True)
     unit = db.Column(db.Enum(UnitOfMeasure), nullable=False, default=UnitOfMeasure.KG)
     purchase_unit = db.Column(db.String(50), nullable=True) # e.g. "carton", "packet"
-    conversion_factor = db.Column(db.Float, default=1.0)    # e.g. 1 carton = 10 KG
+    conversion_factor = db.Column(db.Float, default=1.0)    # legacy: base qty per 1 purchase_unit
+    # Dynamic packaging sizes: base storage units per 1 carton / 1 packet (e.g. ml per carton)
+    unit_conversions = db.Column(db.JSON, nullable=True)
     current_stock = db.Column(db.Float, default=0.0)
     minimum_stock = db.Column(db.Float, default=0.0)   # Low-stock threshold
     reorder_quantity = db.Column(db.Float, default=0.0)
@@ -447,25 +449,6 @@ class RecipePreparedItem(db.Model):
 
     product = db.relationship("Product", backref=db.backref("prepared_recipe_items", cascade="all, delete-orphan"))
     prepared_item = db.relationship("PreparedItem", back_populates="recipe_items")
-
-
-class RecipeExtraCost(db.Model):
-    """Non-stock cost component attached to a menu recipe."""
-
-    __tablename__ = "recipe_extra_costs"
-    __table_args__ = (
-        CheckConstraint("amount >= 0", name="ck_recipe_extra_cost_amount_nonneg"),
-    )
-
-    id = db.Column(db.Integer, primary_key=True)
-    product_id = db.Column(db.Integer, db.ForeignKey("products.id"), nullable=False)
-    name = db.Column(db.String(120), nullable=False)
-    amount = db.Column(db.Float, nullable=False, default=0.0)
-    variant_key = db.Column(db.String(100), nullable=False, default="")
-    created_at = db.Column(db.DateTime(timezone=True), default=utc_now)
-
-    product = db.relationship("Product", backref=db.backref("recipe_extra_costs", cascade="all, delete-orphan"))
-
 
 class PreparedItemStockMovement(db.Model):
     __tablename__ = "prepared_item_stock_movements"

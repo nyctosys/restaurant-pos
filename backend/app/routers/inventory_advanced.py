@@ -33,6 +33,8 @@ from app.services.prepared_item_stock import (
     seed_prepared_branch_stocks_for_new_item,
     sync_prepared_master_total,
 )
+from app.services.unit_conversion import convert_quantity_to_unit, normalize_po_line_to_ingredient_base
+from app.services.units import normalize_unit_token, to_base_unit
 from app.services.product_pricing import recalculate_product_cost
 from app.services.branch_scope import resolve_terminal_branch_id
 from app.deps import get_current_user
@@ -93,6 +95,9 @@ def _ingredient_to_dict(ingredient: Ingredient, branch_id: str) -> dict[str, Any
         "average_cost": ingredient.average_cost,
         "purchase_unit": getattr(ingredient, "purchase_unit", None),
         "conversion_factor": float(getattr(ingredient, "conversion_factor", 1.0) or 1.0),
+        "unit_conversions": getattr(ingredient, "unit_conversions", None) or {},
+        "baseUnit": unit,
+        "pricePerBaseUnit": float(ingredient.average_cost or 0.0),
         "preferred_supplier_id": ingredient.preferred_supplier_id,
         "category": ingredient.category,
         "notes": ingredient.notes,
@@ -342,11 +347,13 @@ def _replace_prepared_components(item: PreparedItem, components: list[Any]) -> N
         ingredient = db.session.get(Ingredient, int(data.get("ingredient_id", 0)))
         if ingredient is None:
             raise ValueError(f"Ingredient not found: {data.get('ingredient_id')}")
-        ingredient_unit = ingredient.unit.value if hasattr(ingredient.unit, "value") else str(ingredient.unit or "")
-        if str(data.get("unit", "")).strip().lower() != ingredient_unit:
-            raise ValueError(
-                f"Unit mismatch for ingredient '{ingredient.name}': expected '{ingredient_unit}'"
-            )
+        input_u = str(data.get("unit", "")).strip().lower()
+        try:
+            qty_base = to_base_unit(float(data.get("quantity", 0)), input_u, ingredient)
+        except ValueError as exc:
+            raise ValueError(str(exc)) from exc
+        data["quantity"] = qty_base
+        data["unit"] = ingredient.unit
         item.components.append(PreparedItemComponent(**data))
 
 
@@ -511,12 +518,13 @@ def add_recipe_item(payload: RecipeItemCreate, current_user: User = Depends(get_
     ingredient = db.session.get(Ingredient, int(data.get("ingredient_id", 0)))
     if ingredient is None:
         return JSONResponse(status_code=404, content={"message": "Ingredient not found"})
-    ingredient_unit = ingredient.unit.value if hasattr(ingredient.unit, "value") else str(ingredient.unit or "")
-    if str(data.get("unit", "")).strip().lower() != ingredient_unit:
-        return JSONResponse(
-            status_code=400,
-            content={"message": f"Unit mismatch for ingredient '{ingredient.name}': expected '{ingredient_unit}'"},
-        )
+    input_u = str(data.get("unit", "")).strip().lower()
+    try:
+        qty_base = to_base_unit(float(data.get("quantity", 0)), input_u, ingredient)
+    except ValueError as exc:
+        return JSONResponse(status_code=400, content={"message": str(exc)})
+    data["quantity"] = qty_base
+    data["unit"] = ingredient.unit
     if "variant_key" not in data or data.get("variant_key") is None:
         data["variant_key"] = ""
     else:
@@ -549,11 +557,23 @@ def add_recipe_prepared_item(payload: RecipePreparedItemCreate, current_user: Us
     if prepared_item is None:
         return JSONResponse(status_code=404, content={"message": "Prepared item not found"})
     prepared_unit = prepared_item.unit.value if hasattr(prepared_item.unit, "value") else str(prepared_item.unit or "")
-    if str(data.get("unit", "")).strip().lower() != prepared_unit:
+    try:
+        qty_base = convert_quantity_to_unit(
+            float(data.get("quantity", 0)),
+            normalize_unit_token(str(data.get("unit", ""))),
+            normalize_unit_token(prepared_unit),
+        )
+    except ValueError as exc:
         return JSONResponse(
             status_code=400,
-            content={"message": f"Unit mismatch for prepared item '{prepared_item.name}': expected '{prepared_unit}'"},
+            content={
+                "message": (
+                    f"Cannot convert recipe unit to prepared item unit ({prepared_unit}): {exc}"
+                )
+            },
         )
+    data["quantity"] = qty_base
+    data["unit"] = prepared_item.unit
     data["variant_key"] = str(data.get("variant_key") or "").strip()[:100]
     r = RecipePreparedItem(**data)
     db.session.add(r)
@@ -681,18 +701,44 @@ def create_purchase_order(payload: PurchaseOrderCreate, current_user: User = Dep
     import uuid
     data['po_number'] = f"PO-{uuid.uuid4().hex[:6].upper()}"
     data['created_by'] = current_user.id
-    
-    total = sum(i['quantity_ordered'] * i['unit_price'] for i in items_data)
+
+    normalized_items: list[dict[str, Any]] = []
+    for raw in items_data:
+        ing = db.session.get(Ingredient, int(raw.get("ingredient_id", 0)))
+        if ing is None:
+            return JSONResponse(status_code=404, content={"message": f"Ingredient {raw.get('ingredient_id')} not found"})
+        try:
+            pkg_override = raw.get("packaging_units_per_one")
+            qty_b, price_b, unit_enum = normalize_po_line_to_ingredient_base(
+                ing,
+                float(raw.get("quantity_ordered", 0)),
+                str(raw.get("unit", "")),
+                float(raw.get("unit_price", 0)),
+                packaging_units_per_one=float(pkg_override) if pkg_override is not None else None,
+            )
+        except ValueError as exc:
+            return JSONResponse(status_code=400, content={"message": str(exc)})
+        normalized_items.append(
+            {
+                "ingredient_id": int(raw["ingredient_id"]),
+                "quantity_ordered": qty_b,
+                "unit_price": price_b,
+                "unit": unit_enum,
+                "notes": raw.get("notes"),
+            }
+        )
+
+    total = sum(float(i["quantity_ordered"]) * float(i["unit_price"]) for i in normalized_items)
     data['total_amount'] = total
 
     po = PurchaseOrder(**data)
     db.session.add(po)
     db.session.flush()
 
-    for item in items_data:
+    for item in normalized_items:
         poi = PurchaseOrderItem(**item, purchase_order_id=po.id)
         db.session.add(poi)
-    
+
     db.session.commit()
     return {"id": po.id, "po_number": po.po_number, "message": "PO created"}
 
@@ -814,11 +860,18 @@ def manual_stock_movement(payload: StockMovementCreate, current_user: User = Dep
         return JSONResponse(status_code=404, content={"message": "Ingredient not found"})
 
     branch_id = _resolve_inventory_branch(payload.branch_id, current_user)
+    qty_delta = float(payload.quantity_change)
+    if getattr(payload, "input_unit", None):
+        try:
+            sign = -1.0 if qty_delta < 0 else 1.0
+            qty_delta = sign * to_base_unit(abs(qty_delta), str(payload.input_unit), ing)
+        except ValueError as exc:
+            return JSONResponse(status_code=400, content={"message": str(exc)})
     try:
         _, qty_after = adjust_branch_ingredient_stock(
             ing.id,
             branch_id,
-            float(payload.quantity_change),
+            qty_delta,
             movement_type=payload.movement_type,
             user_id=current_user.id,
             reference_id=payload.reference_id,

@@ -21,12 +21,49 @@ def _clean_required_text(value: str) -> str:
 
 _UNIT_VALUES = {unit.value for unit in UnitOfMeasure}
 
+# UI aliases → DB enum token (storage unit on Ingredient)
+_STORAGE_UNIT_ALIASES = {"ltr": "l", "liter": "l", "litre": "l", "pcs": "piece", "pc": "piece"}
+
 
 def _normalize_unit(value: str) -> str:
     normalized = _clean_required_text(value).lower()
+    normalized = _STORAGE_UNIT_ALIASES.get(normalized, normalized)
     if normalized not in _UNIT_VALUES:
         raise ValueError(f"Invalid unit '{normalized}'. Allowed: {', '.join(sorted(_UNIT_VALUES))}")
     return normalized
+
+
+def _normalize_storage_unit_for_ingredient(value: str) -> str:
+    """Ingredient base unit: accepts ltr/pcs aliases."""
+    return _normalize_unit(value)
+
+
+def _normalize_bom_input_unit(value: str) -> str:
+    """Recipe/BOM line unit as entered (kg, ml, ltr, carton, packet, …)."""
+    s = str(value or "").strip().lower()
+    if not s:
+        raise ValueError("Line unit is required.")
+    return s
+
+
+def _validate_unit_conversions(raw: dict[str, float] | None) -> dict[str, float] | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ValueError("unit_conversions must be an object")
+    out: dict[str, float] = {}
+    for key, val in raw.items():
+        k = str(key).strip().lower()
+        if k not in ("carton", "packet"):
+            raise ValueError(f"Invalid conversion key '{key}'. Only carton and packet are allowed.")
+        try:
+            fv = float(val)
+        except (TypeError, ValueError):
+            raise ValueError(f"Invalid conversion value for '{key}'")
+        if fv <= 0:
+            raise ValueError(f"Conversion for '{key}' must be positive")
+        out[k] = fv
+    return out or None
 
 class SupplierBase(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -85,11 +122,12 @@ class IngredientBase(BaseModel):
     name: str
     sku: str | None = None
     unit: str = Field(
-        validation_alias=AliasChoices("unit", "unitOfMeasure"),
+        validation_alias=AliasChoices("unit", "unitOfMeasure", "baseUnit"),
         serialization_alias="unitOfMeasure",
     )
     purchase_unit: str | None = None
     conversion_factor: float = 1.0
+    unit_conversions: dict[str, float] | None = None
     brand_name: str = Field(
         default="",
         validation_alias=AliasChoices("brand_name", "brandName"),
@@ -107,8 +145,9 @@ class IngredientBase(BaseModel):
 
     _normalize_name = field_validator("name")(lambda cls, value: _clean_required_text(value))
     _normalize_sku = field_validator("sku")(lambda cls, value: _clean_optional_text(value))
-    _normalize_unit = field_validator("unit")(lambda cls, value: _normalize_unit(value))
+    _normalize_unit = field_validator("unit")(lambda cls, value: _normalize_storage_unit_for_ingredient(value))
     _normalize_purchase_unit = field_validator("purchase_unit")(lambda cls, value: _clean_optional_text(value))
+    _normalize_unit_conversions = field_validator("unit_conversions")(lambda cls, value: _validate_unit_conversions(value))
     _normalize_brand = field_validator("brand_name")(lambda cls, value: _clean_optional_text(value))
     _normalize_category = field_validator("category")(lambda cls, value: _clean_optional_text(value))
     _normalize_notes = field_validator("notes")(lambda cls, value: _clean_optional_text(value))
@@ -137,7 +176,10 @@ class IngredientUpdate(IngredientBase):
     @field_validator("unit")
     @classmethod
     def normalize_optional_unit(cls, value: str | None) -> str | None:
-        return _clean_optional_text(value.lower() if isinstance(value, str) else value)
+        if value is None:
+            return None
+        s = _clean_optional_text(value)
+        return _normalize_storage_unit_for_ingredient(s) if s else None
 
 class IngredientResponse(IngredientBase):
     id: int
@@ -156,7 +198,7 @@ class RecipeItemBase(BaseModel):
     notes: str | None = None
     variant_key: str = ""
 
-    _normalize_unit = field_validator("unit")(lambda cls, value: _normalize_unit(value))
+    _normalize_unit = field_validator("unit")(lambda cls, value: _normalize_bom_input_unit(value))
     _normalize_notes = field_validator("notes")(lambda cls, value: _clean_optional_text(value))
     _normalize_variant_key = field_validator("variant_key")(lambda cls, value: str(value or "").strip())
 
@@ -176,7 +218,7 @@ class PreparedItemComponentBase(BaseModel):
     unit: str
     notes: str | None = None
 
-    _normalize_unit = field_validator("unit")(lambda cls, value: _normalize_unit(value))
+    _normalize_unit = field_validator("unit")(lambda cls, value: _normalize_bom_input_unit(value))
     _normalize_notes = field_validator("notes")(lambda cls, value: _clean_optional_text(value))
 
 
@@ -243,7 +285,7 @@ class RecipePreparedItemBase(BaseModel):
     notes: str | None = None
     variant_key: str = ""
 
-    _normalize_unit = field_validator("unit")(lambda cls, value: _normalize_unit(value))
+    _normalize_unit = field_validator("unit")(lambda cls, value: _normalize_bom_input_unit(value))
     _normalize_notes = field_validator("notes")(lambda cls, value: _clean_optional_text(value))
     _normalize_variant_key = field_validator("variant_key")(lambda cls, value: str(value or "").strip())
 
@@ -275,9 +317,18 @@ class PurchaseOrderItemBase(BaseModel):
         validation_alias=AliasChoices("unit", "unitOfMeasure"),
         serialization_alias="unitOfMeasure",
     )
+    """Base units per 1 carton or 1 packet for this line only (when unit is carton/packet)."""
+    packaging_units_per_one: float | None = Field(default=None, gt=0)
     notes: str | None = None
 
-    _normalize_unit = field_validator("unit")(lambda cls, value: _normalize_unit(value))
+    @field_validator("unit")
+    @classmethod
+    def normalize_po_input_unit(cls, value: str) -> str:
+        s = str(value or "").strip().lower()
+        if not s:
+            raise ValueError("Order line unit is required (e.g. kg, ml, carton).")
+        return s
+
     _normalize_notes = field_validator("notes")(lambda cls, value: _clean_optional_text(value))
 
 class PurchaseOrderCreate(BaseModel):
@@ -305,23 +356,45 @@ class StockMovementCreate(BaseModel):
     ingredient_id: int
     movement_type: Literal["purchase", "sale_deduction", "preparation", "wastage", "adjustment", "stock_take", "transfer"]
     quantity_change: float
+    """When set, quantity_change is interpreted in this unit and converted to ingredient base."""
+    input_unit: str | None = None
     unit_cost: float = 0.0
     reference_id: int | None = None
     reference_type: str | None = None
     reason: str | None = None
     branch_id: str | None = None
 
+    @field_validator("input_unit")
+    @classmethod
+    def strip_movement_input_unit(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        s = str(value).strip().lower()
+        return s or None
+
 
 class BulkRestockLine(BaseModel):
     model_config = ConfigDict(extra="ignore")
     ingredient_id: int
     quantity: float = Field(gt=0)
+    """When set, `quantity` is in this unit (e.g. g, carton); server converts to ingredient base."""
+    input_unit: str | None = None
+    """Base units per 1 carton or 1 packet for this line only (when input_unit is carton/packet)."""
+    packaging_units_per_one: float | None = Field(default=None, gt=0)
     unit_cost: float | None = Field(default=None, ge=0)
     brand_name: str | None = Field(
         default=None,
         validation_alias=AliasChoices("brand_name", "brandName"),
         serialization_alias="brandName",
     )
+
+    @field_validator("input_unit")
+    @classmethod
+    def strip_input_unit(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        s = str(value).strip().lower()
+        return s or None
 
 
 class BulkRestockRequest(BaseModel):

@@ -21,11 +21,40 @@ type Product = {
   image_url?: string;
   archived_at?: string | null;
   unitOfMeasure?: string;
+  /** Saved catalog unit from API (preferred when present). */
+  catalog_unit?: string | null;
   totalQuantity?: number;
 };
 
 type SortKey = 'sku' | 'title' | 'section' | 'base_price' | 'sale_price' | 'archived_at';
 type SortDirection = 'asc' | 'desc';
+
+/** Menu catalog: serving units only (not inventory packaging). Must align with `menu.py` _ALLOWED_CATALOG_UNITS. */
+const MENU_CATALOG_UNIT_GROUPS: { group: string; options: { value: string; label: string }[] }[] = [
+  {
+    group: 'Weight',
+    options: [
+      { value: 'kg', label: 'kg' },
+      { value: 'g', label: 'g' },
+    ],
+  },
+  {
+    group: 'Volume',
+    options: [
+      { value: 'ltr', label: 'ltr' },
+      { value: 'ml', label: 'ml' },
+    ],
+  },
+  { group: 'Count', options: [{ value: 'pcs', label: 'pcs' }] },
+];
+
+function normalizeMenuUnitForForm(raw?: string | null): string {
+  const t = (raw || '').trim().toLowerCase();
+  if (!t) return '';
+  if (t === 'l' || t === 'liter' || t === 'litre') return 'ltr';
+  if (t === 'piece' || t === 'pc') return 'pcs';
+  return t;
+}
 
 function formatUnit(unit?: string): string {
   if (!unit) return '';
@@ -112,7 +141,7 @@ export default function MenuItemsTab() {
     setFormTitle(p.title);
     setFormSection(p.section || '');
     setFormImageUrl(p.image_url || '');
-    setFormUnit(p.unitOfMeasure || '');
+    setFormUnit(normalizeMenuUnitForForm(p.catalog_unit || p.unitOfMeasure || ''));
     setFormVariants(
       Array.isArray(p.variants) && p.variants.length
         ? p.variants.map(v => ({
@@ -195,6 +224,14 @@ export default function MenuItemsTab() {
       setFormError(`Duplicate variant name: ${duplicate.name}`);
       return;
     }
+    let unitTrim = formUnit.trim().toLowerCase();
+    if (unitTrim === 'l') unitTrim = 'ltr';
+    if (unitTrim === 'piece') unitTrim = 'pcs';
+    const allowedMenu = new Set(['kg', 'g', 'ltr', 'ml', 'pcs', '']);
+    if (!allowedMenu.has(unitTrim)) {
+      setFormError('Selling unit must be Weight / Volume / pcs, or leave empty.');
+      return;
+    }
 
     setSubmitting(true);
     setFormError('');
@@ -205,7 +242,7 @@ export default function MenuItemsTab() {
         section: formSection,
         variants: normalizedVariants,
         image_url: formImageUrl.trim() || '',
-        unitOfMeasure: formUnit.trim() || '',
+        unitOfMeasure: unitTrim || '',
       };
       type SaveResponse = { product?: Product; id?: number; message?: string };
       let saved: SaveResponse | null = null;
@@ -696,21 +733,30 @@ export default function MenuItemsTab() {
                 </div>
                 <div className="flex gap-2 mt-2">
                   <button type="button" onClick={() => setFormVariants(prev => [...prev, { name: '', salePrice: '', sku: '' }])} className="px-3 py-2 rounded-[8px] border border-brand-200 text-sm text-brand-800 hover:bg-brand-50">Add variant</button>
-                  <div className="w-1/3 ml-auto">
-                    <select
-                      value={formUnit}
-                      onChange={e => setFormUnit(e.target.value)}
-                      className="w-full h-full px-4 py-2.5 glass-card text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none"
-                    >
-                      <option value="">No unit</option>
-                      <option value="kg">kg</option>
-                      <option value="g">g</option>
-                      <option value="l">l</option>
-                      <option value="ml">ml</option>
-                      <option value="piece">piece</option>
-                    </select>
-                  </div>
                 </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-neutral-700 mb-1">Selling unit (optional)</label>
+                <select
+                  value={formUnit}
+                  onChange={(e) => setFormUnit(e.target.value)}
+                  className="w-full px-4 py-2.5 glass-card text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none"
+                >
+                  <option value="">No unit</option>
+                  {MENU_CATALOG_UNIT_GROUPS.map((g) => (
+                    <optgroup key={g.group} label={g.group}>
+                      {g.options.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+                <p className="text-xs text-neutral-500 mt-1">
+                  Serving-style units only (not inventory carton/packet). Saved as catalog display — separate from BOM units.
+                </p>
               </div>
 
               <div>
