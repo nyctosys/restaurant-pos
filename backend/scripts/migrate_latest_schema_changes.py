@@ -125,7 +125,7 @@ def _ensure_prepared_item_tables(dialect: str) -> None:
             CREATE TABLE prepared_item_branch_stocks (
               id {id_type},
               prepared_item_id INTEGER NOT NULL REFERENCES prepared_items(id),
-              branch_id INTEGER NOT NULL REFERENCES branches(id),
+              branch_id VARCHAR(32) NOT NULL REFERENCES branches(id),
               current_stock {float_type} NOT NULL DEFAULT 0,
               CONSTRAINT uq_prepared_item_branch_stock UNIQUE (prepared_item_id, branch_id),
               CONSTRAINT ck_prepared_item_branch_stock_nonneg CHECK (current_stock >= 0)
@@ -155,7 +155,7 @@ def _ensure_prepared_item_tables(dialect: str) -> None:
               reference_type VARCHAR(50),
               reason VARCHAR(500),
               created_by INTEGER REFERENCES users(id),
-              branch_id INTEGER REFERENCES branches(id),
+              branch_id VARCHAR(32) REFERENCES branches(id),
               created_at {ts_type}
             )
         """,
@@ -213,7 +213,7 @@ def _ensure_riders_table(dialect: str) -> None:
             f"""
             CREATE TABLE riders (
               id {id_type},
-              branch_id INTEGER NOT NULL REFERENCES branches(id),
+              branch_id VARCHAR(32) NOT NULL REFERENCES branches(id),
               name VARCHAR(120) NOT NULL,
               is_available BOOLEAN NOT NULL DEFAULT TRUE,
               created_at {ts_type},
@@ -325,6 +325,16 @@ def main() -> None:
                 table="ingredients",
                 column="brand_name",
                 ddl="ALTER TABLE ingredients ADD COLUMN brand_name VARCHAR(120) NOT NULL DEFAULT ''",
+            ),
+            ColumnMigration(
+                table="ingredients",
+                column="preferred_supplier_id",
+                ddl="ALTER TABLE ingredients ADD COLUMN preferred_supplier_id INTEGER REFERENCES suppliers(id)",
+            ),
+            ColumnMigration(
+                table="ingredients",
+                column="unit_conversions",
+                ddl=f"ALTER TABLE ingredients ADD COLUMN unit_conversions {json_type}",
             ),
             ColumnMigration(
                 table="sales",

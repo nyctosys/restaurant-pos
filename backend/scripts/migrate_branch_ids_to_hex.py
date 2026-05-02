@@ -42,6 +42,7 @@ BRANCH_REF_TABLES = [
     "sync_outbox",
     "riders",
     "app_event_logs",
+    "idempotency_records",
 ]
 
 HEX_RE = re.compile(r"^[0-9a-f]{32}$")
@@ -114,6 +115,12 @@ def migrate_postgres(conn: Connection) -> None:
     already_hex = _is_string_type(branch_id_type) and all(HEX_RE.fullmatch(v or "") for v in branch_ids)
     if already_hex:
         print("branches.id already uses 32-char hex strings")
+        dropped = _drop_branch_fks(conn, inspector, tables)
+        for table in tables:
+            branch_ref_type = _column_type(inspector, table, "branch_id")
+            if branch_ref_type is not None and not _is_string_type(branch_ref_type):
+                conn.execute(text(f'ALTER TABLE {_q(conn, table)} ALTER COLUMN branch_id TYPE VARCHAR(32) USING branch_id::text'))
+        _restore_branch_fks(conn, dropped)
         return
 
     existing_hex = {v for v in branch_ids if HEX_RE.fullmatch(v or "")}

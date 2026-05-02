@@ -51,7 +51,7 @@ def migrate() -> None:
                     CREATE TABLE ingredient_branch_stocks (
                       id SERIAL PRIMARY KEY,
                       ingredient_id INTEGER NOT NULL REFERENCES ingredients(id),
-                      branch_id INTEGER NOT NULL REFERENCES branches(id),
+                      branch_id VARCHAR(32) NOT NULL REFERENCES branches(id),
                       current_stock DOUBLE PRECISION NOT NULL DEFAULT 0,
                       CONSTRAINT uq_ingredient_branch_stock UNIQUE (ingredient_id, branch_id),
                       CONSTRAINT ck_ingredient_branch_stock_nonneg CHECK (current_stock >= 0)

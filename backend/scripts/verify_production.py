@@ -39,6 +39,26 @@ if str(BACKEND_DIR) not in sys.path:
 
 
 LATEST_REQUIRED_COLUMNS: dict[str, set[str]] = {
+    "idempotency_records": {
+        "idempotency_key",
+        "method",
+        "path",
+        "request_hash",
+        "user_id",
+        "branch_id",
+        "response_status",
+        "response_body",
+        "state",
+        "created_at",
+        "updated_at",
+    },
+    "ingredients": {
+        "brand_name",
+        "preferred_supplier_id",
+        "purchase_unit",
+        "conversion_factor",
+        "unit_conversions",
+    },
     "sales": {
         "delivery_charge",
         "order_type",
@@ -53,9 +73,12 @@ LATEST_REQUIRED_COLUMNS: dict[str, set[str]] = {
     },
     "combo_items": {"variant_key", "selection_type", "category_name"},
     "products": {"sale_price"},
+    "purchase_order_items": {"quantity_received", "unit"},
 }
 
 LATEST_REQUIRED_TABLES = {
+    "idempotency_records",
+    "ingredient_branch_stocks",
     "prepared_items",
     "prepared_item_components",
     "prepared_item_branch_stocks",
@@ -63,6 +86,24 @@ LATEST_REQUIRED_TABLES = {
     "prepared_item_stock_movements",
     "recipe_extra_costs",
     "riders",
+}
+
+BRANCH_ID_REFERENCE_TABLES = {
+    "users",
+    "settings",
+    "inventory",
+    "inventory_transactions",
+    "sales",
+    "ingredient_branch_stocks",
+    "prepared_item_branch_stocks",
+    "prepared_item_stock_movements",
+    "purchase_orders",
+    "stock_movements",
+    "stock_takes",
+    "sync_outbox",
+    "riders",
+    "app_event_logs",
+    "idempotency_records",
 }
 
 
@@ -227,6 +268,14 @@ def _check_latest_schema_contract(inspector, report: CheckReport) -> None:
             report.ok("branches.id is string-compatible for hex branch identity")
         elif branch_id_col:
             report.fail(f"branches.id is not string-compatible: {branch_id_col['type']}")
+
+    for table in sorted(BRANCH_ID_REFERENCE_TABLES & existing_tables):
+        branch_id_col = next((col for col in inspector.get_columns(table) if col["name"] == "branch_id"), None)
+        if not branch_id_col:
+            continue
+        if "char" in str(branch_id_col["type"]).lower() or "text" in str(branch_id_col["type"]).lower():
+            continue
+        report.fail(f"{table}.branch_id is not string-compatible with hex branches.id: {branch_id_col['type']}")
 
 
 def _check_postgres_specifics(connection, inspector, report: CheckReport) -> None:

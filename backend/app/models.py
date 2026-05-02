@@ -145,7 +145,7 @@ class IdempotencyRecord(db.Model):
     path = db.Column(db.String(255), nullable=False)
     request_hash = db.Column(db.String(64), nullable=False)
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
-    branch_id = db.Column(db.Integer, db.ForeignKey("branches.id"), nullable=True)
+    branch_id = db.Column(db.String(BRANCH_ID_LENGTH), db.ForeignKey("branches.id"), nullable=True)
     response_status = db.Column(db.Integer, nullable=True)
     response_body = db.Column(db.JSON, nullable=True)
     state = db.Column(db.String(20), nullable=False, default="processing")

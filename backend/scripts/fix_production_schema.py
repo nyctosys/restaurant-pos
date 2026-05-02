@@ -247,6 +247,43 @@ def _apply_postgres_fixes(connection: Connection, report: RepairReport) -> None:
                 f"Ensured {table_name}.unit is VARCHAR-compatible",
             )
 
+    for table_name in (
+        "users",
+        "settings",
+        "inventory",
+        "inventory_transactions",
+        "sales",
+        "ingredient_branch_stocks",
+        "prepared_item_branch_stocks",
+        "prepared_item_stock_movements",
+        "purchase_orders",
+        "stock_movements",
+        "stock_takes",
+        "sync_outbox",
+        "riders",
+        "app_event_logs",
+        "idempotency_records",
+    ):
+        exists = connection.execute(
+            text(
+                """
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_schema = current_schema()
+                  AND table_name = :table_name
+                  AND column_name = 'branch_id'
+                """
+            ),
+            {"table_name": table_name},
+        ).scalar()
+        if exists:
+            _safe_execute(
+                connection,
+                f"ALTER TABLE {_quote(connection.engine, table_name)} ALTER COLUMN branch_id TYPE VARCHAR(32) USING branch_id::text",
+                report,
+                f"Ensured {table_name}.branch_id is VARCHAR-compatible",
+            )
+
     combo_product_id_exists = connection.execute(
         text(
             """
