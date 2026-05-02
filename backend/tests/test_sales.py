@@ -7,6 +7,7 @@ from app.models import (
     ComboItem,
     Ingredient,
     IngredientBranchStock,
+    IdempotencyRecord,
     Modifier,
     Product,
     RecipeItem,
@@ -99,6 +100,91 @@ def test_checkout_success(client, app):
         row = IngredientBranchStock.query.filter_by(ingredient_id=iid, branch_id=bid).first()
         assert row is not None
         assert abs(float(row.current_stock) - 98.0) < 1e-6
+
+
+def test_checkout_idempotency_replays_without_duplicate_sale_or_stock_deduction(client, app):
+    client.post(
+        "/api/auth/setup",
+        json={"username": "owner1", "password": "pass", "branch_name": "Main"},
+    )
+    token = _get_token(client)
+    with app.app_context():
+        bid = Branch.query.filter_by(name="Main").first().id
+    pid, iid = _create_menu_item_with_recipe(app, bid, "Idem Burger", stock=10.0, recipe_qty=2.0)
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "X-Idempotency-Key": "checkout-idem-key-1",
+    }
+    payload = {
+        "items": [{"product_id": pid, "quantity": 2}],
+        "payment_method": "Cash",
+        "branch_id": bid,
+    }
+
+    first = client.post("/api/orders/checkout", headers=headers, json=payload)
+    second = client.post("/api/orders/checkout", headers=headers, json=payload)
+
+    assert first.status_code == 201
+    assert second.status_code == 201
+    assert second.headers.get("X-Idempotency-Replayed") == "true"
+    assert second.get_json() == first.get_json()
+    with app.app_context():
+        assert Sale.query.count() == 1
+        row = IngredientBranchStock.query.filter_by(ingredient_id=iid, branch_id=bid).first()
+        assert row.current_stock == pytest.approx(6.0)
+        assert IdempotencyRecord.query.filter_by(idempotency_key="checkout-idem-key-1").count() == 1
+
+
+def test_idempotency_key_conflict_when_payload_changes(client, app):
+    client.post(
+        "/api/auth/setup",
+        json={"username": "owner1", "password": "pass", "branch_name": "Main"},
+    )
+    token = _get_token(client)
+    with app.app_context():
+        bid = Branch.query.filter_by(name="Main").first().id
+    pid, _ = _create_menu_item_with_recipe(app, bid, "Idem Conflict", stock=20.0, recipe_qty=1.0)
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "X-Idempotency-Key": "checkout-idem-conflict",
+    }
+
+    first = client.post(
+        "/api/orders/checkout",
+        headers=headers,
+        json={"items": [{"product_id": pid, "quantity": 1}], "payment_method": "Cash", "branch_id": bid},
+    )
+    conflict = client.post(
+        "/api/orders/checkout",
+        headers=headers,
+        json={"items": [{"product_id": pid, "quantity": 2}], "payment_method": "Cash", "branch_id": bid},
+    )
+
+    assert first.status_code == 201
+    assert conflict.status_code == 409
+    assert "Idempotency key" in (conflict.get_json().get("message") or "")
+    with app.app_context():
+        assert Sale.query.count() == 1
+
+
+def test_missing_idempotency_key_keeps_existing_checkout_behavior(client, app):
+    client.post(
+        "/api/auth/setup",
+        json={"username": "owner1", "password": "pass", "branch_name": "Main"},
+    )
+    token = _get_token(client)
+    with app.app_context():
+        bid = Branch.query.filter_by(name="Main").first().id
+    pid, _ = _create_menu_item_with_recipe(app, bid, "No Idem", stock=20.0, recipe_qty=1.0)
+    payload = {"items": [{"product_id": pid, "quantity": 1}], "payment_method": "Cash", "branch_id": bid}
+
+    first = client.post("/api/orders/checkout", headers={"Authorization": f"Bearer {token}"}, json=payload)
+    second = client.post("/api/orders/checkout", headers={"Authorization": f"Bearer {token}"}, json=payload)
+
+    assert first.status_code == 201
+    assert second.status_code == 201
+    with app.app_context():
+        assert Sale.query.count() == 2
 
 
 def test_checkout_empty_cart(client, app):

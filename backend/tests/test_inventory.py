@@ -1,6 +1,6 @@
 """Ingredient stock map and manual adjustment (branch-scoped)."""
 import pytest
-from app.models import db, Branch, User, Ingredient, IngredientBranchStock
+from app.models import db, Branch, User, Ingredient, IngredientBranchStock, StockMovement
 from app.services.branch_ingredient_stock import seed_branch_stocks_for_new_ingredient
 from werkzeug.security import generate_password_hash
 
@@ -117,6 +117,34 @@ def test_bulk_restock_success_updates_multiple_ingredients(client, app):
         assert ing1.current_stock == pytest.approx(8.0)
         assert ing2.current_stock == pytest.approx(6.0)
 
+def test_bulk_restock_idempotency_replays_without_duplicate_stock_movement(client, app):
+    bid = _seed_user_branch(app)
+    with app.app_context():
+        ing = Ingredient(name="Replay Sauce", unit="l", current_stock=0.0, average_cost=5.0)
+        db.session.add(ing)
+        db.session.flush()
+        seed_branch_stocks_for_new_ingredient(ing.id, 0.0)
+        db.session.commit()
+        iid = ing.id
+
+    login = client.post("/api/auth/login", json={"username": "invuser", "password": "pass"})
+    token = login.get_json()["token"]
+    headers = {"Authorization": f"Bearer {token}", "X-Idempotency-Key": "restock-idem-key-1"}
+    payload = {"items": [{"ingredient_id": iid, "quantity": 4, "unit_cost": 10}]}
+
+    first = client.post("/api/stock/bulk-restock", headers=headers, json=payload)
+    second = client.post("/api/stock/bulk-restock", headers=headers, json=payload)
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.headers.get("X-Idempotency-Replayed") == "true"
+    assert second.get_json() == first.get_json()
+    with app.app_context():
+        row = IngredientBranchStock.query.filter_by(ingredient_id=iid, branch_id=bid).first()
+        movements = StockMovement.query.filter_by(ingredient_id=iid, branch_id=bid).all()
+        assert row.current_stock == pytest.approx(4.0)
+        assert len(movements) == 1
+
 
 def test_bulk_restock_explicit_zero_cost_updates_average_cost(client, app):
     bid = _seed_user_branch(app)
@@ -148,6 +176,43 @@ def test_bulk_restock_explicit_zero_cost_updates_average_cost(client, app):
         ing = db.session.get(Ingredient, iid)
         assert ing.average_cost == pytest.approx(10.0)
         assert ing.last_purchase_price == pytest.approx(0.0)
+
+def test_bulk_restock_blank_brand_is_optional_and_does_not_clear_existing_brand(client, app):
+    bid = _seed_user_branch(app)
+    with app.app_context():
+        ing = Ingredient(
+            name="Marinade Base",
+            unit="l",
+            current_stock=0.0,
+            average_cost=20.0,
+            last_purchase_price=20.0,
+            brand_name="Existing Brand",
+        )
+        db.session.add(ing)
+        db.session.flush()
+        seed_branch_stocks_for_new_ingredient(ing.id, 0.0)
+        db.session.commit()
+        iid = ing.id
+
+    login = client.post("/api/auth/login", json={"username": "invuser", "password": "pass"})
+    token = login.get_json()["token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    res = client.post(
+        "/api/stock/bulk-restock",
+        headers=headers,
+        json={"items": [{"ingredient_id": iid, "quantity": 3, "brand_name": ""}]},
+    )
+
+    assert res.status_code == 200
+    body = res.get_json()
+    assert body.get("message") == "Bulk restock completed"
+
+    with app.app_context():
+        ing = db.session.get(Ingredient, iid)
+        row = IngredientBranchStock.query.filter_by(ingredient_id=iid, branch_id=bid).first()
+        assert row.current_stock == pytest.approx(3.0)
+        assert ing.brand_name == "Existing Brand"
 
 
 def test_bulk_restock_unknown_ingredient_is_atomic(client, app):

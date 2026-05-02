@@ -132,6 +132,27 @@ class InventoryTransaction(db.Model):
     created_at = db.Column(db.DateTime(timezone=True), default=utc_now)
 
 
+class IdempotencyRecord(db.Model):
+    """Saved response for a client-supplied idempotency key on critical writes."""
+    __tablename__ = "idempotency_records"
+    __table_args__ = (
+        Index("ix_idempotency_records_user_path", "user_id", "method", "path"),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    idempotency_key = db.Column(db.String(128), unique=True, nullable=False)
+    method = db.Column(db.String(10), nullable=False)
+    path = db.Column(db.String(255), nullable=False)
+    request_hash = db.Column(db.String(64), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    branch_id = db.Column(db.Integer, db.ForeignKey("branches.id"), nullable=True)
+    response_status = db.Column(db.Integer, nullable=True)
+    response_body = db.Column(db.JSON, nullable=True)
+    state = db.Column(db.String(20), nullable=False, default="processing")
+    created_at = db.Column(db.DateTime(timezone=True), default=utc_now)
+    updated_at = db.Column(db.DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+
 class Sale(db.Model):
     __tablename__ = 'sales'
     __table_args__ = (
@@ -426,6 +447,24 @@ class RecipePreparedItem(db.Model):
 
     product = db.relationship("Product", backref=db.backref("prepared_recipe_items", cascade="all, delete-orphan"))
     prepared_item = db.relationship("PreparedItem", back_populates="recipe_items")
+
+
+class RecipeExtraCost(db.Model):
+    """Non-stock cost component attached to a menu recipe."""
+
+    __tablename__ = "recipe_extra_costs"
+    __table_args__ = (
+        CheckConstraint("amount >= 0", name="ck_recipe_extra_cost_amount_nonneg"),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    product_id = db.Column(db.Integer, db.ForeignKey("products.id"), nullable=False)
+    name = db.Column(db.String(120), nullable=False)
+    amount = db.Column(db.Float, nullable=False, default=0.0)
+    variant_key = db.Column(db.String(100), nullable=False, default="")
+    created_at = db.Column(db.DateTime(timezone=True), default=utc_now)
+
+    product = db.relationship("Product", backref=db.backref("recipe_extra_costs", cascade="all, delete-orphan"))
 
 
 class PreparedItemStockMovement(db.Model):

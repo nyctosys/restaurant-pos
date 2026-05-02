@@ -232,21 +232,30 @@ export default function MenuItemsTab() {
   };
 
   const handleArchive = async (p: Product) => {
+    const previousProducts = products;
+    setProducts(prev => includeArchived
+      ? prev.map(product => product.id === p.id ? { ...product, archived_at: new Date().toISOString() } : product)
+      : prev.filter(product => product.id !== p.id)
+    );
     try {
       await patch(`/menu-items/${p.id}/archive`, null);
       showToast('Menu item archived', 'success');
       await fetchData(true);
     } catch (e) {
+      setProducts(previousProducts);
       showToast(getUserMessage(e), 'error');
     }
   };
 
   const handleUnarchive = async (p: Product) => {
+    const previousProducts = products;
+    setProducts(prev => prev.map(product => product.id === p.id ? { ...product, archived_at: null } : product));
     try {
       await patch(`/menu-items/${p.id}/unarchive`, null);
       showToast('Menu item restored', 'success');
       await fetchData(true);
     } catch (e) {
+      setProducts(previousProducts);
       showToast(getUserMessage(e), 'error');
     }
   };

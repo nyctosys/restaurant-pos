@@ -16,6 +16,7 @@ from app.database import create_app as init_database_shell
 from app.db import bind_request_session, unbind_request_session
 from app.services.app_event_log import record_unhandled_exception
 from app.error_contract import internal_server_error_body, normalize_error_body, request_id_from_request
+from app.idempotency import IdempotencyMiddleware
 from app.logging_config import setup_logging
 from app.realtime import scanner_hub
 from app.request_context import set_request_id
@@ -120,6 +121,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(IdempotencyMiddleware)
 app.add_middleware(RequestContextDBMiddleware)
 
 

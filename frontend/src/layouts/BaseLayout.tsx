@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { get } from '../api';
 import { getTerminalBranchIdString, parseUserFromStorage } from '../utils/branchContext';
+import { preloadAppRoute } from '../routes/preload';
 import { 
   Package, 
   BarChart3, 
@@ -128,6 +129,9 @@ export default function BaseLayout() {
                 key={item.path}
                 to={item.path}
                 aria-label={navLabel}
+                onMouseEnter={() => preloadAppRoute(item.path)}
+                onFocus={() => preloadAppRoute(item.path)}
+                onTouchStart={() => preloadAppRoute(item.path)}
                 className={`touch-target flex flex-col items-center justify-center gap-0.5 rounded-[11px] transition-colors duration-200 relative ${
                   isActive
                     ? 'bg-white text-brand-700 border border-white p-3 xl:p-2 w-14 h-14 xl:w-full xl:h-auto'

@@ -225,6 +225,35 @@ def _ensure_riders_table(dialect: str) -> None:
     )
     print("  + Created riders")
 
+def _ensure_idempotency_records_table(dialect: str) -> None:
+    id_type = "SERIAL PRIMARY KEY" if dialect == "postgresql" else "INTEGER PRIMARY KEY AUTOINCREMENT"
+    ts_type = "TIMESTAMPTZ" if dialect == "postgresql" else "TIMESTAMP"
+    json_type = "JSONB" if dialect == "postgresql" else "JSON"
+    if _table_exists("idempotency_records"):
+        print("  - idempotency_records already exists")
+        return
+    db.session.execute(
+        text(
+            f"""
+            CREATE TABLE idempotency_records (
+              id {id_type},
+              idempotency_key VARCHAR(128) NOT NULL UNIQUE,
+              method VARCHAR(10) NOT NULL,
+              path VARCHAR(255) NOT NULL,
+              request_hash VARCHAR(64) NOT NULL,
+              user_id INTEGER REFERENCES users(id),
+              branch_id VARCHAR(32) REFERENCES branches(id),
+              response_status INTEGER,
+              response_body {json_type},
+              state VARCHAR(20) NOT NULL DEFAULT 'processing',
+              created_at {ts_type},
+              updated_at {ts_type}
+            )
+            """
+        )
+    )
+    print("  + Created idempotency_records")
+
 
 def main() -> None:
     app = create_app()
@@ -293,6 +322,11 @@ def main() -> None:
                 ddl="ALTER TABLE products ADD COLUMN sale_price NUMERIC(12, 2) DEFAULT 0",
             ),
             ColumnMigration(
+                table="ingredients",
+                column="brand_name",
+                ddl="ALTER TABLE ingredients ADD COLUMN brand_name VARCHAR(120) NOT NULL DEFAULT ''",
+            ),
+            ColumnMigration(
                 table="sales",
                 column="delivery_status",
                 ddl="ALTER TABLE sales ADD COLUMN delivery_status VARCHAR(20) DEFAULT 'pending'",
@@ -315,6 +349,7 @@ def main() -> None:
             _ensure_prepared_item_tables(dialect)
             _ensure_recipe_extra_costs_table(dialect)
             _ensure_riders_table(dialect)
+            _ensure_idempotency_records_table(dialect)
             for migration in migrations:
                 _apply_column_migration(migration)
             # Backward compatibility: old base_price was sale price.
@@ -382,6 +417,11 @@ def main() -> None:
                 "sales",
                 "ix_sales_report_branch_created_order_type",
                 "CREATE INDEX IF NOT EXISTS ix_sales_report_branch_created_order_type ON sales (branch_id, created_at, order_type)",
+            )
+            _ensure_index(
+                "idempotency_records",
+                "ix_idempotency_records_user_path",
+                "CREATE INDEX IF NOT EXISTS ix_idempotency_records_user_path ON idempotency_records (user_id, method, path)",
             )
             db.session.commit()
             print("migrate_latest_schema_changes: complete.")

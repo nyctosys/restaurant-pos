@@ -127,6 +127,30 @@ def _supplier_to_dict(supplier: Supplier, linked_materials: list[Ingredient]) ->
     }
 
 
+def _po_status_value(po: PurchaseOrder) -> str:
+    return po.status.value if hasattr(po.status, "value") else str(po.status)
+
+
+def _po_item_to_dict(item: PurchaseOrderItem) -> dict[str, Any]:
+    ingredient = item.ingredient
+    unit = item.unit.value if hasattr(item.unit, "value") else item.unit
+    quantity_ordered = float(item.quantity_ordered or 0.0)
+    quantity_received = float(item.quantity_received or 0.0)
+    quantity_remaining = max(quantity_ordered - quantity_received, 0.0)
+    return {
+        "id": item.id,
+        "ingredient_id": item.ingredient_id,
+        "ingredient_name": ingredient.name if ingredient else None,
+        "quantity_ordered": quantity_ordered,
+        "quantity_received": quantity_received,
+        "quantity_remaining": quantity_remaining,
+        "unit_price": float(item.unit_price or 0.0),
+        "unit": unit,
+        "unitOfMeasure": unit,
+        "notes": item.notes,
+    }
+
+
 def _apply_supplier_material_links(supplier: Supplier, linked_material_ids: list[int] | None) -> None:
     if linked_material_ids is None:
         return
@@ -618,11 +642,12 @@ def list_purchase_orders(current_user: User = Depends(get_current_user)):
     pos = PurchaseOrder.query.order_by(PurchaseOrder.created_at.desc()).all()
     return {"purchase_orders": [{
         "id": p.id, "po_number": p.po_number, "supplier_id": p.supplier_id,
-        "status": p.status.value if hasattr(p.status, 'value') else p.status, 
+        "status": _po_status_value(p),
         "total_amount": p.total_amount,
         "expected_delivery": p.expected_delivery.isoformat() if p.expected_delivery else None,
         "received_date": p.received_date.isoformat() if p.received_date else None,
-        "created_at": p.created_at.isoformat()
+        "created_at": p.created_at.isoformat(),
+        "items": [_po_item_to_dict(item) for item in p.items],
     } for p in pos]}
 
 @inventory_advanced_router.post("/purchase-orders")
@@ -674,19 +699,53 @@ def create_purchase_order(payload: PurchaseOrderCreate, current_user: User = Dep
 @inventory_advanced_router.post("/purchase-orders/{po_id}/receive")
 def receive_purchase_order(po_id: int, payload: PurchaseOrderReceive, current_user: User = Depends(get_current_user)):
     po = db.session.get(PurchaseOrder, po_id)
-    if not po or po.status == "received":
+    if not po:
+        return JSONResponse(status_code=404, content={"message": "PO not found"})
+    status = _po_status_value(po)
+    if status in {"received", "cancelled"}:
         return JSONResponse(status_code=400, content={"message": "Invalid PO or already received"})
 
-    po.status = "received"
-    po.received_date = payload.received_date or datetime.now(timezone.utc)
-
     branch_id = po.branch_id or current_user.branch_id or resolve_terminal_branch_id(current_user)
+    quantities_by_item_id: dict[int, float] | None = None
+    quantities_by_ingredient_id: dict[int, float] | None = None
 
+    if payload.items is not None:
+        quantities_by_item_id = {}
+        quantities_by_ingredient_id = {}
+        for received_item in payload.items:
+            qty = float(received_item.quantity_received or 0.0)
+            if received_item.item_id is not None:
+                quantities_by_item_id[int(received_item.item_id)] = (
+                    quantities_by_item_id.get(int(received_item.item_id), 0.0) + qty
+                )
+            elif received_item.ingredient_id is not None:
+                quantities_by_ingredient_id[int(received_item.ingredient_id)] = (
+                    quantities_by_ingredient_id.get(int(received_item.ingredient_id), 0.0) + qty
+                )
+            else:
+                return JSONResponse(status_code=400, content={"message": "Received item must include item_id or ingredient_id"})
+
+    total_received = 0.0
     for item in po.items:
         ing = item.ingredient
         if ing is None:
             continue
-        qty_add = float(item.quantity_ordered)
+        already_received = float(item.quantity_received or 0.0)
+        remaining = max(float(item.quantity_ordered or 0.0) - already_received, 0.0)
+        if payload.items is None:
+            qty_add = remaining
+        else:
+            qty_add = float((quantities_by_item_id or {}).get(item.id, 0.0))
+            if qty_add == 0.0:
+                qty_add = float((quantities_by_ingredient_id or {}).get(item.ingredient_id, 0.0))
+        if qty_add <= 0:
+            continue
+        if qty_add - remaining > 0.000001:
+            db.session.rollback()
+            return JSONResponse(
+                status_code=400,
+                content={"message": f"Received quantity for {ing.name} exceeds remaining order quantity"},
+            )
         qty_before = get_branch_stock(ing.id, branch_id)
         total_value_before = qty_before * float(ing.average_cost or 0.0)
         new_value = qty_add * float(item.unit_price)
@@ -694,7 +753,8 @@ def receive_purchase_order(po_id: int, payload: PurchaseOrderReceive, current_us
         if new_total_qty > 0:
             ing.average_cost = (total_value_before + new_value) / new_total_qty
         ing.last_purchase_price = float(item.unit_price)
-        item.quantity_received = item.quantity_ordered
+        item.quantity_received = already_received + qty_add
+        total_received += qty_add
 
         adjust_branch_ingredient_stock(
             ing.id,
@@ -710,15 +770,35 @@ def receive_purchase_order(po_id: int, payload: PurchaseOrderReceive, current_us
         )
         sync_ingredient_master_total(ing.id)
 
+    if total_received <= 0:
+        db.session.rollback()
+        return JSONResponse(status_code=400, content={"message": "Enter at least one received quantity"})
+
+    all_received = all(
+        max(float(item.quantity_ordered or 0.0) - float(item.quantity_received or 0.0), 0.0) <= 0.000001
+        for item in po.items
+    )
+    if all_received:
+        po.status = "received"
+        po.received_date = payload.received_date or datetime.now(timezone.utc)
+        message = "PO fully received, stock and costs updated"
+    else:
+        po.status = "partially_received"
+        message = "Partial stock received; remaining quantities are still open"
+
     db.session.commit()
-    return {"message": "PO fully received, stock and costs updated"}
+    return {
+        "message": message,
+        "status": _po_status_value(po),
+        "items": [_po_item_to_dict(item) for item in po.items],
+    }
 
 @inventory_advanced_router.post("/purchase-orders/{po_id}/cancel")
 def cancel_purchase_order(po_id: int, current_user: User = Depends(get_current_user)):
     po = db.session.get(PurchaseOrder, po_id)
     if not po:
         return JSONResponse(status_code=404, content={"message": "PO not found"})
-    if po.status == "received":
+    if _po_status_value(po) == "received":
         return JSONResponse(status_code=400, content={"message": "Cannot cancel a PO that has already been received. You must manually reverse the stock instead."})
     
     po.status = "cancelled"

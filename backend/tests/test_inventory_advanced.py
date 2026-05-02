@@ -194,6 +194,52 @@ def test_purchase_order_rejects_material_from_another_supplier(client, app):
     assert "not linked" in response.get_json()["message"]
 
 
+def test_purchase_order_partial_receive_keeps_remaining_open(client, app):
+    h = _auth_headers(client, app)
+
+    r1 = client.post("/api/inventory-advanced/suppliers", headers=h, json={"name": "Partial Supplier"})
+    sup_id = r1.get_json()["id"]
+    r2 = client.post("/api/inventory-advanced/ingredients", headers=h, json={
+        "name": "Chicken",
+        "sku": "ING-CHICKEN-PARTIAL",
+        "unit": "kg",
+    })
+    ing_id = r2.get_json()["id"]
+
+    r3 = client.post("/api/inventory-advanced/purchase-orders", headers=h, json={
+        "supplier_id": sup_id,
+        "items": [
+            {
+                "ingredient_id": ing_id,
+                "quantity_ordered": 50,
+                "unit_price": 700,
+                "unit": "kg",
+            }
+        ],
+    })
+    assert r3.status_code == 200
+    po_id = r3.get_json()["id"]
+
+    r4 = client.post(f"/api/inventory-advanced/purchase-orders/{po_id}/receive", headers=h, json={
+        "received_date": "2023-10-25T10:00:00Z",
+        "items": [{"ingredient_id": ing_id, "quantity_received": 20}],
+    })
+    assert r4.status_code == 200
+    assert r4.get_json()["status"] == "partially_received"
+
+    ingredients = client.get("/api/inventory-advanced/ingredients", headers=h).get_json()["ingredients"]
+    chicken = next(i for i in ingredients if i["id"] == ing_id)
+    assert chicken["current_stock"] == 20
+    assert chicken["last_purchase_price"] == 700
+
+    listed = client.get("/api/inventory-advanced/purchase-orders", headers=h).get_json()["purchase_orders"]
+    po = next(p for p in listed if p["id"] == po_id)
+    assert po["status"] == "partially_received"
+    assert po["items"][0]["quantity_ordered"] == 50
+    assert po["items"][0]["quantity_received"] == 20
+    assert po["items"][0]["quantity_remaining"] == 30
+
+
 def test_prepared_item_batch_deducts_ingredients(client, app):
     h = _auth_headers(client, app)
     r_ing = client.post("/api/inventory-advanced/ingredients", headers=h, json={

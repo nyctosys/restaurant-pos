@@ -291,6 +291,14 @@ class PurchaseOrderCreate(BaseModel):
 class PurchaseOrderReceive(BaseModel):
     model_config = ConfigDict(extra="ignore")
     received_date: datetime | None = None
+    items: list["PurchaseOrderReceiveItem"] | None = None
+
+
+class PurchaseOrderReceiveItem(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    item_id: int | None = None
+    ingredient_id: int | None = None
+    quantity_received: float = Field(ge=0)
 
 class StockMovementCreate(BaseModel):
     model_config = ConfigDict(extra="ignore")
