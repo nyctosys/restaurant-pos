@@ -181,7 +181,7 @@ export default function ModifiersSettings() {
               onChange={e => setNewName(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && void add()}
               placeholder="e.g. Extra cheese"
-              className="w-full px-4 py-3 border border-soot-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:outline-none text-sm"
+              className="w-full px-4 py-3 border border-soot-200 rounded-[8px] focus:ring-2 focus:ring-brand-500 focus:outline-none text-sm"
             />
           </div>
           <div className="w-40">
@@ -192,7 +192,7 @@ export default function ModifiersSettings() {
               onKeyDown={e => e.key === 'Enter' && void add()}
               inputMode="decimal"
               placeholder="0"
-              className="w-full px-4 py-3 border border-soot-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:outline-none text-sm text-right"
+              className="w-full px-4 py-3 border border-soot-200 rounded-[8px] focus:ring-2 focus:ring-brand-500 focus:outline-none text-sm text-right"
             />
           </div>
         </div>
@@ -218,14 +218,14 @@ export default function ModifiersSettings() {
               onChange={e => setNewDepletion(e.target.value)}
               inputMode="decimal"
               placeholder="1"
-              className="w-full px-4 py-3 border border-soot-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:outline-none text-sm text-right"
+              className="w-full px-4 py-3 border border-soot-200 rounded-[8px] focus:ring-2 focus:ring-brand-500 focus:outline-none text-sm text-right"
             />
           </div>
           <button
             type="button"
             onClick={() => void add()}
             disabled={saving || !newName.trim()}
-            className="flex items-center gap-2 bg-brand-700 text-white px-5 py-3 rounded-lg font-medium hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm"
+            className="flex items-center gap-2 bg-brand-700 text-white px-5 py-3 rounded-[8px] font-medium hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm"
           >
             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
             Add
@@ -235,7 +235,7 @@ export default function ModifiersSettings() {
 
       {feedback && (
         <div
-          className={`mb-4 text-sm font-medium rounded-lg px-4 py-2 ${
+          className={`mb-4 text-sm font-medium rounded-[8px] px-4 py-2 ${
             feedback.startsWith('error:')
               ? 'text-red-700 bg-red-50 border border-red-200'
               : 'text-brand-700 bg-brand-50 border border-brand-200'
@@ -251,7 +251,7 @@ export default function ModifiersSettings() {
           Loading modifiers…
         </div>
       ) : sorted.length === 0 ? (
-        <div className="text-soot-400 py-8 text-center border border-dashed border-soot-200 rounded-xl">
+        <div className="text-soot-400 py-8 text-center border border-dashed border-soot-200 rounded-[11px]">
           No modifiers yet. Add your first modifier above.
         </div>
       ) : (
@@ -270,7 +270,7 @@ export default function ModifiersSettings() {
                         value={editingName}
                         onChange={e => setEditingName(e.target.value)}
                         onKeyDown={e => e.key === 'Enter' && void saveEdit()}
-                        className="w-full px-3 py-2 border border-soot-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none"
+                        className="w-full px-3 py-2 border border-soot-200 rounded-[8px] text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none"
                         autoFocus
                       />
                     </div>
@@ -281,7 +281,7 @@ export default function ModifiersSettings() {
                         onChange={e => setEditingPrice(e.target.value)}
                         onKeyDown={e => e.key === 'Enter' && void saveEdit()}
                         inputMode="decimal"
-                        className="w-full px-3 py-2 border border-soot-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none text-right"
+                        className="w-full px-3 py-2 border border-soot-200 rounded-[8px] text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none text-right"
                       />
                     </div>
                   </div>
@@ -306,7 +306,7 @@ export default function ModifiersSettings() {
                         value={editingDepletion}
                         onChange={e => setEditingDepletion(e.target.value)}
                         inputMode="decimal"
-                        className="w-full px-3 py-2 border border-soot-200 rounded-lg text-sm text-right"
+                        className="w-full px-3 py-2 border border-soot-200 rounded-[8px] text-sm text-right"
                       />
                     </div>
                   </div>

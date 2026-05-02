@@ -56,7 +56,7 @@ export default function ToastContainer() {
       {toasts.map(t => (
         <div
           key={t.id}
-          className={`pointer-events-auto flex items-start gap-3 px-4 py-3 rounded-xl border shadow-lg ${bg(t.type)} animate-slide-in`}
+          className={`pointer-events-auto flex items-start gap-3 px-4 py-3 rounded-[11px] border ${bg(t.type)} animate-slide-in`}
         >
           {icon(t.type)}
           <p className="text-sm font-medium text-soot-800 flex-1">{t.message}</p>

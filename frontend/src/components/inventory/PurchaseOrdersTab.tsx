@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Plus, X, Loader2, ArrowRightCircle, CheckCircle2, PackageCheck, Ban } from 'lucide-react';
 import { get, post, getUserMessage } from '../../api';
 import { showToast } from '../Toast';
@@ -6,8 +6,8 @@ import { showConfirm } from '../ConfirmDialog';
 import { formatCurrency } from '../../utils/formatCurrency';
 import SearchableSelect from '../SearchableSelect';
 
-type Supplier = { id: number; name: string };
-type Ingredient = { id: number; name: string; unit: string; last_purchase_price: number };
+type Supplier = { id: number; name: string; linked_material_ids?: number[] };
+type Ingredient = { id: number; name: string; unit: string; last_purchase_price: number; preferred_supplier_id?: number };
 
 type POItem = {
   ingredient_id: number;
@@ -71,6 +71,48 @@ export default function PurchaseOrdersTab() {
     setShowModal(true);
   };
 
+  const selectedSupplier = useMemo(
+    () => suppliers.find(supplier => String(supplier.id) === formSupplierId),
+    [formSupplierId, suppliers]
+  );
+
+  const supplierIngredientIds = useMemo(() => {
+    if (!selectedSupplier) return new Set<number>();
+    const linkedIds = selectedSupplier.linked_material_ids;
+    if (Array.isArray(linkedIds)) {
+      return new Set(linkedIds);
+    }
+    return new Set(
+      ingredients
+        .filter(ingredient => ingredient.preferred_supplier_id === selectedSupplier.id)
+        .map(ingredient => ingredient.id)
+    );
+  }, [ingredients, selectedSupplier]);
+
+  const supplierIngredients = useMemo(
+    () => ingredients.filter(ingredient => supplierIngredientIds.has(ingredient.id)),
+    [ingredients, supplierIngredientIds]
+  );
+
+  const handleSupplierChange = (supplierId: string) => {
+    const nextSupplier = suppliers.find(supplier => String(supplier.id) === supplierId);
+    const linkedIds = nextSupplier?.linked_material_ids;
+    const nextIngredientIds = new Set(
+      Array.isArray(linkedIds)
+        ? linkedIds
+        : ingredients
+            .filter(ingredient => ingredient.preferred_supplier_id === nextSupplier?.id)
+            .map(ingredient => ingredient.id)
+    );
+
+    setFormSupplierId(supplierId);
+    setFormItems(currentItems =>
+      supplierId
+        ? currentItems.filter(item => item.ingredient_id === 0 || nextIngredientIds.has(item.ingredient_id))
+        : []
+    );
+  };
+
   const handleAddItem = () => {
     setFormItems([...formItems, { ingredient_id: 0, quantity_ordered: 1, unit_price: 0, unit: 'kg' }]);
   };
@@ -106,6 +148,10 @@ export default function PurchaseOrdersTab() {
     }
     if (formItems.some(i => i.ingredient_id === 0 || i.quantity_ordered <= 0)) {
       showToast('Complete all item fields correctly', 'error');
+      return;
+    }
+    if (formItems.some(i => !supplierIngredientIds.has(i.ingredient_id))) {
+      showToast('Use only materials linked to the selected supplier', 'error');
       return;
     }
 
@@ -280,7 +326,7 @@ export default function PurchaseOrdersTab() {
                      <label className="block text-sm font-medium text-neutral-700 mb-1">Supplier <span className="text-red-400">*</span></label>
                      <SearchableSelect
                        value={formSupplierId}
-                       onChange={setFormSupplierId}
+                       onChange={handleSupplierChange}
                        placeholder="— Select supplier —"
                        searchPlaceholder="Search suppliers…"
                        options={suppliers.map((supplier) => ({ value: String(supplier.id), label: supplier.name }))}
@@ -296,12 +342,12 @@ export default function PurchaseOrdersTab() {
                  <div>
                    <div className="flex items-center justify-between mb-2">
                      <label className="block text-sm font-medium text-neutral-700">Order Items <span className="text-red-400">*</span></label>
-                     <button type="button" onClick={handleAddItem} className="text-sm font-medium text-brand-700 hover:bg-brand-50 px-2 py-1 rounded transition-colors">+ Add row</button>
+                     <button type="button" onClick={handleAddItem} disabled={!formSupplierId} className="text-sm font-medium text-brand-700 hover:bg-brand-50 px-2 py-1 rounded transition-colors disabled:cursor-not-allowed disabled:opacity-50">+ Add row</button>
                    </div>
                    
                    {formItems.length === 0 ? (
                      <div className="p-4 border-2 border-dashed border-soot-200 rounded-lg text-center text-soot-400 text-sm">
-                       No items added yet. Click "+ Add row".
+                       {formSupplierId ? 'No items added yet. Click "+ Add row".' : 'Select a supplier to add their materials.'}
                      </div>
                    ) : (
                      <div className="space-y-2">
@@ -313,7 +359,8 @@ export default function PurchaseOrdersTab() {
                                 onChange={(value) => handleUpdateItem(idx, 'ingredient_id', parseInt(value, 10))}
                                 placeholder="— Material —"
                                 searchPlaceholder="Search materials…"
-                                options={ingredients.map((ingredient) => ({
+                                emptyMessage="No materials linked to this supplier."
+                                options={supplierIngredients.map((ingredient) => ({
                                   value: String(ingredient.id),
                                   label: ingredient.name,
                                   searchText: ingredient.unit,

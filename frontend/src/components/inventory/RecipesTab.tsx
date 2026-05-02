@@ -296,9 +296,9 @@ export default function RecipesTab() {
             <button
               key={p.id}
               onClick={() => loadRecipe(p.id)}
-              className={`w-full text-left px-3 py-2.5 rounded-lg transition-colors flex items-center justify-between group ${
+              className={`w-full text-left px-3 py-2.5 rounded-[8px] transition-colors flex items-center justify-between group ${
                 selectedProductId === p.id 
-                  ? 'bg-brand-600 text-white shadow-md' 
+                  ? 'bg-brand-600 text-white' 
                   : 'hover:bg-white/40 text-soot-700'
               }`}
             >
@@ -398,7 +398,7 @@ export default function RecipesTab() {
                     const ing = ingredients.find(i => i.id === ri.ingredient_id);
                     if (!ing) return null;
                     return (
-                      <div key={ri.id} className="flex items-center justify-between p-3 rounded-lg border border-soot-200 bg-white/30 hover:bg-white/50 transition-colors">
+                      <div key={ri.id} className="flex items-center justify-between p-3 rounded-[8px] border border-soot-200 bg-white/30 hover:bg-white/50 transition-colors">
                         <div>
                           <p className="font-bold text-soot-900">{ing.name}</p>
                           <p className="text-xs text-soot-500 mt-0.5">
@@ -428,7 +428,7 @@ export default function RecipesTab() {
                     const prepared = preparedItems.find(i => i.id === ri.prepared_item_id);
                     if (!prepared) return null;
                     return (
-                      <div key={`prepared-${ri.id}`} className="flex items-center justify-between p-3 rounded-lg border border-brand-200 bg-brand-50/40 hover:bg-brand-50/70 transition-colors">
+                      <div key={`prepared-${ri.id}`} className="flex items-center justify-between p-3 rounded-[8px] border border-brand-200 bg-brand-50/40 hover:bg-brand-50/70 transition-colors">
                         <div>
                           <p className="font-bold text-soot-900">{prepared.name}</p>
                           <p className="text-xs text-soot-500 mt-0.5">
@@ -455,7 +455,7 @@ export default function RecipesTab() {
                     );
                   })}
                   {displayedExtraCosts.map((ec) => (
-                    <div key={`extra-${ec.id}`} className="flex items-center justify-between p-3 rounded-lg border border-orange-200 bg-orange-50/50 hover:bg-orange-50/80 transition-colors">
+                    <div key={`extra-${ec.id}`} className="flex items-center justify-between p-3 rounded-[8px] border border-orange-200 bg-orange-50/50 hover:bg-orange-50/80 transition-colors">
                       <div>
                         <p className="font-bold text-soot-900">{ec.name}</p>
                         <p className="text-xs text-soot-500 mt-0.5">
@@ -489,19 +489,19 @@ export default function RecipesTab() {
                 <div className="space-y-2">
                   <button
                     onClick={() => setShowExtraCostForm(true)}
-                    className="w-full flex items-center justify-center gap-2 py-3 rounded-lg border-2 border-dashed border-orange-300 text-orange-700 font-semibold hover:bg-orange-50 hover:border-orange-400 transition-colors touch-target"
+                    className="w-full flex items-center justify-center gap-2 py-3 rounded-[8px] border-2 border-dashed border-orange-300 text-orange-700 font-semibold hover:bg-orange-50 hover:border-orange-400 transition-colors touch-target"
                   >
                     <Plus className="w-5 h-5" /> Add Extra Cost
                   </button>
                   <button
                     onClick={() => setShowAddForm(true)}
-                    className="w-full flex items-center justify-center gap-2 py-3 rounded-lg border-2 border-dashed border-brand-300 text-brand-700 font-semibold hover:bg-brand-50 hover:border-brand-400 transition-colors touch-target"
+                    className="w-full flex items-center justify-center gap-2 py-3 rounded-[8px] border-2 border-dashed border-brand-300 text-brand-700 font-semibold hover:bg-brand-50 hover:border-brand-400 transition-colors touch-target"
                   >
                     <Plus className="w-5 h-5" /> Add Ingredient or Sauce to Recipe
                   </button>
                 </div>
               ) : (
-                <form onSubmit={showExtraCostForm ? handleAddExtraCost : handleAddSubmit} className="glass-card p-4 space-y-4 shadow-sm border border-brand-200 bg-white/50">
+                <form onSubmit={showExtraCostForm ? handleAddExtraCost : handleAddSubmit} className="glass-card p-4 space-y-4 border border-brand-200 bg-white/50">
                   <div className="flex justify-between items-center mb-1">
                     <h4 className="font-bold text-soot-900 text-sm">{showExtraCostForm ? 'Add Extra Cost' : 'Add Material'}</h4>
                     <button type="button" onClick={() => { setShowAddForm(false); setShowExtraCostForm(false); }} className="text-soot-400 hover:text-soot-700 p-1">
@@ -639,7 +639,7 @@ export default function RecipesTab() {
                     <button 
                       type="submit" 
                       disabled={submitting}
-                      className="px-4 py-2 bg-brand-700 text-white rounded-lg text-sm font-semibold hover:bg-brand-600 disabled:opacity-50 touch-target"
+                      className="px-4 py-2 bg-brand-700 text-white rounded-[8px] text-sm font-semibold hover:bg-brand-600 disabled:opacity-50 touch-target"
                     >
                       {submitting ? 'Adding...' : (showExtraCostForm ? 'Save extra cost' : 'Save mapping')}
                     </button>

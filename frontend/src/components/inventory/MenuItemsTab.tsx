@@ -318,10 +318,10 @@ export default function MenuItemsTab() {
   }, [products, sortDirection, sortKey]);
 
   const renderSortIcon = (key: SortKey) => {
-    if (sortKey !== key) return <ArrowUpDown className="w-3.5 h-3.5 text-soot-400" aria-hidden="true" />;
+    if (sortKey !== key) return <ArrowUpDown className="w-3.5 h-3.5 text-neutral-400" aria-hidden="true" />;
     return sortDirection === 'asc'
-      ? <ArrowUp className="w-3.5 h-3.5 text-brand-700" aria-hidden="true" />
-      : <ArrowDown className="w-3.5 h-3.5 text-brand-700" aria-hidden="true" />;
+      ? <ArrowUp className="w-3.5 h-3.5 text-brand-600" aria-hidden="true" />
+      : <ArrowDown className="w-3.5 h-3.5 text-brand-600" aria-hidden="true" />;
   };
 
   return (
@@ -373,7 +373,7 @@ export default function MenuItemsTab() {
             <button
               type="button"
               onClick={handleOpenModal}
-              className="flex items-center gap-2 bg-brand-700 text-white px-4 py-2 rounded-lg font-medium hover:bg-brand-600 touch-target transition-colors"
+              className="flex items-center gap-2 bg-brand-700 text-white px-4 py-2 rounded-[8px] font-medium hover:bg-brand-600 touch-target transition-colors"
             >
               <Plus className="w-4 h-4" />
               Add menu item
@@ -392,17 +392,28 @@ export default function MenuItemsTab() {
               <p className="text-sm">Click &quot;Add menu item&quot; to get started.</p>
             </div>
           ) : (
-            <table className="w-full text-left border-collapse">
+            <div className="overflow-hidden rounded-[18px] border border-neutral-200/80 bg-white dark:border-neutral-800 dark:bg-neutral-950">
+              <div className="max-h-[calc(100vh-18rem)] min-h-[22rem] overflow-auto overscroll-contain lg:max-h-[calc(100vh-16rem)]">
+                <table className="w-full min-w-[980px] text-left border-separate border-spacing-0">
+                  <colgroup>
+                    <col className="w-[13%]" />
+                    <col className="w-[24%]" />
+                    <col className="w-[15%]" />
+                    <col className="w-[13%]" />
+                    <col className="w-[13%]" />
+                    <col className="w-[10%]" />
+                    <col className="w-[12%]" />
+                  </colgroup>
               <thead>
-                <tr className="border-b-2 border-soot-200 text-sm uppercase text-soot-500 font-semibold tracking-wider">
+                <tr className="border-b border-neutral-200 text-[11px] uppercase text-neutral-500 font-semibold tracking-[0.08em] dark:border-neutral-800 dark:text-neutral-400">
                   <th
                     aria-sort={sortKey === 'sku' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}
-                    className="sticky top-0 z-10 bg-white/90 backdrop-blur-md py-3 px-3 lg:px-4 xl:py-2 xl:text-xs"
+                    className="sticky top-0 z-10 border-b border-neutral-200 bg-neutral-50/95 px-4 py-3 dark:border-neutral-800 dark:bg-neutral-900/95"
                   >
                     <button
                       type="button"
                       onClick={() => handleSort('sku')}
-                      className="flex w-full items-center gap-2 text-left transition-colors hover:text-soot-700 focus:outline-none focus-visible:text-soot-900"
+                      className="flex w-full items-center gap-2 text-left transition-colors hover:text-neutral-800 focus:outline-none focus-visible:text-neutral-950 dark:hover:text-neutral-100 dark:focus-visible:text-white"
                     >
                       <span>SKU</span>
                       {renderSortIcon('sku')}
@@ -410,12 +421,12 @@ export default function MenuItemsTab() {
                   </th>
                   <th
                     aria-sort={sortKey === 'title' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}
-                    className="sticky top-0 z-10 bg-white/90 backdrop-blur-md py-3 px-3 lg:px-4 xl:py-2 xl:text-xs"
+                    className="sticky top-0 z-10 border-b border-neutral-200 bg-neutral-50/95 px-4 py-3 dark:border-neutral-800 dark:bg-neutral-900/95"
                   >
                     <button
                       type="button"
                       onClick={() => handleSort('title')}
-                      className="flex w-full items-center gap-2 text-left transition-colors hover:text-soot-700 focus:outline-none focus-visible:text-soot-900"
+                      className="flex w-full items-center gap-2 text-left transition-colors hover:text-neutral-800 focus:outline-none focus-visible:text-neutral-950 dark:hover:text-neutral-100 dark:focus-visible:text-white"
                     >
                       <span>Item name</span>
                       {renderSortIcon('title')}
@@ -423,12 +434,12 @@ export default function MenuItemsTab() {
                   </th>
                   <th
                     aria-sort={sortKey === 'section' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}
-                    className="sticky top-0 z-10 bg-white/90 backdrop-blur-md py-3 px-3 lg:px-4 xl:py-2 xl:text-xs"
+                    className="sticky top-0 z-10 border-b border-neutral-200 bg-neutral-50/95 px-4 py-3 dark:border-neutral-800 dark:bg-neutral-900/95"
                   >
                     <button
                       type="button"
                       onClick={() => handleSort('section')}
-                      className="flex w-full items-center gap-2 text-left transition-colors hover:text-soot-700 focus:outline-none focus-visible:text-soot-900"
+                      className="flex w-full items-center gap-2 text-left transition-colors hover:text-neutral-800 focus:outline-none focus-visible:text-neutral-950 dark:hover:text-neutral-100 dark:focus-visible:text-white"
                     >
                       <span>Category</span>
                       {renderSortIcon('section')}
@@ -436,12 +447,12 @@ export default function MenuItemsTab() {
                   </th>
                   <th
                     aria-sort={sortKey === 'base_price' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}
-                    className="sticky top-0 z-10 bg-white/90 backdrop-blur-md py-3 px-3 lg:px-4 xl:py-2 xl:text-xs"
+                    className="sticky top-0 z-10 border-b border-neutral-200 bg-neutral-50/95 px-4 py-3 dark:border-neutral-800 dark:bg-neutral-900/95"
                   >
                     <button
                       type="button"
                       onClick={() => handleSort('base_price')}
-                      className="flex w-full items-center gap-2 text-left transition-colors hover:text-soot-700 focus:outline-none focus-visible:text-soot-900"
+                      className="flex w-full items-center gap-2 text-left transition-colors hover:text-neutral-800 focus:outline-none focus-visible:text-neutral-950 dark:hover:text-neutral-100 dark:focus-visible:text-white"
                     >
                       <span>Base Price (Cost)</span>
                       {renderSortIcon('base_price')}
@@ -449,28 +460,28 @@ export default function MenuItemsTab() {
                   </th>
                   <th
                     aria-sort={sortKey === 'sale_price' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}
-                    className="sticky top-0 z-10 bg-white/90 backdrop-blur-md py-3 px-3 lg:px-4 xl:py-2 xl:text-xs"
+                    className="sticky top-0 z-10 border-b border-neutral-200 bg-neutral-50/95 px-4 py-3 dark:border-neutral-800 dark:bg-neutral-900/95"
                   >
                     <button
                       type="button"
                       onClick={() => handleSort('sale_price')}
-                      className="flex w-full items-center gap-2 text-left transition-colors hover:text-soot-700 focus:outline-none focus-visible:text-soot-900"
+                      className="flex w-full items-center gap-2 text-left transition-colors hover:text-neutral-800 focus:outline-none focus-visible:text-neutral-950 dark:hover:text-neutral-100 dark:focus-visible:text-white"
                     >
                       <span>Sale Price</span>
                       {renderSortIcon('sale_price')}
                     </button>
                   </th>
-                  <th className="sticky top-0 z-10 bg-white/90 backdrop-blur-md py-3 px-3 lg:px-4 xl:py-2 xl:text-xs text-left text-soot-500 font-semibold">
+                  <th className="sticky top-0 z-10 border-b border-neutral-200 bg-neutral-50/95 px-4 py-3 text-left text-neutral-500 font-semibold dark:border-neutral-800 dark:bg-neutral-900/95 dark:text-neutral-400">
                     Unit
                   </th>
                   <th
                     aria-sort={sortKey === 'archived_at' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}
-                    className="sticky top-0 z-10 bg-white/90 backdrop-blur-md py-3 px-3 lg:px-4 xl:py-2 xl:text-xs text-right"
+                    className="sticky top-0 z-10 border-b border-neutral-200 bg-neutral-50/95 px-4 py-3 text-right dark:border-neutral-800 dark:bg-neutral-900/95"
                   >
                     <button
                       type="button"
                       onClick={() => handleSort('archived_at')}
-                      className="flex w-full items-center justify-end gap-2 text-right transition-colors hover:text-soot-700 focus:outline-none focus-visible:text-soot-900"
+                      className="flex w-full items-center justify-end gap-2 text-right transition-colors hover:text-neutral-800 focus:outline-none focus-visible:text-neutral-950 dark:hover:text-neutral-100 dark:focus-visible:text-white"
                     >
                       <span>Actions</span>
                       {renderSortIcon('archived_at')}
@@ -478,48 +489,55 @@ export default function MenuItemsTab() {
                   </th>
                 </tr>
               </thead>
-              <tbody className="glass-card">
+              <tbody className="divide-y divide-neutral-200/80 bg-white dark:divide-neutral-800 dark:bg-neutral-950">
                 {sortedProducts.map(p => (
                   <Fragment key={p.id}>
                   <tr
-                    className={`border-b border-white/20 hover:bg-white/40 transition-colors min-h-[52px] xl:min-h-0 ${
-                      p.archived_at ? 'bg-white/20 opacity-90' : ''
+                    className={`group transition-colors hover:bg-brand-50/45 dark:hover:bg-brand-950/25 ${
+                      p.archived_at ? 'bg-neutral-50/80 text-neutral-500 dark:bg-neutral-900/60 dark:text-neutral-400' : ''
                     }`}
                   >
-                    <td className="py-3 px-3 lg:px-4 xl:py-2 font-mono text-sm xl:text-xs">{p.sku}</td>
-                    <td className="py-3 px-3 lg:px-4 xl:py-2 font-medium text-soot-900 text-sm xl:text-xs">{p.title}</td>
-                    <td className="py-3 px-3 lg:px-4 xl:py-2">
+                    <td className="px-4 py-3.5 align-middle font-mono text-[13px] font-medium text-neutral-500 dark:text-neutral-400">{p.sku}</td>
+                    <td className="px-4 py-3.5 align-middle">
+                      <div className="flex min-w-0 flex-col">
+                        <span className="truncate text-[15px] font-semibold leading-5 text-neutral-950 dark:text-neutral-100">{p.title}</span>
+                        {p.archived_at && (
+                          <span className="mt-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-neutral-400">Archived</span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3.5 align-middle">
                       {p.section ? (
-                        <span className="inline-block px-2.5 py-1 bg-brand-50 text-brand-700 rounded-md text-xs font-semibold border border-brand-100">
+                        <span className="inline-flex max-w-full items-center rounded-full border border-brand-200 bg-brand-50 px-2.5 py-1 text-xs font-semibold text-brand-700 dark:border-brand-900/70 dark:bg-brand-950/40 dark:text-brand-300">
                           {p.section}
                         </span>
                       ) : (
-                        <span className="text-soot-300 text-sm">—</span>
+                        <span className="text-neutral-300 text-sm dark:text-neutral-600">—</span>
                       )}
                     </td>
-                    <td className="py-3 px-3 lg:px-4 xl:py-2 font-semibold text-sm xl:text-xs">
+                    <td className="px-4 py-3.5 align-middle text-[13px] font-semibold text-neutral-700 dark:text-neutral-300">
                       {formatCurrency(p.variants?.[0]?.basePrice ?? p.base_price)}
                     </td>
-                    <td className="py-3 px-3 lg:px-4 xl:py-2 font-semibold text-sm xl:text-xs">
+                    <td className="px-4 py-3.5 align-middle text-[14px] font-semibold text-neutral-950 dark:text-neutral-100">
                       {formatCurrency(p.variants?.[0]?.salePrice ?? p.sale_price ?? p.base_price)}
                     </td>
-                    <td className="py-3 px-3 lg:px-4 xl:py-2">
+                    <td className="px-4 py-3.5 align-middle">
                       {p.totalQuantity !== undefined && p.totalQuantity !== null && p.unitOfMeasure && p.unitOfMeasure !== 'Mixed Units' ? (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-soot-100 text-soot-600 text-xs font-semibold border border-soot-200">
+                        <span className="inline-flex items-center rounded-full border border-neutral-200 bg-neutral-100 px-2.5 py-1 text-xs font-semibold text-neutral-600 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-300">
                           {p.totalQuantity} {formatUnit(p.unitOfMeasure)}
                         </span>
                       ) : p.unitOfMeasure === 'Mixed Units' ? (
-                        <span className="text-soot-500 text-xs">Mixed Units</span>
+                        <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400">Mixed Units</span>
                       ) : (
-                        <span className="text-soot-300 text-xs">—</span>
+                        <span className="text-xs text-neutral-300 dark:text-neutral-600">—</span>
                       )}
                     </td>
-                    <td className="py-3 px-3 lg:px-4 xl:py-2 text-right">
-                      <div className="flex items-center justify-end gap-0.5 lg:gap-1 flex-wrap">
+                    <td className="px-4 py-3.5 align-middle text-right">
+                      <div className="flex items-center justify-end gap-1.5">
                         <button
                           type="button"
                           onClick={() => setExpandedRows(prev => ({ ...prev, [p.id]: !prev[p.id] }))}
-                          className="min-w-[44px] min-h-[44px] xl:min-w-9 xl:min-h-9 flex items-center justify-center text-neutral-400 hover:text-brand-600 hover:bg-brand-50 rounded-lg transition-colors"
+                          className="flex h-9 w-9 items-center justify-center rounded-full text-neutral-400 transition-colors hover:bg-brand-50 hover:text-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 dark:hover:bg-brand-950/50 dark:hover:text-brand-300"
                           title="Show variants"
                         >
                           {expandedRows[p.id] ? <ArrowUp className="w-4 h-4" /> : <ArrowDown className="w-4 h-4" />}
@@ -527,7 +545,7 @@ export default function MenuItemsTab() {
                         <button
                           type="button"
                           onClick={() => setBarcodeProduct(p)}
-                          className="min-w-[44px] min-h-[44px] xl:min-w-9 xl:min-h-9 flex items-center justify-center text-neutral-400 hover:text-brand-600 hover:bg-brand-50 rounded-lg transition-colors"
+                          className="flex h-9 w-9 items-center justify-center rounded-full text-neutral-400 transition-colors hover:bg-brand-50 hover:text-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 dark:hover:bg-brand-950/50 dark:hover:text-brand-300"
                           title="Print barcode label"
                         >
                           <ScanBarcode className="w-4 h-4" />
@@ -535,7 +553,7 @@ export default function MenuItemsTab() {
                         <button
                           type="button"
                           onClick={() => handleOpenEditModal(p)}
-                          className="min-w-[44px] min-h-[44px] xl:min-w-9 xl:min-h-9 flex items-center justify-center text-neutral-400 hover:text-brand-600 hover:bg-brand-50 rounded-lg transition-colors"
+                          className="flex h-9 w-9 items-center justify-center rounded-full text-neutral-400 transition-colors hover:bg-brand-50 hover:text-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 dark:hover:bg-brand-950/50 dark:hover:text-brand-300"
                           title="Edit item"
                         >
                           <Pencil className="w-4 h-4" />
@@ -545,7 +563,7 @@ export default function MenuItemsTab() {
                             <button
                               type="button"
                               onClick={() => void handleUnarchive(p)}
-                              className="min-w-[44px] min-h-[44px] xl:min-w-9 xl:min-h-9 flex items-center justify-center text-neutral-400 hover:text-brand-600 hover:bg-brand-50 rounded-lg transition-colors"
+                              className="flex h-9 w-9 items-center justify-center rounded-full text-neutral-400 transition-colors hover:bg-brand-50 hover:text-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 dark:hover:bg-brand-950/50 dark:hover:text-brand-300"
                               title="Restore"
                             >
                               <ArchiveRestore className="w-4 h-4" />
@@ -553,7 +571,7 @@ export default function MenuItemsTab() {
                             <button
                               type="button"
                               onClick={() => void handlePermanentDelete(p)}
-                              className="min-w-[44px] min-h-[44px] xl:min-w-9 xl:min-h-9 flex items-center justify-center text-neutral-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                              className="flex h-9 w-9 items-center justify-center rounded-full text-neutral-400 transition-colors hover:bg-red-50 hover:text-red-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 dark:hover:bg-red-950/40 dark:hover:text-red-300"
                               title="Delete permanently"
                             >
                               <Trash2 className="w-4 h-4" />
@@ -564,7 +582,7 @@ export default function MenuItemsTab() {
                             <button
                               type="button"
                               onClick={() => void handleArchive(p)}
-                              className="min-w-[44px] min-h-[44px] xl:min-w-9 xl:min-h-9 flex items-center justify-center text-neutral-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors"
+                              className="flex h-9 w-9 items-center justify-center rounded-full text-neutral-400 transition-colors hover:bg-amber-50 hover:text-amber-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 dark:hover:bg-amber-950/40 dark:hover:text-amber-300"
                               title="Archive"
                             >
                               <Archive className="w-4 h-4" />
@@ -572,7 +590,7 @@ export default function MenuItemsTab() {
                             <button
                               type="button"
                               onClick={() => void handlePermanentDelete(p)}
-                              className="min-w-[44px] min-h-[44px] xl:min-w-9 xl:min-h-9 flex items-center justify-center text-neutral-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                              className="flex h-9 w-9 items-center justify-center rounded-full text-neutral-400 transition-colors hover:bg-red-50 hover:text-red-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 dark:hover:bg-red-950/40 dark:hover:text-red-300"
                               title="Delete permanently"
                             >
                               <Trash2 className="w-4 h-4" />
@@ -583,24 +601,31 @@ export default function MenuItemsTab() {
                     </td>
                   </tr>
                   {expandedRows[p.id] && (p.variants || []).map((variant) => (
-                    <tr key={`${p.id}-${variant.name}`} className="bg-white/20 border-b border-white/15">
-                      <td className="py-2 px-3 lg:px-4 xl:py-1 text-xs text-soot-400">↳</td>
-                      <td className="py-2 px-3 lg:px-4 xl:py-1 text-xs font-medium text-soot-700">{variant.name}</td>
-                      <td className="py-2 px-3 lg:px-4 xl:py-1 text-xs text-soot-500">Variant</td>
-                      <td className="py-2 px-3 lg:px-4 xl:py-1 text-xs font-semibold">{formatCurrency(variant.basePrice)}</td>
-                      <td className="py-2 px-3 lg:px-4 xl:py-1 text-xs font-semibold">{formatCurrency(variant.salePrice)}</td>
-                      <td className="py-2 px-3 lg:px-4 xl:py-1 text-xs text-soot-500">
+                    <tr key={`${p.id}-${variant.name}`} className="bg-neutral-50/80 text-[13px] dark:bg-neutral-900/45">
+                      <td className="px-4 py-2.5 font-mono text-xs text-neutral-300 dark:text-neutral-600">Variant</td>
+                      <td className="px-4 py-2.5 font-medium text-neutral-700 dark:text-neutral-300">
+                        <span className="inline-flex items-center gap-2">
+                          <span className="h-px w-5 bg-neutral-300 dark:bg-neutral-700" aria-hidden="true" />
+                          {variant.name}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2.5 text-xs font-semibold uppercase tracking-[0.08em] text-neutral-400 dark:text-neutral-500">Option</td>
+                      <td className="px-4 py-2.5 font-semibold text-neutral-600 dark:text-neutral-400">{formatCurrency(variant.basePrice)}</td>
+                      <td className="px-4 py-2.5 font-semibold text-neutral-800 dark:text-neutral-200">{formatCurrency(variant.salePrice)}</td>
+                      <td className="px-4 py-2.5 text-neutral-500 dark:text-neutral-400">
                         {variant.totalQuantity !== undefined && variant.totalQuantity !== null && variant.unit && variant.unit !== 'Mixed Units'
                           ? `${variant.totalQuantity} ${formatUnit(variant.unit)}`
                           : (variant.unit || '—')}
                       </td>
-                      <td className="py-2 px-3 lg:px-4 xl:py-1" />
+                      <td className="px-4 py-2.5" />
                     </tr>
                   ))}
                   </Fragment>
                 ))}
               </tbody>
             </table>
+              </div>
+            </div>
           )}
         </div>
       </div>
@@ -610,14 +635,14 @@ export default function MenuItemsTab() {
           <div className="glass-floating w-full max-w-lg my-auto flex flex-col max-h-[90vh] overflow-hidden">
             <div className="flex items-center justify-between px-6 py-4 border-b border-neutral-200/60 bg-white/25 shrink-0">
               <h3 className="text-lg font-bold text-neutral-900">{editingProduct ? 'Edit menu item' : 'Add menu item'}</h3>
-              <button type="button" onClick={() => setShowModal(false)} className="p-1.5 rounded-lg hover:bg-neutral-200 transition-colors">
+              <button type="button" onClick={() => setShowModal(false)} className="p-1.5 rounded-[8px] hover:bg-neutral-200 transition-colors">
                 <X className="w-5 h-5 text-neutral-500" />
               </button>
             </div>
 
             <form onSubmit={handleSubmit} className="p-6 space-y-5 overflow-y-auto min-h-0 flex-1">
               {formError && (
-                <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-2 text-sm font-medium">{formError}</div>
+                <div className="bg-red-50 border border-red-200 text-red-700 rounded-[8px] px-4 py-2 text-sm font-medium">{formError}</div>
               )}
 
               <div>
@@ -656,12 +681,12 @@ export default function MenuItemsTab() {
                     <div key={`variant-${index}`} className="grid grid-cols-12 gap-2 items-center">
                       <input className="col-span-6 px-3 py-2 glass-card text-sm" placeholder="Variant name" value={variant.name} onChange={e => setFormVariants(prev => prev.map((v, i) => (i === index ? { ...v, name: e.target.value } : v)))} />
                       <input className="col-span-4 px-3 py-2 glass-card text-sm" type="number" min="0.01" step="0.01" placeholder="Sale" value={variant.salePrice} onChange={e => setFormVariants(prev => prev.map((v, i) => (i === index ? { ...v, salePrice: e.target.value } : v)))} />
-                      <button type="button" className="col-span-2 px-2 py-2 rounded-lg border border-soot-200 text-xs" onClick={() => setFormVariants(prev => prev.length > 1 ? prev.filter((_, i) => i !== index) : prev)}>Remove</button>
+                      <button type="button" className="col-span-2 px-2 py-2 rounded-[8px] border border-soot-200 text-xs" onClick={() => setFormVariants(prev => prev.length > 1 ? prev.filter((_, i) => i !== index) : prev)}>Remove</button>
                     </div>
                   ))}
                 </div>
                 <div className="flex gap-2 mt-2">
-                  <button type="button" onClick={() => setFormVariants(prev => [...prev, { name: '', salePrice: '', sku: '' }])} className="px-3 py-2 rounded-lg border border-brand-200 text-sm text-brand-800 hover:bg-brand-50">Add variant</button>
+                  <button type="button" onClick={() => setFormVariants(prev => [...prev, { name: '', salePrice: '', sku: '' }])} className="px-3 py-2 rounded-[8px] border border-brand-200 text-sm text-brand-800 hover:bg-brand-50">Add variant</button>
                   <div className="w-1/3 ml-auto">
                     <select
                       value={formUnit}
@@ -683,7 +708,7 @@ export default function MenuItemsTab() {
                 <label className="block text-sm font-medium text-neutral-700 mb-1">Item image</label>
                 <div className="flex items-start gap-3">
                   {formImageUrl && (
-                    <div className="w-16 h-16 rounded-lg glass-card overflow-hidden shrink-0">
+                    <div className="w-16 h-16 rounded-[8px] glass-card overflow-hidden shrink-0">
                       <img src={formImageUrl} alt="" className="w-full h-full object-cover" />
                     </div>
                   )}
@@ -739,14 +764,14 @@ export default function MenuItemsTab() {
                 <button
                   type="button"
                   onClick={() => setShowModal(false)}
-                  className="flex-1 px-4 py-2.5 border border-neutral-200 rounded-lg text-sm font-medium text-neutral-600 hover:bg-neutral-50 transition-colors"
+                  className="flex-1 px-4 py-2.5 border border-neutral-200 rounded-[8px] text-sm font-medium text-neutral-600 hover:bg-neutral-50 transition-colors"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={submitting}
-                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-brand-700 text-white rounded-lg text-sm font-medium hover:bg-brand-600 disabled:opacity-50 transition-colors"
+                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-brand-700 text-white rounded-[8px] text-sm font-medium hover:bg-brand-600 disabled:opacity-50 transition-colors"
                 >
                   {submitting && <Loader2 className="w-4 h-4 animate-spin" />}
                   {submitting ? 'Saving…' : editingProduct ? 'Save changes' : 'Add menu item'}

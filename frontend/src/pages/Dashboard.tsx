@@ -59,6 +59,13 @@ type CartItem = {
 };
 
 type DiscountPreset = { id: string; name: string; type: 'percent' | 'fixed'; value: number };
+type PrinterStatus = 'checking' | 'connected' | 'disconnected' | 'error';
+type PrinterStatusResponse = {
+  status?: string;
+  success?: boolean;
+  ready?: boolean;
+  connected?: boolean;
+};
 
 /** Sent as `order_type` on checkout; backend accepts for future use / receipts */
 type OrderType = 'takeaway' | 'dine_in' | 'delivery';
@@ -73,6 +80,23 @@ const PRODUCT_PLACEHOLDER_IMAGE = '/product-placeholder.svg';
 
 /** Default delivery fee when not specified (matches backend `DELIVERY_CHARGE`). */
 const DEFAULT_DELIVERY_CHARGE_PKR = 300;
+
+function normalizePrinterStatus(data: PrinterStatusResponse | null | undefined): PrinterStatus {
+  const rawStatus = String(data?.status ?? '').trim().toLowerCase();
+  if (data?.connected === true || data?.ready === true || data?.success === true) {
+    return 'connected';
+  }
+  if (['connected', 'ready', 'online', 'ok', 'available'].includes(rawStatus)) {
+    return 'connected';
+  }
+  if (['checking', 'connecting'].includes(rawStatus)) {
+    return 'checking';
+  }
+  if (['error', 'failed', 'failure'].includes(rawStatus)) {
+    return 'error';
+  }
+  return 'disconnected';
+}
 
 function getProductImageUrl(product: Product): string {
   return (product.image_url && product.image_url.trim()) ? product.image_url.trim() : PRODUCT_PLACEHOLDER_IMAGE;
@@ -162,7 +186,7 @@ export default function Dashboard() {
   const editOrderLoadedRef = useRef<number | null>(null);
   const skipOrderTypeResetRef = useRef(false);
   const { lastScannedBarcode, clearBarcode, scannerStatus } = useScanner();
-  const [printerStatus, setPrinterStatus] = useState<'checking' | 'connected' | 'disconnected' | 'error'>('checking');
+  const [printerStatus, setPrinterStatus] = useState<PrinterStatus>('checking');
   const [cart, setCart] = useState<CartItem[]>([]);
   const [activeCategory, setActiveCategory] = useState('All Items');
   const [searchQuery, setSearchQuery] = useState('');
@@ -212,7 +236,6 @@ export default function Dashboard() {
     variant: string;
     selections: Record<number, { productId: string; variant: string }>;
   } | null>(null);
-  const [variantPickerProduct, setVariantPickerProduct] = useState<Product | null>(null);
   /** Set when resuming an open dine-in sale from Active Dine-in → Modify */
   const [editingOpenSaleId, setEditingOpenSaleId] = useState<number | null>(null);
   const [orderReadyAlerts, setOrderReadyAlerts] = useState<{ id: string; sale_id: number; table_name?: string | null }[]>([]);
@@ -303,6 +326,15 @@ export default function Dashboard() {
       setLoading(false);
     }
   }, [terminalBranchKey]);
+
+  const checkPrinterStatus = useCallback(async () => {
+    try {
+      const data = await get<PrinterStatusResponse>('/printer/status', { cacheTtlMs: 0, forceRefresh: true });
+      setPrinterStatus(normalizePrinterStatus(data));
+    } catch {
+      setPrinterStatus('error');
+    }
+  }, []);
 
   useEffect(() => {
     if (skipOrderTypeResetRef.current) {
@@ -475,17 +507,28 @@ export default function Dashboard() {
   // Fetch products + sections on mount
   useEffect(() => {
     void fetchData();
-    // Check printer status
-    const checkPrinter = async () => {
-      try {
-        const data = await get<{ status?: string }>('/printer/status');
-        setPrinterStatus(data?.status === 'connected' ? 'connected' : 'disconnected');
-      } catch {
-        setPrinterStatus('error');
+    void checkPrinterStatus();
+
+    const intervalId = window.setInterval(() => {
+      void checkPrinterStatus();
+    }, 60_000);
+    const handleFocus = () => {
+      void checkPrinterStatus();
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        void checkPrinterStatus();
       }
     };
-    checkPrinter();
-  }, [fetchData]);
+    window.addEventListener('focus', handleFocus);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [checkPrinterStatus, fetchData]);
 
   // ORDER_READY real-time notification from KDS
   useEffect(() => {
@@ -678,11 +721,6 @@ export default function Dashboard() {
   }, [lastScannedBarcode]);
 
   const handleProductClick = (product: Product) => {
-    const hasVariants = (product.variants || []).length > 0;
-    if (hasVariants && !product.is_deal) {
-      setVariantPickerProduct(product);
-      return;
-    }
     const defaultVariant = product.variants?.length ? product.variants[0]?.name : undefined;
     if (product.is_deal && hasCategoryChoiceRows(product)) {
       setDealConfigurator({
@@ -836,8 +874,10 @@ export default function Dashboard() {
       const saleId = data?.sale_id ?? 0;
 
       if (data.print_success === false) {
+        setPrinterStatus('disconnected');
         setNotification({ type: 'error', msg: `Payment OK, but Printer Error — Order #ORD-${String(saleId).padStart(4, '0')}` });
       } else {
+        setPrinterStatus('connected');
         setNotification({ type: 'ok', msg: `Payment Processed — Order #ORD-${String(saleId).padStart(4, '0')}` });
       }
 
@@ -913,8 +953,10 @@ export default function Dashboard() {
       const data = await post<{ sale_id?: number; print_success?: boolean }>(`/orders/${editingOpenSaleId}/finalize`, finalizeBody);
       const saleId = data?.sale_id ?? editingOpenSaleId;
       if (data?.print_success === false) {
+        setPrinterStatus('disconnected');
         setNotification({ type: 'error', msg: `Payment OK, but Printer Error — Order #ORD-${String(saleId).padStart(4, '0')}` });
       } else {
+        setPrinterStatus('connected');
         setNotification({ type: 'ok', msg: `Payment Processed — Order #ORD-${String(saleId).padStart(4, '0')}` });
       }
       setTimeout(() => setNotification(null), 4000);
@@ -1311,7 +1353,7 @@ export default function Dashboard() {
 
       {/* Notification Toast */}
       {notification && (
-        <div className={`fixed top-5 left-1/2 -translate-x-1/2 z-[200] px-5 py-3 rounded-xl shadow-lg text-sm font-semibold transition-all ${
+        <div className={`fixed top-5 left-1/2 -translate-x-1/2 z-[200] px-5 py-3 rounded-[11px] text-sm font-semibold transition-all ${
           notification.type === 'ok'
             ? 'bg-brand-600 text-white'
             : 'bg-red-600 text-white'
@@ -1326,7 +1368,7 @@ export default function Dashboard() {
           {orderReadyAlerts.map(alert => (
             <div
               key={alert.id}
-              className="flex items-center gap-3 bg-green-700 text-white px-4 py-3 rounded-xl shadow-2xl border border-green-500 animate-pulse-once"
+              className="flex items-center gap-3 bg-green-700 text-white px-4 py-3 rounded-[11px] border border-green-500 animate-pulse-once"
               role="alert"
             >
               <Bell className="w-5 h-5 shrink-0" />
@@ -1350,8 +1392,8 @@ export default function Dashboard() {
       )}
 
       {dealConfigurator && (
-        <div className="fixed inset-0 z-[210] flex items-center justify-center bg-neutral-900/55 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-2xl rounded-3xl border border-white/30 bg-white/90 p-5 shadow-2xl backdrop-blur-xl">
+        <div className="fixed inset-0 z-[210] flex items-center justify-center bg-neutral-900/55 p-4">
+          <div className="w-full max-w-2xl rounded-[18px] border border-white/30 bg-white/90 p-5">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <p className="text-xs font-black uppercase tracking-[0.18em] text-brand-700">Configure Deal</p>
@@ -1363,7 +1405,7 @@ export default function Dashboard() {
               <button
                 type="button"
                 onClick={() => setDealConfigurator(null)}
-                className="rounded-full bg-white p-2 text-neutral-500 shadow-sm transition-colors hover:bg-neutral-100 hover:text-neutral-800"
+                className="rounded-full bg-white p-2 text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-neutral-800"
                 aria-label="Close deal configuration"
               >
                 <X className="h-5 w-5" />
@@ -1388,7 +1430,7 @@ export default function Dashboard() {
               {activeDealConfigRows.map(row => {
                 if (!isCategoryChoiceRow(row)) {
                   return (
-                    <div key={row.id} className="flex items-center justify-between rounded-2xl border border-white/60 bg-white/70 px-4 py-3">
+                    <div key={row.id} className="flex items-center justify-between rounded-[18px] border border-white/60 bg-white/70 px-4 py-3">
                       <div>
                         <p className="text-sm font-bold text-neutral-900">{row.product_title || 'Menu item'}</p>
                         <p className="text-xs font-medium text-neutral-500">Included automatically</p>
@@ -1405,7 +1447,7 @@ export default function Dashboard() {
                 const selectedState = dealConfigurator.selections[row.id] || { productId: '', variant: '' };
                 const selectedProduct = categoryProducts.find(product => String(product.id) === selectedState.productId);
                 return (
-                  <div key={row.id} className="rounded-2xl border border-white/60 bg-white/70 p-4 shadow-sm">
+                  <div key={row.id} className="rounded-[18px] border border-white/60 bg-white/70 p-4">
                     <div className="mb-3 flex items-center justify-between gap-3">
                       <div>
                         <p className="text-sm font-bold text-neutral-900">{categoryName}</p>
@@ -1481,14 +1523,14 @@ export default function Dashboard() {
                 <button
                   type="button"
                   onClick={() => setDealConfigurator(null)}
-                  className="rounded-xl border border-neutral-200 bg-white px-4 py-2.5 text-sm font-bold text-neutral-700 transition-colors hover:bg-neutral-50"
+                  className="rounded-[11px] border border-neutral-200 bg-white px-4 py-2.5 text-sm font-bold text-neutral-700 transition-colors hover:bg-neutral-50"
                 >
                   Cancel
                 </button>
                 <button
                   type="button"
                   onClick={handleConfirmDealConfiguration}
-                  className="rounded-xl bg-brand-600 px-5 py-2.5 text-sm font-black text-white shadow-lg shadow-brand-500/20 transition-colors hover:bg-brand-700"
+                  className="rounded-[11px] bg-brand-600 px-5 py-2.5 text-sm font-black text-white transition-colors hover:bg-brand-700"
                 >
                   Add Deal
                 </button>
@@ -1498,56 +1540,17 @@ export default function Dashboard() {
         </div>
       )}
 
-      {variantPickerProduct && (
-        <div className="fixed inset-0 z-[215] flex items-center justify-center bg-neutral-900/55 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-3xl border border-white/30 bg-white/95 p-5 shadow-2xl backdrop-blur-xl">
-            <div className="flex items-center justify-between gap-2">
-              <h3 className="text-lg font-bold text-neutral-900">Select Variant</h3>
-              <button type="button" onClick={() => setVariantPickerProduct(null)} className="rounded-full bg-white p-2 text-neutral-500 hover:bg-neutral-100">
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-            <p className="mt-1 text-sm text-neutral-600">{variantPickerProduct.title}</p>
-            <div className="mt-4 space-y-2">
-              {(variantPickerProduct.variants || []).map((variant) => (
-                <button
-                  key={`${variantPickerProduct.id}-${variant.name}`}
-                  type="button"
-                  className="w-full text-left px-4 py-3 rounded-xl border border-neutral-200 hover:border-brand-300 hover:bg-brand-50 transition-colors"
-                  onClick={() => {
-                    handleAddToCart({
-                      id: variantPickerProduct.id,
-                      title: variantPickerProduct.title,
-                      price: getVariantSalePrice(variantPickerProduct, variant.name),
-                      image: getProductImageUrl(variantPickerProduct),
-                      variant: variant.name,
-                      variantPrice: getVariantSalePrice(variantPickerProduct, variant.name),
-                    });
-                    setVariantPickerProduct(null);
-                  }}
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="font-semibold text-neutral-900">{variant.name}</span>
-                    <span className="font-bold text-brand-700">{formatCurrency(variant.salePrice)}</span>
-                  </div>
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* =========================================
           LEFT PANEL: CART (25-30% width on lg)
           ========================================= */}
-      <div className="w-full lg:w-[min(340px,28vw)] xl:w-[360px] border-b lg:border-b-0 lg:border-r border-white/20 flex flex-col shrink-0 min-h-0 bg-white/10 backdrop-blur-md z-10 order-2 lg:order-1">
+      <div className="w-full lg:w-[min(340px,28vw)] xl:w-[360px] border-b lg:border-b-0 lg:border-r border-white/20 flex flex-col shrink-0 min-h-0 bg-white/10 z-10 order-2 lg:order-1">
         
         {/* Cart Header */}
         <div className="p-4 lg:p-5 border-b border-white/20 shrink-0">
           <div className="flex items-center justify-between">
             <h2 className="text-xl font-bold text-neutral-900 tracking-tight">Current Order</h2>
             {editingOpenSaleId && (
-              <span className="text-[10px] font-bold text-amber-900 bg-amber-100 border border-amber-300 px-2.5 py-1 rounded-lg shadow-sm">
+              <span className="text-[10px] font-bold text-amber-900 bg-amber-100 border border-amber-300 px-2.5 py-1 rounded-[8px]">
                 Open tab #{editingOpenSaleId}
               </span>
             )}
@@ -1569,11 +1572,11 @@ export default function Dashboard() {
               const hasDealSelections = (item.dealSelections || []).length > 0;
               const showVariantSelector = Boolean(hasVariants && !hasDealSelections);
               return (
-              <div key={item.uniqueId + "-" + index} className="flex flex-col gap-2 p-3 glass-card relative group shadow-sm transition-shadow bg-white/60 hover:bg-white/80 border border-white/50">
+              <div key={item.uniqueId + "-" + index} className="flex flex-col gap-2 p-3 glass-card relative group transition-shadow bg-white/60 hover:bg-white/80 border border-white/50">
                 
                 {/* Main Item Row */}
                 <div className="flex items-start gap-3">
-                  <div className="w-12 h-12 rounded-lg bg-white/20 flex items-center justify-center overflow-hidden shrink-0 border border-white/30 p-0.5">
+                  <div className="w-12 h-12 rounded-[8px] bg-white/20 flex items-center justify-center overflow-hidden shrink-0 border border-white/30 p-0.5">
                     <img src={item.image} alt="" className="h-full w-full object-contain object-center" />
                   </div>
                   
@@ -1596,7 +1599,7 @@ export default function Dashboard() {
                           onChange={(value) => handleChangeVariant(item.uniqueId, value)}
                           searchPlaceholder="Search variants…"
                           options={(baseProd?.variants || []).map((variant) => ({ value: variant.name, label: `${variant.name} (${formatCurrency(variant.salePrice)})` }))}
-                          className="min-h-[32px] border-brand-300/80 bg-white py-1 pl-2 pr-2 text-xs font-bold text-neutral-800 shadow-sm hover:border-brand-400 hover:bg-brand-50/30 focus:border-brand-500"
+                          className="min-h-[32px] border-brand-300/80 bg-white py-1 pl-2 pr-2 text-xs font-bold text-neutral-800 hover:border-brand-400 hover:bg-brand-50/30 focus:border-brand-500"
                           dropdownClassName="min-w-[8.5rem]"
                         />
                       </div>
@@ -1640,7 +1643,7 @@ export default function Dashboard() {
                 {(item.modifiers || []).length > 0 && (
                   <div className="mt-1 space-y-1">
                     {(item.modifiers || []).map((m: { id: number; name: string; price: number | null }) => (
-                      <div key={m.id} className="flex items-center justify-between gap-2 text-[11px] font-semibold text-neutral-600 bg-white/70 border border-white/80 px-2 py-1.5 rounded-md shadow-sm">
+                      <div key={m.id} className="flex items-center justify-between gap-2 text-[11px] font-semibold text-neutral-600 bg-white/70 border border-white/80 px-2 py-1.5 rounded-md">
                         <span className="truncate flex items-center gap-1.5">
                           <span className="w-1.5 h-1.5 rounded-full bg-brand-400"></span> {m.name} {m.price ? `(+${formatCurrency(m.price)})` : ''}
                         </span>
@@ -1655,7 +1658,7 @@ export default function Dashboard() {
                 {/* Active Modifier Picker Tray */}
                 {activeModifierRowId === item.uniqueId && (
                   <div className="mt-2">
-                    <div className="p-2.5 bg-brand-50/80 border border-brand-200/60 rounded-lg shadow-inner">
+                    <div className="p-2.5 bg-brand-50/80 border border-brand-200/60 rounded-[8px]">
                       <p className="text-[10px] font-bold text-brand-800 uppercase tracking-wide mb-2 opacity-80">Available Modifiers</p>
                       {modifiers.length === 0 ? (
                         <p className="text-xs text-neutral-500 font-medium">None configured.</p>
@@ -1669,7 +1672,7 @@ export default function Dashboard() {
                                 key={m.id}
                                 type="button"
                                 onClick={() => attachModifier({ id: m.id, name: m.name, price: m.price })}
-                                className="px-2.5 py-1.5 rounded-lg shadow-sm text-[11px] font-bold border transition-colors bg-white hover:bg-brand-100 hover:border-brand-300 border-neutral-200 text-neutral-700 active:scale-95 flex items-center gap-1"
+                                className="px-2.5 py-1.5 rounded-[8px] text-[11px] font-bold border transition-colors bg-white hover:bg-brand-100 hover:border-brand-300 border-neutral-200 text-neutral-700 active:scale-95 flex items-center gap-1"
                               >
                                 {m.name} <span className="opacity-60">{m.price ? `(+${m.price})` : ''}</span>
                               </button>
@@ -1684,11 +1687,11 @@ export default function Dashboard() {
                 {/* Bottom Row: Quantity & Total */}
                 <div className="flex items-center justify-between mt-1 pt-2 border-t border-black/5">
                   <div className="flex items-center gap-2">
-                    <button type="button" onClick={(e) => { e.stopPropagation(); handleUpdateQuantity(item.uniqueId, -1); }} className="w-7 h-7 rounded-lg bg-white/80 hover:bg-white flex items-center justify-center transition-all border border-black/10 shadow-sm active:scale-95">
+                    <button type="button" onClick={(e) => { e.stopPropagation(); handleUpdateQuantity(item.uniqueId, -1); }} className="w-7 h-7 rounded-[8px] bg-white/80 hover:bg-white flex items-center justify-center transition-all border border-black/10 active:scale-95">
                       <Minus className="w-3.5 h-3.5 text-neutral-700" />
                     </button>
                     <span className="text-sm font-black text-neutral-800 w-6 text-center tabular-nums">{item.quantity}</span>
-                    <button type="button" onClick={(e) => { e.stopPropagation(); handleUpdateQuantity(item.uniqueId, 1); }} className="w-7 h-7 rounded-lg bg-brand-600 hover:bg-brand-500 flex items-center justify-center transition-all shadow-md shadow-brand-500/20 active:scale-95">
+                    <button type="button" onClick={(e) => { e.stopPropagation(); handleUpdateQuantity(item.uniqueId, 1); }} className="w-7 h-7 rounded-[8px] bg-brand-600 hover:bg-brand-500 flex items-center justify-center transition-all active:scale-95">
                       <Plus className="w-3.5 h-3.5 text-white" />
                     </button>
                   </div>
@@ -1704,7 +1707,7 @@ export default function Dashboard() {
         </div>
 
         {/* Cart totals: subtotal, discount, tax, total */}
-        <div className="shrink-0 border-t border-white/20 bg-white/40 backdrop-blur px-4 py-3 lg:px-5 lg:py-4">
+        <div className="shrink-0 border-t border-white/20 bg-white/40 px-4 py-3 lg:px-5 lg:py-4">
           <div className="space-y-2">
             <div className="flex justify-between items-center text-[13px] font-bold text-neutral-500">
               <span>Subtotal</span>
@@ -1754,7 +1757,7 @@ export default function Dashboard() {
 
           <div className="flex flex-wrap items-center gap-2 border-b border-brand-200/40 pb-2">
             {categories.map(cat => (
-              <button key={cat} type="button" onClick={() => setActiveCategory(cat)} className={`px-5 py-2.5 rounded-full text-sm font-bold whitespace-nowrap transition-all active:scale-95 ${activeCategory === cat ? 'bg-brand-600 text-white shadow-md shadow-brand-500/20' : 'bg-white/50 text-neutral-600 hover:bg-white/80 hover:text-neutral-900 border border-transparent hover:border-white/60'}`}>
+              <button key={cat} type="button" onClick={() => setActiveCategory(cat)} className={`px-5 py-2.5 rounded-full text-sm font-bold whitespace-nowrap transition-all active:scale-95 ${activeCategory === cat ? 'bg-brand-600 text-white' : 'bg-white/50 text-neutral-600 hover:bg-white/80 hover:text-neutral-900 border border-transparent hover:border-white/60'}`}>
                 {cat}
               </button>
             ))}
@@ -1781,9 +1784,9 @@ export default function Dashboard() {
                 <button
                   key={product.id}
                   onClick={() => handleProductClick(product)}
-                  className={`glass-card bg-white/80 overflow-hidden w-full transition-all duration-200 group text-left border border-white/50 shadow-sm ${layoutView === 'grid' ? 'flex items-center gap-3 rounded-xl min-h-[72px] px-3 py-2.5' : 'flex items-center gap-3 p-3 rounded-xl'} hover:shadow-md hover:border-brand-300 hover:bg-white hover:scale-[1.02] active:scale-[0.98]`}
+                  className={`glass-card bg-white/80 overflow-hidden w-full transition-all duration-200 group text-left border border-white/50 ${layoutView === 'grid' ? 'flex items-center gap-3 rounded-[11px] min-h-[72px] px-3 py-2.5' : 'flex items-center gap-3 p-3 rounded-[11px]'} hover:border-brand-300 hover:bg-white hover:scale-[1.02] active:scale-[0.98]`}
                 >
-                  <div className={`${layoutView === 'grid' ? 'w-14 h-14' : 'w-14 h-14 lg:w-16 lg:h-16'} shrink-0 rounded-lg p-1 flex items-center justify-center overflow-hidden transition-colors relative bg-gradient-to-br from-brand-50/40 to-brand-100/40 group-hover:from-brand-100/50 group-hover:to-brand-200/50`}>
+                  <div className={`${layoutView === 'grid' ? 'w-14 h-14' : 'w-14 h-14 lg:w-16 lg:h-16'} shrink-0 rounded-[8px] p-1 flex items-center justify-center overflow-hidden transition-colors relative bg-brand-50 group-hover:bg-brand-100`}>
                     <img src={getProductImageUrl(product)} alt="" className="h-full w-full object-contain object-center" />
                     <div className="absolute inset-0 bg-brand-900/0 group-hover:bg-brand-900/5 transition-colors duration-300" />
                   </div>
@@ -1813,44 +1816,44 @@ export default function Dashboard() {
       
       {/* Mobile Backdrop overlay */}
       {isRightPanelOpen && (
-        <div className="fixed inset-0 bg-neutral-900/50 backdrop-blur-md z-[60] lg:hidden transition-opacity" onClick={() => setIsRightPanelOpen(false)} aria-hidden />
+        <div className="fixed inset-0 bg-neutral-900/50 z-[60] lg:hidden transition-opacity" onClick={() => setIsRightPanelOpen(false)} aria-hidden />
       )}
 
-      <div className={`fixed inset-y-0 right-0 z-[70] w-[min(400px,90vw)] lg:static lg:w-[min(380px,28vw)] xl:w-[min(420px,30vw)] transform transition-transform duration-300 ${isRightPanelOpen ? 'translate-x-0' : 'translate-x-full lg:translate-x-0'} border-l border-white/20 bg-neutral-50/95 lg:bg-white/10 backdrop-blur-xl flex flex-col shrink-0 min-h-0 order-3 shadow-2xl lg:shadow-none`}>
+      <div className={`fixed inset-y-0 right-0 z-[70] w-[min(400px,90vw)] lg:static lg:w-[min(380px,28vw)] xl:w-[min(420px,30vw)] transform transition-transform duration-300 ${isRightPanelOpen ? 'translate-x-0' : 'translate-x-full lg:translate-x-0'} border-l border-white/20 bg-neutral-50/95 lg:bg-white/10 flex flex-col shrink-0 min-h-0 order-3`}>
         
         {/* Drawer Header (Mobile only) */}
         <div className="p-4 flex items-center justify-between lg:hidden border-b border-black/5 bg-white/50">
           <h2 className="text-xl font-black text-neutral-900 tracking-tight">Checkout Summary</h2>
-          <button onClick={() => setIsRightPanelOpen(false)} className="w-9 h-9 flex items-center justify-center rounded-full bg-neutral-200/70 hover:bg-neutral-300 text-neutral-700 transition-colors shadow-sm">
+          <button onClick={() => setIsRightPanelOpen(false)} className="w-9 h-9 flex items-center justify-center rounded-full bg-neutral-200/70 hover:bg-neutral-300 text-neutral-700 transition-colors">
             <X className="w-5 h-5" />
           </button>
         </div>
 
         <div className="flex-1 overflow-auto p-4 lg:p-5 space-y-4 lg:space-y-6">
-          <div className="glass-card !overflow-visible p-4 rounded-xl shadow-sm border border-white/60 bg-white/70">
+          <div className="glass-card !overflow-visible p-4 rounded-[11px] border border-white/60 bg-white/70">
             <div className="flex flex-wrap items-center justify-center gap-2">
-              <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold shadow-sm ${scannerStatus === 'active' ? 'bg-brand-100 text-brand-800 border border-brand-300' : scannerStatus === 'idle' ? 'bg-amber-100 text-amber-800 border border-amber-300' : 'bg-neutral-100 text-neutral-600 border border-neutral-300'}`}>
+              <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold ${scannerStatus === 'active' ? 'bg-brand-100 text-brand-800 border border-brand-300' : scannerStatus === 'idle' ? 'bg-amber-100 text-amber-800 border border-amber-300' : 'bg-neutral-100 text-neutral-600 border border-neutral-300'}`}>
                 <Usb className="w-4 h-4" />
                 <span>{scannerStatus === 'active' ? 'Scanner Active' : scannerStatus === 'idle' ? 'Scanner Idle' : 'Scanner Waiting'}</span>
               </div>
-              <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold shadow-sm ${printerStatus === 'connected' ? 'bg-brand-100 text-brand-800 border border-brand-300' : printerStatus === 'checking' ? 'bg-neutral-100 text-neutral-600 border border-neutral-300' : 'bg-red-100 text-red-700 border border-red-300'}`}>
+              <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold ${printerStatus === 'connected' ? 'bg-brand-100 text-brand-800 border border-brand-300' : printerStatus === 'checking' ? 'bg-neutral-100 text-neutral-600 border border-neutral-300' : 'bg-red-100 text-red-700 border border-red-300'}`}>
                 <Printer className="w-4 h-4" />
                 <span>{printerStatus === 'connected' ? 'Printer Ready' : printerStatus === 'checking' ? 'Checking…' : 'Printer Offline'}</span>
               </div>
             </div>
           </div>
 
-          <div className="glass-card !overflow-visible p-4 rounded-xl shadow-sm border border-white/60 bg-white/70">
+          <div className="glass-card !overflow-visible p-4 rounded-[11px] border border-white/60 bg-white/70">
             <h3 className="text-sm font-black text-neutral-800 mb-3 tracking-wide">MENU SEARCH</h3>
             <div className="relative min-w-0">
               <Search className="pointer-events-none absolute left-4 top-1/2 z-10 -translate-y-1/2 w-5 h-5 text-neutral-400" aria-hidden />
-              <input type="text" inputMode="search" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search menu items..." className="w-full min-h-[48px] pl-12 pr-4 py-2.5 glass-card bg-white/70 text-sm font-medium focus:ring-2 focus:ring-brand-500 focus:border-brand-500 focus:outline-none transition-all shadow-sm rounded-xl border border-white/60" />
+              <input type="text" inputMode="search" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search menu items..." className="w-full min-h-[48px] pl-12 pr-4 py-2.5 glass-card bg-white/70 text-sm font-medium focus:ring-2 focus:ring-brand-500 focus:border-brand-500 focus:outline-none transition-all rounded-[11px] border border-white/60" />
             </div>
           </div>
 
           
           {/* SECTION 1: ORDER INFO */}
-          <div className="glass-card !overflow-visible p-4 rounded-xl shadow-sm border border-white/60 bg-white/70">
+          <div className="glass-card !overflow-visible p-4 rounded-[11px] border border-white/60 bg-white/70">
             <h3 className="text-sm font-black text-neutral-800 mb-3 tracking-wide">ORDER INFO</h3>
             
             {/* Order Type Buttons */}
@@ -1868,10 +1871,10 @@ export default function Dashboard() {
                       editOrderLoadedRef.current = null;
                       setOrderType(id);
                     }}
-                    className={`min-h-[48px] py-2 px-1 flex flex-col items-center justify-center gap-1 rounded-xl border-2 transition-all active:scale-95 ${
+                    className={`min-h-[48px] py-2 px-1 flex flex-col items-center justify-center gap-1 rounded-[11px] border-2 transition-all active:scale-95 ${
                       selected
-                        ? 'bg-brand-50 border-brand-500 text-brand-800 shadow-md shadow-brand-500/10'
-                        : 'bg-white/60 border-transparent hover:border-brand-300 text-neutral-600 hover:bg-white shadow-sm'
+                        ? 'bg-brand-50 border-brand-500 text-brand-800'
+                        : 'bg-white/60 border-transparent hover:border-brand-300 text-neutral-600 hover:bg-white'
                     }`}
                   >
                     <Icon className="w-4.5 h-4.5 shrink-0" strokeWidth={selected ? 2.25 : 1.75} />
@@ -1891,7 +1894,7 @@ export default function Dashboard() {
                 {orderType === 'dine_in' && (
                   <div>
                     {tables.length === 0 ? (
-                      <p className="text-xs text-amber-800 bg-amber-50/90 border border-amber-200/80 rounded-lg px-3 py-2 font-medium">
+                      <p className="text-xs text-amber-800 bg-amber-50/90 border border-amber-200/80 rounded-[8px] px-3 py-2 font-medium">
                         No tables registered. Add names under Settings → Tables.
                       </p>
                     ) : (
@@ -1903,9 +1906,9 @@ export default function Dashboard() {
                               key={t}
                               type="button"
                               onClick={() => setDineInTable(t)}
-                              className={`py-2.5 rounded-xl text-xs font-bold border-2 transition-all active:scale-95 shadow-sm text-center ${
+                              className={`py-2.5 rounded-[11px] text-xs font-bold border-2 transition-all active:scale-95 text-center ${
                                 selected
-                                  ? 'border-brand-500 bg-brand-500 text-white shadow-brand-500/30'
+                                  ? 'border-brand-500 bg-brand-500 text-white'
                                   : 'border-white/80 bg-white text-neutral-700 hover:border-brand-300 hover:bg-brand-50'
                               }`}
                             >
@@ -1924,7 +1927,7 @@ export default function Dashboard() {
                         step={1}
                         value={serviceChargePkr || ''}
                         onChange={e => setServiceChargePkr(e.target.value === '' ? 0 : Number(e.target.value))}
-                        className="mt-1.5 w-full px-3.5 py-3 rounded-xl border border-white/80 bg-white text-sm font-semibold text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-brand-500 transition-all shadow-sm"
+                        className="mt-1.5 w-full px-3.5 py-3 rounded-[11px] border border-white/80 bg-white text-sm font-semibold text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-brand-500 transition-all"
                         placeholder="0"
                       />
                     </label>
@@ -1933,8 +1936,8 @@ export default function Dashboard() {
 
                 {orderType === 'delivery' && (
                   <div className="space-y-2.5">
-                    <input type="text" value={deliveryCustomerName} onChange={e => setDeliveryCustomerName(e.target.value)} placeholder="Customer name" className="w-full px-3.5 py-3 rounded-xl border border-white/80 bg-white text-sm font-semibold text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-brand-500 transition-all shadow-sm" />
-                    <input type="tel" value={deliveryPhone} onChange={e => setDeliveryPhone(e.target.value)} placeholder="Phone number" className="w-full px-3.5 py-3 rounded-xl border border-white/80 bg-white text-sm font-semibold text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-brand-500 transition-all shadow-sm" />
+                    <input type="text" value={deliveryCustomerName} onChange={e => setDeliveryCustomerName(e.target.value)} placeholder="Customer name" className="w-full px-3.5 py-3 rounded-[11px] border border-white/80 bg-white text-sm font-semibold text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-brand-500 transition-all" />
+                    <input type="tel" value={deliveryPhone} onChange={e => setDeliveryPhone(e.target.value)} placeholder="Phone number" className="w-full px-3.5 py-3 rounded-[11px] border border-white/80 bg-white text-sm font-semibold text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-brand-500 transition-all" />
                     {deliveryLookupState === 'loading' && (
                       <p className="text-[11px] font-semibold text-neutral-500">Looking up customer details...</p>
                     )}
@@ -1969,7 +1972,7 @@ export default function Dashboard() {
                             setDeliveryCustomerName(name || '');
                             setDeliveryAddress(address || '');
                           }}
-                          className="mt-1.5 w-full px-3.5 py-3 rounded-xl border border-white/80 bg-white text-sm font-semibold text-neutral-900 focus:outline-none focus:ring-2 focus:ring-brand-500 transition-all shadow-sm"
+                          className="mt-1.5 w-full px-3.5 py-3 rounded-[11px] border border-white/80 bg-white text-sm font-semibold text-neutral-900 focus:outline-none focus:ring-2 focus:ring-brand-500 transition-all"
                         >
                           {deliveryLookupMatches.map((match, idx) => (
                             <option key={`${match.customer_name}-${match.address}-${idx}`} value={`${match.customer_name}|||${match.address}`}>
@@ -1979,13 +1982,13 @@ export default function Dashboard() {
                         </select>
                       </label>
                     )}
-                    <textarea value={deliveryAddress} onChange={e => setDeliveryAddress(e.target.value)} placeholder="Delivery address" rows={2} className="w-full px-3.5 py-3 rounded-xl border border-white/80 bg-white text-sm font-semibold text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-brand-500 resize-y min-h-[80px] transition-all shadow-sm" />
+                    <textarea value={deliveryAddress} onChange={e => setDeliveryAddress(e.target.value)} placeholder="Delivery address" rows={2} className="w-full px-3.5 py-3 rounded-[11px] border border-white/80 bg-white text-sm font-semibold text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-brand-500 resize-y min-h-[80px] transition-all" />
                     <label className="block">
                       <span className="text-[11px] font-bold text-neutral-600 uppercase tracking-wide">Assign rider</span>
                       <select
                         value={deliveryRiderName}
                         onChange={e => setDeliveryRiderName(e.target.value)}
-                        className="mt-1.5 w-full px-3.5 py-3 rounded-xl border border-white/80 bg-white text-sm font-semibold text-neutral-900 focus:outline-none focus:ring-2 focus:ring-brand-500 transition-all shadow-sm"
+                        className="mt-1.5 w-full px-3.5 py-3 rounded-[11px] border border-white/80 bg-white text-sm font-semibold text-neutral-900 focus:outline-none focus:ring-2 focus:ring-brand-500 transition-all"
                       >
                         <option value="">Select rider</option>
                         {availableRiderOptions.map(rider => (
@@ -2007,7 +2010,7 @@ export default function Dashboard() {
                         step={1}
                         value={deliveryChargePkr || ''}
                         onChange={e => setDeliveryChargePkr(e.target.value === '' ? 0 : Number(e.target.value))}
-                        className="mt-1.5 w-full px-3.5 py-3 rounded-xl border border-white/80 bg-white text-sm font-semibold text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-brand-500 transition-all shadow-sm"
+                        className="mt-1.5 w-full px-3.5 py-3 rounded-[11px] border border-white/80 bg-white text-sm font-semibold text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-brand-500 transition-all"
                         placeholder={String(DEFAULT_DELIVERY_CHARGE_PKR)}
                       />
                     </label>
@@ -2018,29 +2021,29 @@ export default function Dashboard() {
           </div>
 
           {/* SECTION 2: PAYMENT INFO */}
-          <div className="glass-card p-4 rounded-xl shadow-sm border border-white/60 bg-white/70 space-y-4">
+          <div className="glass-card p-4 rounded-[11px] border border-white/60 bg-white/70 space-y-4">
             
             {/* Coupon / Discount */}
             <div className="relative">
-              <button type="button" onClick={() => setCouponSectionExpanded(prev => !prev)} className="w-full flex items-center justify-between gap-2 py-1 px-1 -mx-1 rounded-lg hover:bg-white/60 text-left transition-colors">
+              <button type="button" onClick={() => setCouponSectionExpanded(prev => !prev)} className="w-full flex items-center justify-between gap-2 py-1 px-1 -mx-1 rounded-[8px] hover:bg-white/60 text-left transition-colors">
                 <h3 className="text-sm font-black text-neutral-800 tracking-wide">DISCOUNT</h3>
                 {couponSectionExpanded ? <ChevronDown className="w-4.5 h-4.5 shrink-0 text-neutral-500" /> : <ChevronRight className="w-4.5 h-4.5 shrink-0 text-neutral-500" />}
               </button>
               
               {couponSectionExpanded && (
               <div className="relative mt-3">
-                <button type="button" onClick={() => setCouponDropdownOpen(prev => !prev)} className={`w-full flex items-center justify-between gap-2 px-4 py-3 rounded-xl border-2 text-left text-sm font-bold transition-all shadow-sm ${appliedDiscount ? 'border-brand-500 bg-brand-50 text-brand-800' : 'border-neutral-200/80 bg-white hover:border-brand-300 text-neutral-600'}`}>
+                <button type="button" onClick={() => setCouponDropdownOpen(prev => !prev)} className={`w-full flex items-center justify-between gap-2 px-4 py-3 rounded-[11px] border-2 text-left text-sm font-bold transition-all ${appliedDiscount ? 'border-brand-500 bg-brand-50 text-brand-800' : 'border-neutral-200/80 bg-white hover:border-brand-300 text-neutral-600'}`}>
                   <span className="flex items-center gap-2.5"><Tag className="w-4.5 h-4.5 text-neutral-500" />{appliedDiscount ? `${appliedDiscount.name} (${appliedDiscount.type === 'percent' ? `${appliedDiscount.value}%` : formatCurrency(appliedDiscount.value)})` : 'Apply coupon ticket'}</span>
                   <ChevronDown className={`w-4 h-4 shrink-0 transition-transform ${couponDropdownOpen ? 'rotate-180' : ''}`} />
                 </button>
                 {couponDropdownOpen && (
-                  <div className="absolute top-[calc(100%+4px)] left-0 right-0 py-1.5 glass-floating bg-white/95 backdrop-blur-xl border border-neutral-200 rounded-xl shadow-xl z-10 max-h-60 overflow-auto">
+                  <div className="absolute top-[calc(100%+4px)] left-0 right-0 py-1.5 glass-floating bg-white/95 border border-neutral-200 rounded-[11px] z-10 max-h-60 overflow-auto">
                     <button type="button" onClick={() => { setAppliedDiscount(null); setCouponDropdownOpen(false); }} className="w-full px-4 py-3 text-left text-sm font-bold text-neutral-600 hover:bg-neutral-50 transition-colors">No discount</button>
                     <div className="px-3 py-2.5 border-t border-neutral-100 bg-neutral-50/50">
                       <p className="text-[11px] font-bold text-neutral-500 uppercase tracking-wide mb-2 pl-1">Custom Amount</p>
                       <div className="flex gap-2">
-                        <input type="text" value={customCouponInput} onChange={e => setCustomCouponInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && applyCustomCoupon()} placeholder="e.g. 500 or 10%" className="flex-1 px-3.5 py-2.5 bg-white border border-neutral-200 rounded-lg text-sm font-semibold focus:ring-2 focus:ring-brand-500 focus:outline-none shadow-sm" />
-                        <button type="button" onClick={applyCustomCoupon} disabled={!customCouponInput.trim()} className="px-4 py-2.5 bg-brand-600 text-white rounded-lg text-sm font-bold hover:bg-brand-700 disabled:opacity-50 shadow-sm active:scale-95 transition-all">Apply</button>
+                        <input type="text" value={customCouponInput} onChange={e => setCustomCouponInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && applyCustomCoupon()} placeholder="e.g. 500 or 10%" className="flex-1 px-3.5 py-2.5 bg-white border border-neutral-200 rounded-[8px] text-sm font-semibold focus:ring-2 focus:ring-brand-500 focus:outline-none" />
+                        <button type="button" onClick={applyCustomCoupon} disabled={!customCouponInput.trim()} className="px-4 py-2.5 bg-brand-600 text-white rounded-[8px] text-sm font-bold hover:bg-brand-700 disabled:opacity-50 active:scale-95 transition-all">Apply</button>
                       </div>
                     </div>
                     {sortedDiscounts.length > 0 && <div className="h-px bg-neutral-100 my-1" />}
@@ -2055,11 +2058,11 @@ export default function Dashboard() {
               {appliedDiscount && couponSectionExpanded && (
                 <div className="mt-3 flex flex-wrap gap-2">
                   <button type="button" onClick={() => setAppliedDiscount(null)} className="text-[11px] font-bold text-red-600 hover:text-red-700 hover:underline px-1 py-1">Remove discount</button>
-                  <button type="button" onClick={activateCouponForAllOrders} className={`inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1.5 rounded-lg border transition-all shadow-sm ${activeCoupon?.id === appliedDiscount?.id && activeCoupon?.value === appliedDiscount?.value ? 'border-brand-300 bg-brand-50 text-brand-700' : 'border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-50 hover:border-neutral-300'}`}>
+                  <button type="button" onClick={activateCouponForAllOrders} className={`inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1.5 rounded-[8px] border transition-all ${activeCoupon?.id === appliedDiscount?.id && activeCoupon?.value === appliedDiscount?.value ? 'border-brand-300 bg-brand-50 text-brand-700' : 'border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-50 hover:border-neutral-300'}`}>
                     <CheckCircle className="w-3.5 h-3.5" /> {activeCoupon?.id === appliedDiscount?.id && activeCoupon?.value === appliedDiscount?.value ? 'Active for all orders' : 'Activate for all orders'}
                   </button>
                   {activeCoupon && (
-                    <button type="button" onClick={deactivateCouponForAllOrders} className="inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1.5 rounded-lg border border-neutral-200 bg-neutral-100 text-neutral-600 hover:bg-neutral-200 hover:border-neutral-300 transition-all shadow-sm">
+                    <button type="button" onClick={deactivateCouponForAllOrders} className="inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1.5 rounded-[8px] border border-neutral-200 bg-neutral-100 text-neutral-600 hover:bg-neutral-200 hover:border-neutral-300 transition-all">
                       <XCircle className="w-3.5 h-3.5" /> Mark inactive
                     </button>
                   )}
@@ -2070,14 +2073,14 @@ export default function Dashboard() {
             {/* Payment Method — only relevant for takeaway/delivery */}
             {(orderType === 'takeaway' || orderType === 'delivery') && (
             <div className="border-t border-black/10 pt-4 mt-4">
-              <button type="button" onClick={() => setPaymentMethodSectionExpanded(prev => !prev)} className="w-full flex items-center justify-between gap-2 py-1 px-1 -mx-1 rounded-lg hover:bg-white/60 text-left transition-colors">
+              <button type="button" onClick={() => setPaymentMethodSectionExpanded(prev => !prev)} className="w-full flex items-center justify-between gap-2 py-1 px-1 -mx-1 rounded-[8px] hover:bg-white/60 text-left transition-colors">
                 <h3 className="text-sm font-black text-neutral-800 tracking-wide">PAYMENT METHOD</h3>
                 {paymentMethodSectionExpanded ? <ChevronDown className="w-4.5 h-4.5 shrink-0 text-neutral-500" /> : <ChevronRight className="w-4.5 h-4.5 shrink-0 text-neutral-500" />}
               </button>
               {paymentMethodSectionExpanded && (
               <div className="mt-3 grid grid-cols-3 gap-2">
                 {(['Cash','Card','Online Transfer'] as const).map(pm => (
-                  <button key={pm} type="button" onClick={() => setPaymentMethod(pm)} className={`py-3 px-1 flex flex-col items-center justify-center gap-1.5 rounded-xl border-2 transition-all active:scale-95 shadow-sm ${paymentMethod === pm ? 'bg-brand-50 border-brand-500 text-brand-800 shadow-brand-500/10' : 'bg-white/80 border-transparent hover:border-brand-300 text-neutral-600 hover:bg-white'}`}>
+                  <button key={pm} type="button" onClick={() => setPaymentMethod(pm)} className={`py-3 px-1 flex flex-col items-center justify-center gap-1.5 rounded-[11px] border-2 transition-all active:scale-95 ${paymentMethod === pm ? 'bg-brand-50 border-brand-500 text-brand-800' : 'bg-white/80 border-transparent hover:border-brand-300 text-neutral-600 hover:bg-white'}`}>
                     {pm === 'Cash' ? <Banknote className="w-5 h-5" /> : pm === 'Card' ? <CreditCard className="w-5 h-5" /> : <Smartphone className="w-5 h-5" />}
                     <span className="text-[10px] font-bold tracking-wide uppercase">{pm === 'Online Transfer' ? 'Online' : pm}</span>
                   </button>
@@ -2090,10 +2093,10 @@ export default function Dashboard() {
         </div>
 
         {/* SECTION 3: CHECKOUT ACTIONS */}
-        <div className="p-4 lg:p-5 border-t border-black/10 bg-white/70 backdrop-blur-2xl shrink-0 shadow-[0_-4px_24px_-12px_rgba(0,0,0,0.1)]">
+        <div className="p-4 lg:p-5 border-t border-black/10 bg-white/70 shrink-0">
           {orderType === 'dine_in' && !editingOpenSaleId ? (
             <div className="grid grid-cols-1 gap-2.5">
-              <button type="button" onClick={handleGenerateKot} disabled={cart.length === 0 || checkoutSubmitting} className="w-full bg-brand-600 hover:bg-brand-700 disabled:bg-neutral-200 disabled:text-neutral-400 disabled:border-neutral-200 disabled:cursor-not-allowed text-white py-4 rounded-xl font-bold text-[15px] transition-all active:scale-[0.98] flex items-center justify-center gap-2 shadow-sm">
+              <button type="button" onClick={handleGenerateKot} disabled={cart.length === 0 || checkoutSubmitting} className="w-full bg-brand-600 hover:bg-brand-700 disabled:bg-neutral-200 disabled:text-neutral-400 disabled:border-neutral-200 disabled:cursor-not-allowed text-white py-4 rounded-[11px] font-bold text-[15px] transition-all active:scale-[0.98] flex items-center justify-center gap-2">
                 <ClipboardList className="w-5 h-5" /> {checkoutSubmitting ? 'Working…' : 'Send to Kitchen (KOT)'}
               </button>
               <p className="text-center text-xs text-neutral-400 font-medium">To collect payment, open Active Dine-in Orders.</p>
@@ -2104,7 +2107,7 @@ export default function Dashboard() {
                 type="button"
                 onClick={() => void submitTakeawayDeliveryKotAndPay()}
                 disabled={cart.length === 0 || checkoutSubmitting}
-                className="w-full bg-brand-600 hover:bg-brand-700 disabled:bg-neutral-200 disabled:text-neutral-400 disabled:cursor-not-allowed text-white py-4 rounded-xl font-bold text-[15px] shadow-lg shadow-brand-900/20 transition-all active:scale-[0.98] flex items-center justify-center gap-2"
+                className="w-full bg-brand-600 hover:bg-brand-700 disabled:bg-neutral-200 disabled:text-neutral-400 disabled:cursor-not-allowed text-white py-4 rounded-[11px] font-bold text-[15px] transition-all active:scale-[0.98] flex items-center justify-center gap-2"
               >
                 <ClipboardList className="w-5 h-5" /> {checkoutSubmitting ? 'Working…' : 'Send to Kitchen (KOT)'}
               </button>
@@ -2112,13 +2115,13 @@ export default function Dashboard() {
             </div>
           ) : editingOpenSaleId ? (
             <div className="grid grid-cols-1 gap-2.5">
-              <button type="button" onClick={submitUpdateOrder} disabled={cart.length === 0 || checkoutSubmitting} className="w-full bg-brand-600 hover:bg-brand-700 border-2 border-amber-500 text-white disabled:bg-neutral-200 disabled:text-neutral-400 disabled:border-neutral-200 disabled:cursor-not-allowed py-4 rounded-xl font-bold text-[15px] transition-all active:scale-[0.98] flex items-center justify-center gap-2 shadow-sm">
+              <button type="button" onClick={submitUpdateOrder} disabled={cart.length === 0 || checkoutSubmitting} className="w-full bg-brand-600 hover:bg-brand-700 border-2 border-amber-500 text-white disabled:bg-neutral-200 disabled:text-neutral-400 disabled:border-neutral-200 disabled:cursor-not-allowed py-4 rounded-[11px] font-bold text-[15px] transition-all active:scale-[0.98] flex items-center justify-center gap-2">
                 <ClipboardList className="w-5 h-5" /> {checkoutSubmitting ? 'Working…' : 'Update Order'}
               </button>
               <p className="text-center text-xs text-neutral-400 font-medium">To collect payment, open Active Dine-in Orders.</p>
             </div>
           ) : (
-            <button onClick={handleCheckout} disabled={cart.length === 0 || checkoutSubmitting} className="w-full bg-brand-600 hover:bg-brand-700 disabled:bg-neutral-200 disabled:text-neutral-400 disabled:cursor-not-allowed text-white py-4 rounded-2xl font-black text-lg shadow-lg shadow-brand-900/20 transition-all active:scale-[0.98] flex items-center justify-center gap-2 tracking-wide">
+            <button onClick={handleCheckout} disabled={cart.length === 0 || checkoutSubmitting} className="w-full bg-brand-600 hover:bg-brand-700 disabled:bg-neutral-200 disabled:text-neutral-400 disabled:cursor-not-allowed text-white py-4 rounded-[18px] font-black text-lg transition-all active:scale-[0.98] flex items-center justify-center gap-2 tracking-wide">
               <ShoppingBag className="w-5 h-5" /> {checkoutSubmitting ? 'Processing…' : 'PAY & PRINT'}
             </button>
           )}
@@ -2129,7 +2132,7 @@ export default function Dashboard() {
       {/* Mobile Checkout Drawer Toggle (Visible only on lg and down) */}
       <div className="lg:hidden fixed bottom-5 right-5 z-[55]">
         {!isRightPanelOpen && (
-          <button onClick={() => setIsRightPanelOpen(true)} className="bg-brand-600 text-white px-7 py-4 rounded-full font-black text-[15px] tracking-wide shadow-xl shadow-brand-900/40 flex items-center gap-2 hover:bg-brand-700 active:scale-95 transition-all outline-none focus:ring-4 focus:ring-brand-500/30">
+          <button onClick={() => setIsRightPanelOpen(true)} className="bg-brand-600 text-white px-7 py-4 rounded-full font-black text-[15px] tracking-wide flex items-center gap-2 hover:bg-brand-700 active:scale-95 transition-all outline-none focus:ring-4 focus:ring-brand-500/30">
             <ShoppingBag className="w-5 h-5"/> Checkout <span className="opacity-60 mx-1.5 font-normal">|</span> {formatCurrency(total)}
           </button>
         )}

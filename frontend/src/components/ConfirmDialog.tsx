@@ -78,14 +78,14 @@ export default function ConfirmDialogProvider() {
           <button
             type="button"
             onClick={handleCancel}
-            className="min-h-[44px] px-5 py-2.5 text-sm font-medium text-soot-700 bg-white border border-soot-300 rounded-lg hover:bg-soot-100 transition-colors"
+            className="min-h-[44px] px-5 py-2.5 text-sm font-medium text-soot-700 bg-white border border-soot-300 rounded-[8px] hover:bg-soot-100 transition-colors"
           >
             {opts.cancelLabel || 'Cancel'}
           </button>
           <button
             type="button"
             onClick={handleConfirm}
-            className={`min-h-[44px] px-5 py-2.5 text-sm font-medium text-white rounded-lg transition-colors ${
+            className={`min-h-[44px] px-5 py-2.5 text-sm font-medium text-white rounded-[8px] transition-colors ${
               isDanger
                 ? 'bg-red-600 hover:bg-red-700'
                 : 'bg-brand-600 hover:bg-brand-700'

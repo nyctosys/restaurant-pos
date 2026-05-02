@@ -14,7 +14,7 @@ import {
 
 const baseNavItems = [
   { icon: ShoppingBag, path: '/dashboard', label: 'Order', allowedRoles: ['owner', 'manager', 'cashier'] },
-  { icon: UtensilsCrossed, path: '/dine-in', label: 'Dine-in', allowedRoles: ['owner', 'manager', 'cashier'] },
+  { icon: UtensilsCrossed, path: '/dine-in', label: 'Open Orders', allowedRoles: ['owner', 'manager', 'cashier'] },
   { icon: BookOpen, path: '/menu', label: 'Menu', allowedRoles: ['owner', 'manager', 'cashier', 'inventory_manager'] },
   { icon: Package, path: '/inventory', label: 'Inventory', allowedRoles: ['owner', 'manager', 'cashier', 'inventory_manager'] },
   { icon: BarChart3, path: '/reports', label: 'Reports', allowedRoles: ['owner'] },
@@ -69,15 +69,10 @@ export default function BaseLayout() {
     return () => window.clearInterval(id);
   }, [isAuthPage, refreshActiveDineInCount]);
 
-  /** Kitchen display (KDS): full viewport — no POS rail; same canvas + glass chrome as POS */
+  /** Kitchen display (KDS): full viewport — no POS rail; same layout, Apple chrome */
   if (location.pathname === '/kitchen') {
     return (
-      <div className="h-screen min-h-[100dvh] flex bg-canvas/40 text-neutral-900 font-sans overflow-hidden relative">
-        <div className="fixed inset-0 z-0 pointer-events-none overflow-hidden">
-          <div className="absolute top-[-10%] left-[-10%] w-[50vw] h-[50vw] rounded-full bg-brand-200/50 mix-blend-multiply filter blur-[100px] animate-blob dark:bg-brand-500/18 dark:mix-blend-screen dark:opacity-90" />
-          <div className="absolute top-[20%] right-[-10%] w-[45vw] h-[45vw] rounded-full bg-gold-200/50 mix-blend-multiply filter blur-[100px] animate-blob animation-delay-2000 dark:bg-gold-600/15 dark:mix-blend-screen dark:opacity-90" />
-          <div className="absolute bottom-[-20%] left-[20%] w-[60vw] h-[60vw] rounded-full bg-brand-300/40 mix-blend-multiply filter blur-[100px] animate-blob animation-delay-4000 dark:bg-brand-400/12 dark:mix-blend-screen dark:opacity-85" />
-        </div>
+      <div className="h-screen min-h-[100dvh] flex bg-canvas text-neutral-900 font-sans overflow-hidden relative">
         <main className="flex-1 min-h-0 min-w-0 overflow-hidden m-2 lg:m-3 xl:m-4 glass-panel z-10">
           <Outlet />
         </main>
@@ -87,13 +82,7 @@ export default function BaseLayout() {
 
   if (isAuthPage) {
     return (
-      <div className="min-h-screen min-h-[100dvh] bg-canvas/40 text-neutral-900 font-sans flex items-stretch justify-center p-4 lg:p-6 relative overflow-hidden">
-        {/* Ambient wash — multiply reads muddy on dark; use soft additive glows */}
-        <div className="fixed inset-0 z-0 pointer-events-none overflow-hidden">
-          <div className="absolute top-[-10%] left-[-10%] w-[50vw] h-[50vw] rounded-full bg-brand-200/50 mix-blend-multiply filter blur-[100px] animate-blob dark:bg-brand-500/18 dark:mix-blend-screen dark:opacity-90" />
-          <div className="absolute top-[20%] right-[-10%] w-[45vw] h-[45vw] rounded-full bg-gold-200/50 mix-blend-multiply filter blur-[100px] animate-blob animation-delay-2000 dark:bg-gold-600/15 dark:mix-blend-screen dark:opacity-90" />
-          <div className="absolute bottom-[-20%] left-[20%] w-[60vw] h-[60vw] rounded-full bg-brand-300/40 mix-blend-multiply filter blur-[100px] animate-blob animation-delay-4000 dark:bg-brand-400/12 dark:mix-blend-screen dark:opacity-85" />
-        </div>
+      <div className="min-h-screen min-h-[100dvh] bg-canvas text-neutral-900 font-sans flex items-stretch justify-center p-4 lg:p-6 relative overflow-hidden">
         <div className="w-full max-w-md lg:max-w-lg flex items-center justify-center z-10">
           <Outlet />
         </div>
@@ -102,20 +91,14 @@ export default function BaseLayout() {
   }
 
   return (
-    <div className="h-screen min-h-[100dvh] flex bg-canvas/40 text-neutral-900 font-sans overflow-hidden relative">
-      <div className="fixed inset-0 z-0 pointer-events-none overflow-hidden">
-        <div className="absolute top-[-10%] left-[-10%] w-[50vw] h-[50vw] rounded-full bg-brand-200/50 mix-blend-multiply filter blur-[100px] animate-blob dark:bg-brand-500/18 dark:mix-blend-screen dark:opacity-90" />
-        <div className="absolute top-[20%] right-[-10%] w-[45vw] h-[45vw] rounded-full bg-gold-200/50 mix-blend-multiply filter blur-[100px] animate-blob animation-delay-2000 dark:bg-gold-600/15 dark:mix-blend-screen dark:opacity-90" />
-        <div className="absolute bottom-[-20%] left-[20%] w-[60vw] h-[60vw] rounded-full bg-brand-300/40 mix-blend-multiply filter blur-[100px] animate-blob animation-delay-4000 dark:bg-brand-400/12 dark:mix-blend-screen dark:opacity-85" />
-      </div>
-      
+    <div className="h-screen min-h-[100dvh] flex bg-canvas text-neutral-900 font-sans overflow-hidden relative">
       {/* Vertical rail: iPad landscape-first (lg) touch targets; xl+ shows icon labels */}
-      <aside className="w-[84px] min-w-[84px] xl:w-[108px] xl:min-w-[108px] glass-panel glass-hover flex flex-col items-center py-4 lg:py-5 shrink-0 m-2 lg:m-3 xl:m-4 z-10">
+      <aside className="w-[84px] min-w-[84px] xl:w-[108px] xl:min-w-[108px] bg-black text-white border border-black rounded-[18px] flex flex-col items-center py-4 lg:py-5 shrink-0 m-2 lg:m-3 xl:m-4 z-10">
         {/* App mark — first nav item is role-appropriate “home” (e.g. Order vs Menu) */}
         <div className="mb-6 lg:mb-8">
           <Link
             to={navItems[0]?.path ?? '/dashboard'}
-            className="block rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 focus-visible:ring-offset-transparent"
+            className="block rounded-[11px] focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-offset-2 focus-visible:ring-offset-black"
             aria-label={navItems[0] ? `${navItems[0].label} — home` : 'Home'}
           >
             <img
@@ -123,7 +106,7 @@ export default function BaseLayout() {
               alt=""
               width={64}
               height={64}
-              className="w-14 h-14 xl:w-16 xl:h-16 object-contain drop-shadow-md"
+              className="w-14 h-14 xl:w-16 xl:h-16 object-contain"
               decoding="async"
             />
           </Link>
@@ -144,17 +127,17 @@ export default function BaseLayout() {
                 key={item.path}
                 to={item.path}
                 aria-label={navLabel}
-                className={`touch-target flex flex-col items-center justify-center gap-0.5 rounded-xl transition-all duration-200 relative ${
+                className={`touch-target flex flex-col items-center justify-center gap-0.5 rounded-[11px] transition-colors duration-200 relative ${
                   isActive
-                    ? 'glass-card text-brand-900 shadow-lg shadow-gold-500/20 border-gold-300/70 p-3 xl:p-2 w-14 h-14 xl:w-full xl:h-auto'
-                    : 'text-brand-700/90 hover:text-brand-900 hover:bg-white/20 active:bg-white/25 p-3 xl:p-2 w-14 h-14 xl:w-full xl:h-auto'
+                    ? 'bg-white text-brand-700 border border-white p-3 xl:p-2 w-14 h-14 xl:w-full xl:h-auto'
+                    : 'text-white/78 hover:text-white hover:bg-white/12 active:bg-white/18 p-3 xl:p-2 w-14 h-14 xl:w-full xl:h-auto'
                 }`}
               >
                 <span className="relative inline-flex shrink-0">
                   <Icon className="w-5 h-5 shrink-0 xl:w-[22px] xl:h-[22px]" strokeWidth={isActive ? 2.5 : 1.8} />
                   {dineInBadge && (
                     <span
-                      className="absolute -top-1.5 -right-2 min-w-[1.125rem] h-[1.125rem] px-0.5 flex items-center justify-center rounded-full bg-gold-600 text-[9px] font-bold text-white leading-none shadow-sm border border-white/30 dark:border-brand-900/40"
+                      className="absolute -top-1.5 -right-2 min-w-[1.125rem] h-[1.125rem] px-0.5 flex items-center justify-center rounded-full bg-gold-600 text-[9px] font-bold text-white leading-none border border-white/30 dark:border-brand-900/40"
                       aria-hidden
                     >
                       {activeDineInCount > 99 ? '99+' : activeDineInCount}
@@ -175,13 +158,13 @@ export default function BaseLayout() {
         <div className="flex flex-col items-center gap-3 mt-auto w-full px-0.5 min-w-0">
           <div className="flex flex-col items-center gap-1 w-full min-w-0">
             <div
-              className="w-10 h-10 xl:w-11 xl:h-11 rounded-full glass-card flex items-center justify-center text-gold-600 text-sm font-bold border-gold-300/60 shrink-0"
+              className="w-10 h-10 xl:w-11 xl:h-11 rounded-full bg-white/10 border border-white/16 flex items-center justify-center text-white text-sm font-semibold shrink-0"
               aria-hidden
             >
               {user?.username?.charAt(0).toUpperCase() || 'U'}
             </div>
             <p
-              className="w-full text-center text-[9px] xl:text-[10px] font-semibold leading-snug text-brand-800 truncate px-0.5"
+              className="w-full text-center text-[9px] xl:text-[10px] font-semibold leading-snug text-white/78 truncate px-0.5"
               title={user?.username || 'Operator'}
             >
               {user?.username || 'Operator'}
@@ -191,7 +174,7 @@ export default function BaseLayout() {
             type="button"
             onClick={handleLogout}
             aria-label="Logout"
-            className="touch-target flex items-center justify-center rounded-xl text-brand-700/90 hover:text-brand-900 hover:bg-white/20 transition-colors"
+            className="touch-target flex items-center justify-center rounded-[11px] text-white/78 hover:text-white hover:bg-white/12 transition-colors"
           >
             <LogOut className="w-5 h-5 xl:w-[22px] xl:h-[22px]" strokeWidth={1.8} />
           </button>

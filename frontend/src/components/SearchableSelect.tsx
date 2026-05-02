@@ -166,7 +166,7 @@ export default function SearchableSelect({
         onClick={() => setOpen(current => !current)}
         onKeyDown={handleTriggerKeyDown}
         className={cx(
-          'flex w-full items-center justify-between gap-3 rounded-lg border border-soot-200 bg-white/80 px-4 py-2.5 text-left text-sm text-soot-800 transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500 disabled:cursor-not-allowed disabled:opacity-50',
+          'flex w-full items-center justify-between gap-3 rounded-[8px] border border-soot-200 bg-white/80 px-4 py-2.5 text-left text-sm text-soot-800 transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500 disabled:cursor-not-allowed disabled:opacity-50',
           className
         )}
         aria-haspopup="listbox"
@@ -186,7 +186,7 @@ export default function SearchableSelect({
             <div
               ref={portalRef}
               className={cx(
-                'fixed z-[120] min-w-[12rem] overflow-hidden rounded-xl border border-soot-200 bg-white/95 shadow-xl backdrop-blur-md searchable-select-dropdown',
+                'fixed z-[120] min-w-[12rem] overflow-hidden rounded-[11px] border border-soot-200 bg-white/95 searchable-select-dropdown',
                 dropdownClassName
               )}
               style={{
@@ -247,7 +247,7 @@ export default function SearchableSelect({
                           setOpen(false);
                         }}
                         className={cx(
-                          'flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left text-sm transition-colors',
+                          'flex w-full items-center justify-between gap-3 rounded-[8px] px-3 py-2 text-left text-sm transition-colors',
                           option.disabled
                             ? 'cursor-not-allowed text-soot-300'
                             : 'text-soot-700 hover:bg-brand-50 hover:text-soot-900',

@@ -134,7 +134,7 @@ export default function SuppliersTab() {
         <h3 className="text-xl font-bold text-soot-900 hidden sm:block">Supplier Directory</h3>
         <button
           onClick={handleOpenAdd}
-          className="flex items-center gap-2 bg-brand-700 text-white px-4 py-2 rounded-lg font-medium hover:bg-brand-600 touch-target transition-colors ml-auto"
+          className="flex items-center gap-2 bg-brand-700 text-white px-4 py-2 rounded-[8px] font-medium hover:bg-brand-600 touch-target transition-colors ml-auto"
         >
           <Plus className="w-4 h-4" />
           Add supplier
@@ -185,14 +185,14 @@ export default function SuppliersTab() {
              {/* Header */}
              <div className="flex items-center justify-between px-6 py-4 border-b border-neutral-200/60 bg-white/25 shrink-0">
                 <h3 className="text-lg font-bold text-neutral-900">{editingSupplier ? 'Edit supplier' : 'Add supplier'}</h3>
-                <button onClick={() => setShowModal(false)} className="p-1.5 rounded-lg hover:bg-neutral-200 transition-colors">
+                <button onClick={() => setShowModal(false)} className="p-1.5 rounded-[8px] hover:bg-neutral-200 transition-colors">
                   <X className="w-5 h-5 text-neutral-500" />
                 </button>
              </div>
 
              <form onSubmit={handleSubmit} className="p-6 space-y-4 overflow-y-auto min-h-0 flex-1">
                {formError && (
-                 <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-2 text-sm font-medium">
+                 <div className="bg-red-50 border border-red-200 text-red-700 rounded-[8px] px-4 py-2 text-sm font-medium">
                    {formError}
                  </div>
                )}
@@ -244,8 +244,8 @@ export default function SuppliersTab() {
                </div>
 
                <div className="flex gap-3 pt-4">
-                 <button type="button" onClick={() => setShowModal(false)} className="flex-1 px-4 py-2.5 border border-neutral-200 rounded-lg text-sm font-medium text-neutral-600 hover:bg-neutral-50 transition-colors">Cancel</button>
-                 <button type="submit" disabled={submitting} className="flex-1 px-4 py-2.5 bg-brand-700 text-white rounded-lg text-sm font-medium hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 touch-target">
+                 <button type="button" onClick={() => setShowModal(false)} className="flex-1 px-4 py-2.5 border border-neutral-200 rounded-[8px] text-sm font-medium text-neutral-600 hover:bg-neutral-50 transition-colors">Cancel</button>
+                 <button type="submit" disabled={submitting} className="flex-1 px-4 py-2.5 bg-brand-700 text-white rounded-[8px] text-sm font-medium hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 touch-target">
                    {submitting && <Loader2 className="w-4 h-4 animate-spin" />}
                    {editingSupplier ? 'Save changes' : 'Add supplier'}
                  </button>

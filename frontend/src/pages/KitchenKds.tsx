@@ -209,27 +209,27 @@ const OrderCard = memo(function OrderCard({
   const tableName = order.table_name || (snap as Record<string, string>).table_name;
   const customerName = (snap as Record<string, string>).customer_name;
 
-  let cardBg = 'bg-white/80 border-white/60 shadow-black/5';
+  let cardBg = 'bg-white/80 border-white/60';
   let timerColor = 'text-neutral-700';
 
   if (order.is_modified) {
-    cardBg = 'bg-orange-100/95 border-orange-400 shadow-orange-900/15 shadow-lg ring-2 ring-orange-400/45';
+    cardBg = 'bg-orange-100/95 border-orange-400 ring-2 ring-orange-400/45';
     timerColor = 'text-orange-700';
   } else if (priority === 'yellow') {
-    cardBg = 'bg-amber-100/90 border-amber-300 shadow-amber-900/10 shadow-lg ring-1 ring-amber-400/50';
+    cardBg = 'bg-amber-100/90 border-amber-300 ring-1 ring-amber-400/50';
     timerColor = 'text-amber-700';
   } else if (priority === 'red') {
-    cardBg = 'bg-red-100/90 border-red-400 shadow-red-900/15 shadow-xl ring-2 ring-red-500/50';
+    cardBg = 'bg-red-100/90 border-red-400 ring-2 ring-red-500/50';
     timerColor = 'text-red-700';
   }
 
   return (
     <div
-      className={`flex flex-col relative rounded-2xl overflow-hidden backdrop-blur-md border transition-all h-[460px] ${cardBg} ${priority === 'white' ? otCfg.bgClass : ''}`}
+      className={`flex flex-col relative rounded-[18px] overflow-hidden border transition-all h-[460px] ${cardBg} ${priority === 'white' ? otCfg.bgClass : ''}`}
       style={{ animation: '0.3s ease-out 0s 1 normal forwards running kds-pop' }}
     >
       {/* Subtle stripe across top */}
-      <div className={`absolute top-0 left-0 right-0 h-1.5 z-10 ${priority === 'white' ? 'bg-gradient-to-r from-white to-white/50' : priority === 'yellow' ? 'bg-amber-500' : 'bg-red-600'}`} />
+      <div className={`absolute top-0 left-0 right-0 h-1.5 z-10 ${priority === 'white' ? 'bg-white' : priority === 'yellow' ? 'bg-amber-500' : 'bg-red-600'}`} />
 
       {/* Card Header */}
       <div className="px-5 pt-6 pb-3 flex justify-between items-start border-b border-black/5 shrink-0">
@@ -271,7 +271,7 @@ const OrderCard = memo(function OrderCard({
       <div className="flex-1 px-5 py-4 flex flex-col gap-3 overflow-y-auto custom-scrollbar">
         {lines.map((line, idx) => (
           <div key={idx} className="flex gap-3 items-start">
-            <div className="min-w-[36px] h-9 rounded-lg shrink-0 flex items-center justify-center bg-white border border-black/5 font-black text-[15px] text-neutral-900 shadow-sm">
+            <div className="min-w-[36px] h-9 rounded-[8px] shrink-0 flex items-center justify-center bg-white border border-black/5 font-black text-[15px] text-neutral-900">
               {line.quantity}×
             </div>
             <div className="flex-1 min-w-0 pt-0.5">
@@ -280,14 +280,14 @@ const OrderCard = memo(function OrderCard({
               {line.modifiers && line.modifiers.length > 0 && (
                 <div className="flex flex-wrap gap-1.5 mt-2">
                   {line.modifiers.map((m, mi) => (
-                    <span key={mi} className="text-[11px] font-bold px-2 py-0.5 rounded flex items-center bg-white/60 border border-white text-neutral-700 shadow-sm">
+                    <span key={mi} className="text-[11px] font-bold px-2 py-0.5 rounded flex items-center bg-white/60 border border-white text-neutral-700">
                       {m}
                     </span>
                   ))}
                 </div>
               )}
               {line.children && line.children.length > 0 && (
-                <div className="mt-2 space-y-1.5 rounded-xl bg-black/5 px-3 py-2">
+                <div className="mt-2 space-y-1.5 rounded-[11px] bg-black/5 px-3 py-2">
                   {line.children.map((child, childIndex) => (
                     <div key={`${idx}-${childIndex}`} className="flex items-start gap-2 text-[12px] font-semibold text-neutral-700">
                       <span className="shrink-0 text-neutral-500">{child.quantity}×</span>
@@ -307,14 +307,14 @@ const OrderCard = memo(function OrderCard({
 
         {/* Modifications Alert */}
         {order.modifications && order.modifications.length > 0 && (
-          <div className="mt-3 rounded-xl bg-amber-500/15 border border-amber-500/30 backdrop-blur-md p-3 shadow-inner">
+          <div className="mt-3 rounded-[11px] bg-amber-500/15 border border-amber-500/30 p-3">
             <div className="flex items-center gap-1.5 mb-2 font-bold text-amber-900 text-[11px] uppercase tracking-wider">
               <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
               Modifications
             </div>
             <ul className="space-y-1.5">
               {order.modifications.map((mod: any, i: number) => (
-                <li key={i} className="flex gap-2 items-start text-sm font-semibold text-amber-950 bg-white/40 border border-white/50 rounded-lg p-2.5 shadow-sm">
+                <li key={i} className="flex gap-2 items-start text-sm font-semibold text-amber-950 bg-white/40 border border-white/50 rounded-[8px] p-2.5">
                   <span className="shrink-0 text-amber-700 font-black mt-0.5">
                     {mod.type === 'add' ? '+' : mod.type === 'remove' ? '-' : '•'}
                   </span>
@@ -337,7 +337,7 @@ const OrderCard = memo(function OrderCard({
           <button
             disabled={isBusy}
             onClick={() => onUpdateStatus(order.id, 'preparing')}
-            className="w-full py-3.5 rounded-xl font-black text-sm uppercase tracking-wider flex items-center justify-center gap-2 bg-brand-700 text-white hover:bg-brand-600 transition-all shadow-sm active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full py-3.5 rounded-[11px] font-black text-sm uppercase tracking-wider flex items-center justify-center gap-2 bg-brand-700 text-white hover:bg-brand-600 transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Play className="w-4 h-4 fill-white" />
             {isBusy ? 'Wait...' : 'Start Preparing'}
@@ -347,14 +347,14 @@ const OrderCard = memo(function OrderCard({
           <button
             disabled={isBusy}
             onClick={() => onUpdateStatus(order.id, 'ready')}
-            className="w-full py-3.5 rounded-xl font-black text-sm uppercase tracking-wider flex items-center justify-center gap-2 bg-emerald-600 text-white hover:bg-emerald-500 transition-all shadow-sm active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed border border-emerald-500"
+            className="w-full py-3.5 rounded-[11px] font-black text-sm uppercase tracking-wider flex items-center justify-center gap-2 bg-emerald-600 text-white hover:bg-emerald-500 transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed border border-emerald-500"
           >
             <CheckCircle2 className="w-4 h-4" />
             {isBusy ? 'Wait...' : 'Order Ready'}
           </button>
         )}
         {ks === 'ready' && (
-          <div className="w-full py-3.5 rounded-xl font-black text-sm uppercase tracking-wider flex items-center justify-center gap-2 bg-neutral-100 text-neutral-400 border border-neutral-200">
+          <div className="w-full py-3.5 rounded-[11px] font-black text-sm uppercase tracking-wider flex items-center justify-center gap-2 bg-neutral-100 text-neutral-400 border border-neutral-200">
             <CheckCircle2 className="w-4 h-4" />
             Ready
           </div>
@@ -459,10 +459,10 @@ export default function KitchenKds() {
   return (
     <div className="flex flex-col h-screen min-h-0 bg-neutral-50/50 text-neutral-900 font-sans overflow-hidden">
       {/* Header */}
-      <header className="flex items-center justify-between px-6 py-4 bg-white/60 backdrop-blur-md border-b border-white/40 shrink-0 shadow-sm z-10">
+      <header className="flex items-center justify-between px-6 py-4 bg-white/60 border-b border-white/40 shrink-0 z-10">
         <div className="flex items-center gap-8">
           <div className="flex items-center gap-3 text-2xl font-black text-neutral-800 tracking-tight">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-600 to-brand-800 flex items-center justify-center text-white shadow-brand-900/20 shadow-lg">
+            <div className="w-10 h-10 rounded-[11px] bg-brand-700 flex items-center justify-center text-white">
               <ChefHat className="w-6 h-6" />
             </div>
             <span>Kitchen Display</span>
@@ -473,11 +473,11 @@ export default function KitchenKds() {
           </div>
         </div>
         <div className="flex items-center gap-3">
-          <button className="w-11 h-11 flex items-center justify-center rounded-xl bg-white border border-neutral-200 text-neutral-600 hover:text-brand-600 hover:bg-brand-50 hover:border-brand-200 transition-all shadow-sm active:scale-95" onClick={() => void load()} title="Refresh">
+          <button className="w-11 h-11 flex items-center justify-center rounded-[11px] bg-white border border-neutral-200 text-neutral-600 hover:text-brand-600 hover:bg-brand-50 hover:border-brand-200 transition-all active:scale-95" onClick={() => void load()} title="Refresh">
             <RefreshCw className="w-5 h-5" />
           </button>
           <button
-            className="w-11 h-11 flex items-center justify-center rounded-xl bg-white border border-neutral-200 text-neutral-600 hover:text-red-600 hover:bg-red-50 hover:border-red-200 transition-all shadow-sm active:scale-95"
+            className="w-11 h-11 flex items-center justify-center rounded-[11px] bg-white border border-neutral-200 text-neutral-600 hover:text-red-600 hover:bg-red-50 hover:border-red-200 transition-all active:scale-95"
             onClick={() => { localStorage.removeItem('auth_token'); localStorage.removeItem('user'); navigate('/login', { replace: true }); }}
             title="Log out"
           >
@@ -487,7 +487,7 @@ export default function KitchenKds() {
       </header>
 
       {/* Tabs */}
-      <nav className="flex items-center gap-3 px-6 py-3 bg-white/30 shrink-0 border-b border-white/40 shadow-[0_4px_12px_rgba(0,0,0,0.02)] z-[1]">
+      <nav className="flex items-center gap-3 px-6 py-3 bg-white/30 shrink-0 border-b border-white/40 z-[1]">
         {(['placed', 'preparing', 'ready'] as const).map(tabKey => {
           const isActive = activeTab === tabKey;
           const labels: Record<string, string> = { placed: 'NEW QUEUE', preparing: 'PREPARING', ready: 'READY' };
@@ -495,9 +495,9 @@ export default function KitchenKds() {
             <button
               key={tabKey}
               onClick={() => setActiveTab(tabKey)}
-              className={`flex items-center gap-2.5 px-6 py-2.5 rounded-xl font-bold text-[13px] transition-all tracking-wide ${
+              className={`flex items-center gap-2.5 px-6 py-2.5 rounded-[11px] font-bold text-[13px] transition-all tracking-wide ${
                 isActive
-                  ? 'bg-white border text-brand-800 border-white shadow-sm ring-1 ring-black/5'
+                  ? 'bg-white border text-brand-800 border-white ring-1 ring-black/5'
                   : 'bg-transparent text-neutral-500 border border-transparent hover:bg-white/40'
               }`}
             >
@@ -512,12 +512,12 @@ export default function KitchenKds() {
         })}
       </nav>
 
-      {error && <div className="m-6 mb-0 p-4 rounded-xl bg-red-50 border border-red-200 text-red-800 font-semibold shadow-sm">{error}</div>}
+      {error && <div className="m-6 mb-0 p-4 rounded-[11px] bg-red-50 border border-red-200 text-red-800 font-semibold">{error}</div>}
 
       {/* Collective queue totals — sums items across all tickets in this tab */}
       {!loading && filtered.length > 0 && collectiveLines.length > 0 && (
         <div className="shrink-0 px-6 pt-4 pb-0">
-          <div className="rounded-2xl border border-white/60 bg-white/70 backdrop-blur-md shadow-sm px-5 py-4 ring-1 ring-black/5">
+          <div className="rounded-[18px] border border-white/60 bg-white/70 px-5 py-4 ring-1 ring-black/5">
             <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 mb-3">
               <span className="text-[11px] font-black uppercase tracking-widest text-neutral-500">Queue totals</span>
               <span className="text-[11px] font-semibold text-neutral-400">
@@ -530,7 +530,7 @@ export default function KitchenKds() {
               {collectiveLines.map((row, i) => (
                 <div
                   key={`${row.product_title}-${row.variant_sku_suffix ?? ''}-${row.modifiers.join(',')}-${i}`}
-                  className="inline-flex items-center gap-2 rounded-xl border border-brand-200/80 bg-gradient-to-br from-brand-50/95 to-amber-50/40 px-3.5 py-2 shadow-sm"
+                  className="inline-flex items-center gap-2 rounded-[11px] border border-brand-200/80 bg-brand-50 px-3.5 py-2"
                 >
                   <span className="min-w-[2.25rem] text-center font-black text-lg tabular-nums text-brand-900 leading-none">
                     {row.quantity}×

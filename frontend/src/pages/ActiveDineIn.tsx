@@ -78,7 +78,7 @@ const kitchenStatusConfig: Record<
   placed: {
     label: 'Sent',
     Icon: Bell,
-    cardClass: 'bg-sky-50/70 border-sky-200/80 shadow-sky-900/5',
+    cardClass: 'bg-sky-50/70 border-sky-200/80',
     badgeClass: 'bg-sky-100 text-sky-800 border-sky-300',
     itemPanelClass: 'bg-sky-50/55 border-sky-100/80',
     quantityClass: 'bg-sky-100 text-sky-900',
@@ -86,7 +86,7 @@ const kitchenStatusConfig: Record<
   preparing: {
     label: 'Preparing',
     Icon: ChefHat,
-    cardClass: 'bg-amber-50/75 border-amber-300/80 shadow-amber-900/10',
+    cardClass: 'bg-amber-50/75 border-amber-300/80',
     badgeClass: 'bg-amber-100 text-amber-800 border-amber-300',
     itemPanelClass: 'bg-amber-50/60 border-amber-100/90',
     quantityClass: 'bg-amber-100 text-amber-900',
@@ -94,7 +94,7 @@ const kitchenStatusConfig: Record<
   ready: {
     label: 'Ready',
     Icon: CheckCircle2,
-    cardClass: 'bg-emerald-50/80 border-emerald-300/85 shadow-emerald-900/10',
+    cardClass: 'bg-emerald-50/80 border-emerald-300/85',
     badgeClass: 'bg-emerald-100 text-emerald-800 border-emerald-300',
     itemPanelClass: 'bg-emerald-50/60 border-emerald-100/90',
     quantityClass: 'bg-emerald-100 text-emerald-900',
@@ -150,7 +150,7 @@ function OpenOrderCard({
   const KitchenStatusIcon = kitchenStatus.Icon;
 
   return (
-    <li className={`glass-card rounded-xl p-3 flex flex-col gap-2 border min-h-[210px] shadow-sm transition-colors duration-300 ${kitchenStatus.cardClass}`}>
+    <li className={`glass-card rounded-[11px] p-3 flex flex-col gap-2 border min-h-[210px] transition-colors duration-300 ${kitchenStatus.cardClass}`}>
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <p className="text-[10px] font-semibold text-neutral-500 uppercase tracking-wide">{orderKindLabel(sale)}</p>
@@ -174,7 +174,7 @@ function OpenOrderCard({
         {new Date(sale.created_at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}
       </p>
       {sale.items && sale.items.length > 0 && (
-        <div className={`rounded-lg border px-2.5 py-2 space-y-1.5 transition-colors duration-300 ${kitchenStatus.itemPanelClass}`}>
+        <div className={`rounded-[8px] border px-2.5 py-2 space-y-1.5 transition-colors duration-300 ${kitchenStatus.itemPanelClass}`}>
           <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-neutral-500">
             Items to prepare
           </p>
@@ -234,7 +234,7 @@ function OpenOrderCard({
           type="button"
           onClick={() => onPay(sale)}
           disabled={sale.status !== 'open'}
-          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-brand-700 text-white text-xs font-semibold hover:bg-brand-600"
+          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-[8px] bg-brand-700 text-white text-xs font-semibold hover:bg-brand-600"
         >
           <CreditCard className="w-3.5 h-3.5" />
           {sale.status === 'open' ? 'Pay' : 'Paid'}
@@ -244,7 +244,7 @@ function OpenOrderCard({
           onClick={() => onModify(sale)}
           disabled={modifyDisabled}
           title={modifyDisabled ? 'Cannot modify — kitchen is already working on this order' : 'Modify order'}
-          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg glass-card text-xs font-semibold text-brand-900 disabled:opacity-40 disabled:cursor-not-allowed disabled:pointer-events-none"
+          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-[8px] glass-card text-xs font-semibold text-brand-900 disabled:opacity-40 disabled:cursor-not-allowed disabled:pointer-events-none"
         >
           <Pencil className="w-3.5 h-3.5" />
           Modify
@@ -252,7 +252,7 @@ function OpenOrderCard({
         <button
           type="button"
           onClick={() => onVoid(sale)}
-          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-red-200 text-red-700 text-xs font-semibold hover:bg-red-50"
+          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-[8px] border border-red-200 text-red-700 text-xs font-semibold hover:bg-red-50"
         >
           <Ban className="w-3.5 h-3.5" />
           Void
@@ -262,7 +262,7 @@ function OpenOrderCard({
             type="button"
             onClick={() => onDelivered(sale)}
             disabled={deliveringSaleId === sale.id}
-            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-emerald-200 text-emerald-700 text-xs font-semibold hover:bg-emerald-50 disabled:opacity-60"
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-[8px] border border-emerald-200 text-emerald-700 text-xs font-semibold hover:bg-emerald-50 disabled:opacity-60"
           >
             <CheckCircle2 className="w-3.5 h-3.5" />
             {deliveringSaleId === sale.id ? 'Updating…' : 'Delivered'}
@@ -272,7 +272,7 @@ function OpenOrderCard({
           <button
             type="button"
             onClick={() => onAssignRider(sale)}
-            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-amber-200 text-amber-800 text-xs font-semibold hover:bg-amber-50"
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-[8px] border border-amber-200 text-amber-800 text-xs font-semibold hover:bg-amber-50"
           >
             <UserPlus className="w-3.5 h-3.5" />
             Assign rider
@@ -283,7 +283,7 @@ function OpenOrderCard({
             type="button"
             onClick={() => onServed(sale)}
             disabled={servingSaleId === sale.id}
-            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-emerald-200 text-emerald-700 text-xs font-semibold hover:bg-emerald-50 disabled:opacity-60"
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-[8px] border border-emerald-200 text-emerald-700 text-xs font-semibold hover:bg-emerald-50 disabled:opacity-60"
           >
             <CheckCircle2 className="w-3.5 h-3.5" />
             {servingSaleId === sale.id ? 'Updating…' : 'Served'}
@@ -523,7 +523,7 @@ export default function ActiveDineIn() {
     <div className="flex flex-col h-full min-h-0 page-padding">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6 shrink-0">
         <div className="flex items-center gap-3 min-w-0">
-          <div className="w-12 h-12 rounded-2xl bg-brand-100/80 border border-brand-200 flex items-center justify-center shrink-0">
+          <div className="w-12 h-12 rounded-[18px] bg-brand-100/80 border border-brand-200 flex items-center justify-center shrink-0">
             <UtensilsCrossed className="w-6 h-6 text-brand-800" />
           </div>
           <div className="min-w-0">
@@ -534,7 +534,7 @@ export default function ActiveDineIn() {
         <button
           type="button"
           onClick={() => void load()}
-          className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl glass-card text-sm font-semibold text-brand-800 hover:bg-white/50"
+          className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-[11px] glass-card text-sm font-semibold text-brand-800 hover:bg-white/50"
         >
           <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
           Refresh
@@ -542,7 +542,7 @@ export default function ActiveDineIn() {
       </div>
 
       {error && (
-        <div className="mb-4 px-4 py-3 rounded-xl bg-red-50 text-red-800 text-sm border border-red-200 shrink-0">
+        <div className="mb-4 px-4 py-3 rounded-[11px] bg-red-50 text-red-800 text-sm border border-red-200 shrink-0">
           {error}
           <button type="button" className="ml-2 underline font-medium" onClick={() => setError(null)}>
             Dismiss
@@ -556,7 +556,7 @@ export default function ActiveDineIn() {
           {readyAlerts.map(alert => (
             <div
               key={alert.id}
-              className="flex items-center gap-3 px-4 py-3 rounded-xl bg-emerald-600 text-white shadow-lg border border-emerald-400"
+              className="flex items-center gap-3 px-4 py-3 rounded-[11px] bg-emerald-600 text-white border border-emerald-400"
               role="alert"
             >
               <Bell className="w-5 h-5 shrink-0 animate-bounce" />
@@ -591,10 +591,10 @@ export default function ActiveDineIn() {
         <div className="flex-1 min-h-0 overflow-auto pb-2">
           <div className="grid gap-4 lg:grid-cols-3 items-start min-w-0">
             {orderColumns.map(({ key, title, empty, Icon }) => (
-              <section key={key} className="min-w-0 rounded-2xl border border-white/45 bg-white/25 backdrop-blur-xl p-2.5">
+              <section key={key} className="min-w-0 rounded-[18px] border border-white/45 bg-white/25 p-2.5">
                 <div className="flex items-start justify-between gap-3 mb-2.5">
                   <div className="flex items-center gap-2 min-w-0">
-                    <span className="w-9 h-9 rounded-xl bg-white/65 border border-white/70 flex items-center justify-center shrink-0">
+                    <span className="w-9 h-9 rounded-[11px] bg-white/65 border border-white/70 flex items-center justify-center shrink-0">
                       <Icon className="w-[18px] h-[18px] text-brand-800" />
                     </span>
                     <div className="min-w-0">
@@ -610,7 +610,7 @@ export default function ActiveDineIn() {
                 </div>
 
                 {groupedSales[key].length === 0 ? (
-                  <div className="min-h-[180px] rounded-xl border border-dashed border-white/70 bg-white/25 flex flex-col items-center justify-center text-center px-4 py-6 text-neutral-500">
+                  <div className="min-h-[180px] rounded-[11px] border border-dashed border-white/70 bg-white/25 flex flex-col items-center justify-center text-center px-4 py-6 text-neutral-500">
                     <Icon className="w-7 h-7 opacity-40 mb-2" />
                     <p className="text-sm font-semibold">{empty}</p>
                   </div>
@@ -641,7 +641,7 @@ export default function ActiveDineIn() {
       {assignModalSale && (
         <div className="fixed inset-0 z-[200] flex items-end sm:items-center justify-center glass-overlay px-4 pb-8 sm:p-6">
           <div
-            className="glass-floating rounded-t-3xl sm:rounded-2xl w-full max-w-md p-6 space-y-4"
+            className="glass-floating rounded-t-3xl sm:rounded-[18px] w-full max-w-md p-6 space-y-4"
             role="dialog"
             aria-labelledby="assign-rider-title"
           >
@@ -661,7 +661,7 @@ export default function ActiveDineIn() {
                 value={assignRiderName}
                 onChange={event => setAssignRiderName(event.target.value)}
                 placeholder="Select or type rider name"
-                className="w-full px-3 py-2.5 rounded-xl border border-neutral-200 bg-white/80 text-sm font-semibold text-neutral-900 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                className="w-full px-3 py-2.5 rounded-[11px] border border-neutral-200 bg-white/80 text-sm font-semibold text-neutral-900 focus:outline-none focus:ring-2 focus:ring-brand-500"
               />
               <datalist id="assign-rider-options">
                 {assignRiderOptions.map(rider => (
@@ -679,7 +679,7 @@ export default function ActiveDineIn() {
                   setAssignModalSale(null);
                   setAssignRiderName('');
                 }}
-                className="flex-1 py-3 rounded-xl border border-neutral-200 font-semibold text-neutral-700"
+                className="flex-1 py-3 rounded-[11px] border border-neutral-200 font-semibold text-neutral-700"
               >
                 Cancel
               </button>
@@ -687,7 +687,7 @@ export default function ActiveDineIn() {
                 type="button"
                 disabled={assigningSaleId === assignModalSale.id || !assignRiderName.trim()}
                 onClick={() => void submitAssignRider()}
-                className="flex-1 py-3 rounded-xl bg-brand-700 text-white font-bold disabled:opacity-50"
+                className="flex-1 py-3 rounded-[11px] bg-brand-700 text-white font-bold disabled:opacity-50"
               >
                 {assigningSaleId === assignModalSale.id ? 'Assigning…' : 'Assign rider'}
               </button>
@@ -699,7 +699,7 @@ export default function ActiveDineIn() {
       {payModalSale && (
         <div className="fixed inset-0 z-[200] flex items-end sm:items-center justify-center glass-overlay px-4 pb-8 sm:p-6">
           <div
-            className="glass-floating rounded-t-3xl sm:rounded-2xl w-full max-w-md p-6 space-y-4"
+            className="glass-floating rounded-t-3xl sm:rounded-[18px] w-full max-w-md p-6 space-y-4"
             role="dialog"
             aria-labelledby="pay-modal-title"
           >
@@ -717,7 +717,7 @@ export default function ActiveDineIn() {
                     key={m}
                     type="button"
                     onClick={() => setPaymentMethod(m)}
-                    className={`py-2 px-1 rounded-xl border-2 text-xs font-bold ${
+                    className={`py-2 px-1 rounded-[11px] border-2 text-xs font-bold ${
                       paymentMethod === m ? 'border-brand-500 bg-brand-50' : 'border-neutral-200 hover:border-brand-300'
                     }`}
                   >
@@ -730,7 +730,7 @@ export default function ActiveDineIn() {
               <button
                 type="button"
                 onClick={() => setPayModalSale(null)}
-                className="flex-1 py-3 rounded-xl border border-neutral-200 font-semibold text-neutral-700"
+                className="flex-1 py-3 rounded-[11px] border border-neutral-200 font-semibold text-neutral-700"
               >
                 Cancel
               </button>
@@ -738,7 +738,7 @@ export default function ActiveDineIn() {
                 type="button"
                 disabled={paySubmitting}
                 onClick={() => void finalizePayment()}
-                className="flex-1 py-3 rounded-xl bg-brand-700 text-white font-bold disabled:opacity-50"
+                className="flex-1 py-3 rounded-[11px] bg-brand-700 text-white font-bold disabled:opacity-50"
               >
                 {paySubmitting ? 'Processing…' : 'Confirm payment'}
               </button>

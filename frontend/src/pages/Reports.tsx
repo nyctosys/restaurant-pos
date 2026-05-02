@@ -268,7 +268,7 @@ export default function Reports() {
     }[tone];
 
     return (
-      <div className="glass-card border border-white/60 bg-white/75 p-4 lg:p-5 shadow-sm min-h-[128px]">
+      <div className="glass-card border border-white/60 bg-white/75 p-4 lg:p-5 min-h-[128px]">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="text-[12px] font-bold uppercase tracking-wide text-soot-600">{title}</div>
@@ -276,7 +276,7 @@ export default function Reports() {
               {loading ? '...' : formatCurrency(amount)}
             </div>
           </div>
-          <div className={`shrink-0 rounded-lg border p-2 ${toneClass}`}>
+          <div className={`shrink-0 rounded-[8px] border p-2 ${toneClass}`}>
             <Icon className="h-5 w-5" />
           </div>
         </div>
@@ -315,7 +315,7 @@ export default function Reports() {
                   { value: 'week', label: 'This Week' },
                   { value: 'year', label: 'This Year' },
                 ]}
-                className="glass-card border-0 min-h-[44px] rounded-lg px-3 py-2.5 text-sm font-medium text-soot-700"
+                className="glass-card border-0 min-h-[44px] rounded-[8px] px-3 py-2.5 text-sm font-medium text-soot-700"
               />
             </div>
 
@@ -325,19 +325,19 @@ export default function Reports() {
                   type="date" 
                   value={customStart}
                   onChange={(e) => setCustomStart(e.target.value)}
-                  className="glass-card rounded-lg px-2 py-2 min-h-[44px] text-sm"
+                  className="glass-card rounded-[8px] px-2 py-2 min-h-[44px] text-sm"
                 />
                 <span className="text-soot-400">-</span>
                 <input 
                   type="date" 
                   value={customEnd}
                   onChange={(e) => setCustomEnd(e.target.value)}
-                  className="glass-card rounded-lg px-2 py-2 min-h-[44px] text-sm"
+                  className="glass-card rounded-[8px] px-2 py-2 min-h-[44px] text-sm"
                 />
               </div>
             )}
 
-            <button type="button" onClick={() => { fetchData(); fetchStockTransactions(); }} className="touch-target p-2 ml-1 text-soot-500 hover:text-brand-600 hover:bg-brand-50 rounded-lg transition-colors border border-transparent hover:border-brand-100" aria-label="Refresh">
+            <button type="button" onClick={() => { fetchData(); fetchStockTransactions(); }} className="touch-target p-2 ml-1 text-soot-500 hover:text-brand-600 hover:bg-brand-50 rounded-[8px] transition-colors border border-transparent hover:border-brand-100" aria-label="Refresh">
               <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
             </button>
           </div>
@@ -357,7 +357,7 @@ export default function Reports() {
               <MetricCard title="Delivery orders" amount={metric(report?.order_types, 'delivery').amount} orders={metric(report?.order_types, 'delivery').orders} icon={Truck} tone="delivery" detail={`Delivery charges: ${formatCurrency(report?.totals.delivery_charge ?? 0)}`} />
               <MetricCard title="Dine-in orders" amount={metric(report?.order_types, 'dine_in').amount} orders={metric(report?.order_types, 'dine_in').orders} icon={UtensilsCrossed} detail={`Service charges: ${formatCurrency(report?.totals.service_charge ?? 0)}`} />
               <MetricCard title="Takeaway orders" amount={metric(report?.order_types, 'takeaway').amount} orders={metric(report?.order_types, 'takeaway').orders} icon={ShoppingBag} />
-              <div className="glass-card border border-white/60 bg-white/75 p-4 lg:p-5 shadow-sm min-h-[128px]">
+              <div className="glass-card border border-white/60 bg-white/75 p-4 lg:p-5 min-h-[128px]">
                 <div className="text-[12px] font-bold uppercase tracking-wide text-soot-600">Top selling item</div>
                 <div className="mt-2 text-lg lg:text-xl font-bold text-brand-800 leading-snug line-clamp-2" title={report?.most_selling_product?.title || undefined}>
                   {loading ? '...' : report?.most_selling_product?.title?.trim() ? report.most_selling_product.title : '-'}
@@ -386,7 +386,7 @@ export default function Reports() {
                 <p className="font-medium">No transactions found for this period.</p>
               </div>
             ) : (
-              <div className="glass-card overflow-hidden border border-white/60 bg-white/70 shadow-sm">
+              <div className="glass-card overflow-hidden border border-white/60 bg-white/70">
                 <div className="overflow-x-auto">
                 <table className="w-full text-left border-collapse min-w-[760px]">
                   <thead>
@@ -468,7 +468,7 @@ export default function Reports() {
                 <p className="font-medium">No stock movements for this period.</p>
               </div>
             ) : (
-              <div className="glass-card overflow-hidden border border-white/60 bg-white/70 shadow-sm">
+              <div className="glass-card overflow-hidden border border-white/60 bg-white/70">
                 <div className="overflow-x-auto">
                 <table className="w-full text-left border-collapse min-w-[520px]">
                   <thead>

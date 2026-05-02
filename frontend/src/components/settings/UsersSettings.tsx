@@ -209,7 +209,7 @@ export default function UsersSettings() {
           </label>
           <button
             onClick={() => openModal()}
-            className="flex items-center gap-2 bg-brand-700 text-white px-5 py-2.5 rounded-lg font-medium hover:bg-brand-600 transition-colors shadow-sm"
+            className="flex items-center gap-2 bg-brand-700 text-white px-5 py-2.5 rounded-[8px] font-medium hover:bg-brand-600 transition-colors"
           >
             <Plus className="w-4 h-4" /> Add User
           </button>
@@ -222,7 +222,7 @@ export default function UsersSettings() {
             <Loader2 className="w-6 h-6 animate-spin" />
           </div>
         ) : users.length === 0 ? (
-          <div className="p-8 text-center text-soot-500 border border-dashed border-soot-200 m-4 rounded-xl">
+          <div className="p-8 text-center text-soot-500 border border-dashed border-soot-200 m-4 rounded-[11px]">
             No users found.
           </div>
         ) : (
@@ -321,7 +321,7 @@ export default function UsersSettings() {
               <h3 className="text-lg font-bold text-soot-900">
                 {editingUser ? 'Edit User' : 'Create New User'}
               </h3>
-              <button type="button" onClick={closeModal} className="min-w-[44px] min-h-[44px] flex items-center justify-center text-soot-400 hover:text-soot-600 rounded-lg hover:bg-soot-100" aria-label="Close">
+              <button type="button" onClick={closeModal} className="min-w-[44px] min-h-[44px] flex items-center justify-center text-soot-400 hover:text-soot-600 rounded-[8px] hover:bg-soot-100" aria-label="Close">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -359,7 +359,7 @@ export default function UsersSettings() {
                       type="text"
                       value="Owner"
                       disabled
-                      className="w-full px-4 py-2 bg-soot-100 border border-soot-200 rounded-lg text-soot-500 cursor-not-allowed"
+                      className="w-full px-4 py-2 bg-soot-100 border border-soot-200 rounded-[8px] text-soot-500 cursor-not-allowed"
                     />
                     <p className="mt-1 text-xs text-soot-500">
                       Owner role cannot be changed.
@@ -391,7 +391,7 @@ export default function UsersSettings() {
               <button
                 type="button"
                 onClick={closeModal}
-                className="min-h-[44px] px-5 py-2.5 text-soot-700 font-medium hover:bg-soot-200 rounded-lg transition-colors"
+                className="min-h-[44px] px-5 py-2.5 text-soot-700 font-medium hover:bg-soot-200 rounded-[8px] transition-colors"
                 disabled={saving}
               >
                 Cancel
@@ -400,7 +400,7 @@ export default function UsersSettings() {
                 type="button"
                 onClick={handleSaveUser}
                 disabled={saving || !username.trim()}
-                className="flex items-center justify-center gap-2 min-h-[44px] bg-brand-700 text-white px-6 py-2.5 rounded-lg font-medium hover:bg-brand-600 disabled:opacity-50 transition-colors"
+                className="flex items-center justify-center gap-2 min-h-[44px] bg-brand-700 text-white px-6 py-2.5 rounded-[8px] font-medium hover:bg-brand-600 disabled:opacity-50 transition-colors"
               >
                 {saving && <Loader2 className="w-4 h-4 animate-spin" />}
                 {editingUser ? 'Save Changes' : 'Create User'}

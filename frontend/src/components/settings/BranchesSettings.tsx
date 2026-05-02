@@ -143,7 +143,7 @@ export default function BranchesSettings() {
           <div className="glass-card p-6 space-y-4">
             <div>
               <label className="block text-sm font-medium text-soot-700 mb-1">Official branch identity</label>
-              <div className="flex items-center gap-2 rounded-lg border border-soot-200/70 bg-white/45 px-4 py-3 font-mono text-sm text-soot-800">
+              <div className="flex items-center gap-2 rounded-[8px] border border-soot-200/70 bg-white/45 px-4 py-3 font-mono text-sm text-soot-800">
                 <Fingerprint className="h-4 w-4 shrink-0 text-brand-700" />
                 <span className="break-all">{branch.id}</span>
               </div>
@@ -185,7 +185,7 @@ export default function BranchesSettings() {
                 type="button"
                 onClick={() => void handleSave()}
                 disabled={saving || !name.trim()}
-                className="flex items-center gap-2 bg-brand-700 text-white px-6 py-2.5 rounded-lg font-medium hover:bg-brand-600 disabled:opacity-50"
+                className="flex items-center gap-2 bg-brand-700 text-white px-6 py-2.5 rounded-[8px] font-medium hover:bg-brand-600 disabled:opacity-50"
               >
                 {saving && <Loader2 className="w-4 h-4 animate-spin" />}
                 Save
@@ -204,7 +204,7 @@ export default function BranchesSettings() {
             ) : (
               <ul className="space-y-2">
                 {branchUsers.map((u) => (
-                  <li key={u.id} className="flex justify-between items-center text-sm glass-card px-3 py-2 rounded-lg">
+                  <li key={u.id} className="flex justify-between items-center text-sm glass-card px-3 py-2 rounded-[8px]">
                     <span className="font-medium text-soot-800">{u.username}</span>
                     <span className="text-xs capitalize text-soot-600">{u.role}</span>
                   </li>

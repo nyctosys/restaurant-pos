@@ -42,28 +42,24 @@ export default function Login() {
 
   return (
     <div className="flex items-center justify-center w-full p-4">
-      <div className="glass-floating max-w-md w-full overflow-hidden">
-        
-        {/* Brand Header */}
-        <div className="py-6 flex flex-col items-center justify-center border-b border-white/20 bg-[linear-gradient(160deg,rgba(194,74,54,0.40),rgba(61,21,16,0.58))] dark:border-white/10 dark:bg-[linear-gradient(168deg,rgba(194,74,54,0.42),rgba(26,14,12,0.92))]">
+      <div className="glass-floating max-w-md w-full p-8 lg:p-10">
+        <div className="mb-8 flex flex-col items-center text-center">
           <img
             src="/app-logo.svg"
             alt=""
             width={320}
             height={320}
-            className="h-28 w-auto max-w-[85%] object-contain drop-shadow-xl"
+            className="h-20 w-auto max-w-[72%] object-contain"
             decoding="async"
           />
-        </div>
-        
-        <div className="p-8">
-          <h2 className="text-2xl font-bold text-center text-neutral-900 mb-1">Terminal Login</h2>
-          <p className="text-sm text-neutral-500 text-center mb-6">
+          <h2 className="mt-8 text-[34px] leading-[1.12] font-semibold text-neutral-900 tracking-[-0.374px]">Terminal Login</h2>
+          <p className="mt-2 text-[15px] leading-6 text-neutral-500">
             Enter your operator credentials to access the POS.
           </p>
+        </div>
 
         {error && (
-          <div className="mb-4 p-3 bg-red-50 text-red-600 rounded-lg text-sm font-medium border border-red-200">
+          <div className="mb-4 p-3 bg-red-50 text-red-600 rounded-[8px] text-sm font-medium border border-red-200">
             {error}
           </div>
         )}
@@ -79,7 +75,7 @@ export default function Login() {
               name="username"
               value={formData.username}
               onChange={handleChange}
-              className="w-full px-4 py-3 glass-card focus:ring-2 focus:ring-brand-500 focus:border-brand-500 focus:outline-none transition-shadow"
+              className="w-full px-4 py-3 glass-card focus:ring-2 focus:ring-brand-500 focus:border-brand-500 focus:outline-none transition-colors"
               placeholder="Username"
             />
           </div>
@@ -93,7 +89,7 @@ export default function Login() {
               name="password"
               value={formData.password}
               onChange={handleChange}
-              className="w-full px-4 py-3 glass-card focus:ring-2 focus:ring-brand-500 focus:border-brand-500 focus:outline-none transition-shadow"
+              className="w-full px-4 py-3 glass-card focus:ring-2 focus:ring-brand-500 focus:border-brand-500 focus:outline-none transition-colors"
               placeholder="••••••••"
             />
           </div>
@@ -101,12 +97,11 @@ export default function Login() {
           <button 
             type="submit" 
             disabled={loading}
-            className="w-full bg-brand-700 hover:bg-brand-600 disabled:bg-neutral-200 disabled:text-neutral-400 text-white py-3.5 rounded-xl font-semibold transition-colors mt-4 flex justify-center items-center shadow-sm shadow-brand-700/20"
+            className="w-full bg-brand-700 hover:bg-brand-600 disabled:bg-neutral-200 disabled:text-neutral-400 text-white py-3.5 rounded-[11px] font-semibold transition-colors mt-4 flex justify-center items-center"
           >
             {loading ? 'Authenticating...' : 'Access Terminal'}
           </button>
         </form>
-        </div>
       </div>
     </div>
   );

@@ -629,6 +629,29 @@ def list_purchase_orders(current_user: User = Depends(get_current_user)):
 def create_purchase_order(payload: PurchaseOrderCreate, current_user: User = Depends(get_current_user)):
     data = payload.model_dump()
     items_data = data.pop('items', [])
+    supplier = db.session.get(Supplier, data.get("supplier_id"))
+    if not supplier or not supplier.is_active:
+        return JSONResponse(status_code=400, content={"message": "Select an active supplier"})
+
+    ingredient_ids = {int(item["ingredient_id"]) for item in items_data}
+    ingredients_by_id = {
+        ingredient.id: ingredient
+        for ingredient in Ingredient.query.filter(Ingredient.id.in_(ingredient_ids)).all()
+    } if ingredient_ids else {}
+    missing_ids = sorted(ingredient_id for ingredient_id in ingredient_ids if ingredient_id not in ingredients_by_id)
+    if missing_ids:
+        return JSONResponse(status_code=400, content={"message": f"Material not found: {missing_ids[0]}"})
+
+    unlinked_items = [
+        ingredient
+        for ingredient in ingredients_by_id.values()
+        if ingredient.preferred_supplier_id != supplier.id
+    ]
+    if unlinked_items:
+        return JSONResponse(
+            status_code=400,
+            content={"message": f"{unlinked_items[0].name} is not linked to {supplier.name}"},
+        )
     
     import uuid
     data['po_number'] = f"PO-{uuid.uuid4().hex[:6].upper()}"

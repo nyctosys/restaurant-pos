@@ -103,13 +103,13 @@ export default function RidersSettings() {
           onChange={e => setNewRider(e.target.value)}
           onKeyDown={e => e.key === 'Enter' && handleAdd()}
           placeholder="e.g. Hamza, Bilal..."
-          className="flex-1 px-4 py-3 border border-soot-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:outline-none text-sm"
+          className="flex-1 px-4 py-3 border border-soot-200 rounded-[8px] focus:ring-2 focus:ring-brand-500 focus:outline-none text-sm"
         />
         <button
           type="button"
           onClick={handleAdd}
           disabled={!newRider.trim() || saving || riders.includes(newRider.trim())}
-          className="flex items-center gap-2 bg-brand-700 text-white px-5 py-3 rounded-lg font-medium hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm"
+          className="flex items-center gap-2 bg-brand-700 text-white px-5 py-3 rounded-[8px] font-medium hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm"
         >
           <Plus className="w-4 h-4" />
           Add
@@ -118,7 +118,7 @@ export default function RidersSettings() {
 
       {feedback && (
         <div
-          className={`mb-4 text-sm font-medium rounded-lg px-4 py-2 ${
+          className={`mb-4 text-sm font-medium rounded-[8px] px-4 py-2 ${
             feedback.startsWith('error:')
               ? 'text-red-700 bg-red-50 border border-red-200'
               : 'text-brand-700 bg-brand-50 border border-brand-200'
@@ -134,7 +134,7 @@ export default function RidersSettings() {
           Loading riders...
         </div>
       ) : riders.length === 0 ? (
-        <div className="text-soot-400 py-8 text-center border border-dashed border-soot-200 rounded-xl">
+        <div className="text-soot-400 py-8 text-center border border-dashed border-soot-200 rounded-[11px]">
           No riders yet. Add names above so staff can assign delivery orders.
         </div>
       ) : (
@@ -155,7 +155,7 @@ export default function RidersSettings() {
                       if (e.key === 'Enter') handleUpdate();
                       if (e.key === 'Escape') setEditingIndex(null);
                     }}
-                    className="flex-1 px-3 py-2 border border-soot-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none"
+                    className="flex-1 px-3 py-2 border border-soot-200 rounded-[8px] text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none"
                     autoFocus
                   />
                   <button

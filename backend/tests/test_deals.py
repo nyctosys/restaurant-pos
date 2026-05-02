@@ -5,6 +5,8 @@ from app.models import (
     IngredientBranchStock,
     Product,
     RecipeItem,
+    Sale,
+    SaleItem,
     User,
     db,
 )
@@ -254,6 +256,102 @@ def test_deal_soft_delete_hides_from_list_blocks_new_sales(client, app):
         },
     )
     assert r_checkout.status_code == 400
+
+
+def test_deal_edit_archive_restore_and_permanent_delete(client, app):
+    h = _auth_headers(client, app)
+
+    burger_res = client.post(
+        "/api/menu-items/",
+        headers=h,
+        json={"sku": "EDIT-BURGER", "title": "Edit Burger", "base_price": 5.0, "section": "Mains"},
+    )
+    burger_id = burger_res.get_json()["id"]
+    fries_res = client.post(
+        "/api/menu-items/",
+        headers=h,
+        json={"sku": "EDIT-FRIES", "title": "Edit Fries", "base_price": 3.0, "section": "Sides"},
+    )
+    fries_id = fries_res.get_json()["id"]
+    client.post(
+        "/api/menu-items/",
+        headers=h,
+        json={"sku": "EDIT-DRINK", "title": "Edit Drink", "base_price": 2.0, "section": "Drinks"},
+    )
+
+    create_res = client.post(
+        "/api/menu/deals/",
+        headers=h,
+        json={
+            "title": "Editable Combo",
+            "sku": "EDIT-COMBO",
+            "base_price": 7.0,
+            "variants": ["Regular"],
+            "combo_items": [{"product_id": burger_id, "quantity": 1, "variant_key": "Regular"}],
+        },
+    )
+    assert create_res.status_code == 200
+    deal_id = create_res.get_json()["id"]
+
+    update_res = client.put(
+        f"/api/menu/deals/{deal_id}",
+        headers=h,
+        json={
+            "title": "Edited Combo",
+            "sku": "EDIT-COMBO-2",
+            "sale_price": 8.5,
+            "variants": ["Regular", "Large"],
+            "combo_items": [
+                {"product_id": fries_id, "quantity": 2, "variant_key": "Regular"},
+                {"selection_type": "category", "category_name": "Drinks", "quantity": 1, "variant_key": "Large"},
+            ],
+        },
+    )
+    assert update_res.status_code == 200
+    assert "updated" in update_res.get_json()["message"].lower()
+
+    list_res = client.get("/api/menu/deals/", headers=h)
+    edited = next(d for d in list_res.get_json()["deals"] if d["id"] == deal_id)
+    assert edited["title"] == "Edited Combo"
+    assert edited["sku"] == "EDIT-COMBO-2"
+    assert edited["sale_price"] == 8.5
+    assert edited["variants"] == ["Regular", "Large"]
+    assert len(edited["combo_items"]) == 2
+    assert any(ci["product_id"] == fries_id and ci["quantity"] == 2 for ci in edited["combo_items"])
+    assert any(ci["selection_type"] == "category" and ci["category_name"] == "Drinks" for ci in edited["combo_items"])
+
+    archive_res = client.patch(f"/api/menu/deals/{deal_id}/archive", headers=h)
+    assert archive_res.status_code == 200
+    assert archive_res.get_json()["archived_at"]
+
+    active_list_res = client.get("/api/menu/deals/", headers=h)
+    assert not any(d["id"] == deal_id for d in active_list_res.get_json()["deals"])
+
+    archived_list_res = client.get("/api/menu/deals/?include_archived=1", headers=h)
+    archived_deal = next(d for d in archived_list_res.get_json()["deals"] if d["id"] == deal_id)
+    assert archived_deal["archived_at"]
+
+    restore_res = client.patch(f"/api/menu/deals/{deal_id}/unarchive", headers=h)
+    assert restore_res.status_code == 200
+    with app.app_context():
+        br = Branch.query.filter_by(name="DealsBranch").first()
+        user = User.query.filter_by(username="owner_deals").first()
+        sale = Sale(branch_id=br.id, user_id=user.id, total_amount=8.5, tax_amount=0, payment_method="Cash")
+        db.session.add(sale)
+        db.session.flush()
+        db.session.add(
+            SaleItem(sale_id=sale.id, product_id=deal_id, quantity=1, unit_price=8.5, subtotal=8.5)
+        )
+        db.session.commit()
+
+    permanent_res = client.delete(f"/api/menu/deals/{deal_id}?permanent=1", headers=h)
+    assert permanent_res.status_code == 200
+    assert "permanently deleted" in permanent_res.get_json()["message"].lower()
+
+    with app.app_context():
+        assert db.session.get(Product, deal_id) is None
+        assert SaleItem.query.filter_by(product_id=deal_id).count() == 0
+        assert SaleItem.query.filter_by(product_id=None).count() >= 1
 
 
 def test_deal_with_category_choices_lists_and_checks_out_selected_items(client, app):

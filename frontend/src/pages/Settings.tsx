@@ -529,7 +529,7 @@ export default function Settings() {
               key={tab}
               type="button"
               onClick={() => setActiveTab(tab.toLowerCase().replace(/ & | /g, ''))}
-              className={`w-full text-left px-4 py-3 min-h-[44px] rounded-lg font-medium transition-colors ${
+              className={`w-full text-left px-4 py-3 min-h-[44px] rounded-[8px] font-medium transition-colors ${
                 activeTab === tab.toLowerCase().replace(/ & | /g, '')
                   ? 'bg-soot-200 text-soot-900'
                   : 'text-soot-600 hover:bg-soot-100'
@@ -591,7 +591,7 @@ export default function Settings() {
                   <button
                     type="button"
                     onClick={() => setDashboardMenuLayout('list')}
-                    className={`rounded-xl border px-4 py-4 text-left transition-all ${dashboardMenuLayout === 'list' ? 'border-brand-500 bg-brand-50 text-brand-800 shadow-sm' : 'border-soot-200 bg-white/70 text-soot-600 hover:border-brand-300'}`}
+                    className={`rounded-[11px] border px-4 py-4 text-left transition-all ${dashboardMenuLayout === 'list' ? 'border-brand-500 bg-brand-50 text-brand-800' : 'border-soot-200 bg-white/70 text-soot-600 hover:border-brand-300'}`}
                   >
                     <div className="flex items-center gap-2 mb-1">
                       <List className="w-4 h-4" />
@@ -602,7 +602,7 @@ export default function Settings() {
                   <button
                     type="button"
                     onClick={() => setDashboardMenuLayout('grid')}
-                    className={`rounded-xl border px-4 py-4 text-left transition-all ${dashboardMenuLayout === 'grid' ? 'border-brand-500 bg-brand-50 text-brand-800 shadow-sm' : 'border-soot-200 bg-white/70 text-soot-600 hover:border-brand-300'}`}
+                    className={`rounded-[11px] border px-4 py-4 text-left transition-all ${dashboardMenuLayout === 'grid' ? 'border-brand-500 bg-brand-50 text-brand-800' : 'border-soot-200 bg-white/70 text-soot-600 hover:border-brand-300'}`}
                   >
                     <div className="flex items-center gap-2 mb-1">
                       <LayoutGrid className="w-4 h-4" />
@@ -620,7 +620,7 @@ export default function Settings() {
                     type="button"
                     onClick={saveGeneralSettings}
                     disabled={generalSaving || generalLoading}
-                    className="px-4 py-2.5 rounded-lg bg-brand-600 text-white font-semibold hover:bg-brand-700 disabled:opacity-60 transition-colors"
+                    className="px-4 py-2.5 rounded-[8px] bg-brand-600 text-white font-semibold hover:bg-brand-700 disabled:opacity-60 transition-colors"
                   >
                     {generalSaving ? 'Saving…' : 'Save layout'}
                   </button>
@@ -655,7 +655,7 @@ export default function Settings() {
                       Configure dedicated printers for customer receipts and KOT tickets. LAN mode supports separate network printers (recommended), and USB mode remains available for local setups.
                     </p>
 
-                    <div className="rounded-lg border border-soot-200 p-4 space-y-3">
+                    <div className="rounded-[8px] border border-soot-200 p-4 space-y-3">
                       <h5 className="text-sm font-semibold text-soot-900">Order Receipt Printer</h5>
                       <div>
                         <label className="block text-sm font-medium text-soot-800 mb-1">Connection Type</label>
@@ -725,7 +725,7 @@ export default function Settings() {
                       )}
                     </div>
 
-                    <div className="rounded-lg border border-soot-200 p-4 space-y-3 mt-4">
+                    <div className="rounded-[8px] border border-soot-200 p-4 space-y-3 mt-4">
                       <h5 className="text-sm font-semibold text-soot-900">KOT Printer</h5>
                       <div>
                         <label className="block text-sm font-medium text-soot-800 mb-1">Connection Type</label>
@@ -812,7 +812,7 @@ export default function Settings() {
                 </div>
 
                 {hardwareFeedback && (
-                  <div className={`mt-6 text-sm font-medium rounded-lg px-4 py-3 border ${
+                  <div className={`mt-6 text-sm font-medium rounded-[8px] px-4 py-3 border ${
                     hardwareFeedback.startsWith('error:')
                       ? 'bg-red-50 text-red-700 border-red-200'
                       : 'bg-brand-50 text-brand-700 border-brand-200'
@@ -825,7 +825,7 @@ export default function Settings() {
                   <button 
                     onClick={saveHardwareSettings}
                     disabled={hardwareSaving}
-                    className="bg-brand-700 text-white px-6 py-2 rounded-lg text-sm font-medium hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm flex items-center gap-2"
+                    className="bg-brand-700 text-white px-6 py-2 rounded-[8px] text-sm font-medium hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
                   >
                     {hardwareSaving && <Loader2 className="w-4 h-4 animate-spin" />}
                     Save Hardware Config
@@ -833,7 +833,7 @@ export default function Settings() {
                   <button 
                     onClick={handleTestPrint}
                     disabled={testPrintLoading || testKotPrintLoading || hardwareSaving}
-                    className="bg-white border text-soot-700 border-soot-300 px-6 py-2 rounded-lg text-sm font-medium hover:bg-soot-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+                    className="bg-white border text-soot-700 border-soot-300 px-6 py-2 rounded-[8px] text-sm font-medium hover:bg-soot-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
                   >
                     {testPrintLoading && <Loader2 className="w-4 h-4 animate-spin text-soot-500" />}
                     Test Receipt Printer
@@ -841,7 +841,7 @@ export default function Settings() {
                   <button 
                     onClick={handleTestKotPrint}
                     disabled={testKotPrintLoading || testPrintLoading || hardwareSaving}
-                    className="bg-white border text-soot-700 border-soot-300 px-6 py-2 rounded-lg text-sm font-medium hover:bg-soot-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+                    className="bg-white border text-soot-700 border-soot-300 px-6 py-2 rounded-[8px] text-sm font-medium hover:bg-soot-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
                   >
                     {testKotPrintLoading && <Loader2 className="w-4 h-4 animate-spin text-soot-500" />}
                     Test KOT Printer
@@ -881,12 +881,12 @@ export default function Settings() {
                 onChange={e => setNewSection(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && handleAddSection()}
                 placeholder="e.g. Mains, Sides, Drinks…"
-                className="flex-1 px-4 py-3 border border-soot-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:outline-none text-sm"
+                className="flex-1 px-4 py-3 border border-soot-200 rounded-[8px] focus:ring-2 focus:ring-brand-500 focus:outline-none text-sm"
               />
               <button
                 onClick={handleAddSection}
                 disabled={!newSection.trim() || sectionsSaving}
-                className="flex items-center gap-2 bg-brand-700 text-white px-5 py-3 rounded-lg font-medium hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm"
+                className="flex items-center gap-2 bg-brand-700 text-white px-5 py-3 rounded-[8px] font-medium hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm"
               >
                 <Plus className="w-4 h-4" />
                 Add
@@ -895,7 +895,7 @@ export default function Settings() {
 
             {/* Feedback */}
             {sectionsFeedback && (
-              <div className={`mb-4 text-sm font-medium rounded-lg px-4 py-2 ${
+              <div className={`mb-4 text-sm font-medium rounded-[8px] px-4 py-2 ${
                 sectionsFeedback.startsWith('error:')
                   ? 'text-red-700 bg-red-50 border border-red-200'
                   : 'text-brand-700 bg-brand-50 border border-brand-200'
@@ -911,7 +911,7 @@ export default function Settings() {
                 Loading categories…
               </div>
             ) : sections.length === 0 ? (
-              <div className="text-soot-400 py-8 text-center border border-dashed border-soot-200 rounded-xl">
+              <div className="text-soot-400 py-8 text-center border border-dashed border-soot-200 rounded-[11px]">
                 No categories yet. Add your first category above.
               </div>
             ) : (
@@ -951,12 +951,12 @@ export default function Settings() {
                 onChange={e => setNewVariant(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && handleAddVariant()}
                 placeholder="e.g. Small, Medium, Large…"
-                className="flex-1 px-4 py-3 border border-soot-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:outline-none text-sm"
+                className="flex-1 px-4 py-3 border border-soot-200 rounded-[8px] focus:ring-2 focus:ring-brand-500 focus:outline-none text-sm"
               />
               <button
                 onClick={handleAddVariant}
                 disabled={!newVariant.trim() || variantsSaving || variants.includes(newVariant.trim())}
-                className="flex items-center gap-2 bg-brand-700 text-white px-5 py-3 rounded-lg font-medium hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm"
+                className="flex items-center gap-2 bg-brand-700 text-white px-5 py-3 rounded-[8px] font-medium hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm"
               >
                 <Plus className="w-4 h-4" />
                 Add
@@ -964,7 +964,7 @@ export default function Settings() {
             </div>
 
             {variantsFeedback && (
-              <div className={`mb-4 text-sm font-medium rounded-lg px-4 py-2 ${
+              <div className={`mb-4 text-sm font-medium rounded-[8px] px-4 py-2 ${
                 variantsFeedback.startsWith('error:')
                   ? 'text-red-700 bg-red-50 border border-red-200'
                   : 'text-brand-700 bg-brand-50 border border-brand-200'
@@ -979,7 +979,7 @@ export default function Settings() {
                 Loading variants…
               </div>
             ) : variants.length === 0 ? (
-              <div className="text-soot-400 py-8 text-center border border-dashed border-soot-200 rounded-xl">
+              <div className="text-soot-400 py-8 text-center border border-dashed border-soot-200 rounded-[11px]">
                 No variants yet. Add variant names above; they will be available when creating or editing menu items.
               </div>
             ) : (
@@ -1000,7 +1000,7 @@ export default function Settings() {
                             if (e.key === 'Enter') handleUpdateVariant();
                             if (e.key === 'Escape') setEditingVariantIndex(null);
                           }}
-                          className="flex-1 px-3 py-2 border border-soot-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none"
+                          className="flex-1 px-3 py-2 border border-soot-200 rounded-[8px] text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none"
                           autoFocus
                         />
                         <button
@@ -1102,7 +1102,7 @@ export default function Settings() {
                             min="0"
                             value={taxRatesByPaymentMethod[method] ?? 0}
                             onChange={(e) => setTaxRatesByPaymentMethod(prev => ({ ...prev, [method]: parseFloat(e.target.value) || 0 }))}
-                            className="w-24 px-3 py-2 border border-soot-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:outline-none text-right font-medium"
+                            className="w-24 px-3 py-2 border border-soot-200 rounded-[8px] focus:ring-2 focus:ring-brand-500 focus:outline-none text-right font-medium"
                           />
                           <span className="text-soot-400 font-medium">%</span>
                         </div>
@@ -1112,7 +1112,7 @@ export default function Settings() {
                 )}
 
                 {taxFeedback && (
-                  <div className={`text-sm font-medium rounded-lg px-4 py-2 ${
+                  <div className={`text-sm font-medium rounded-[8px] px-4 py-2 ${
                     taxFeedback.startsWith('error:')
                       ? 'text-red-700 bg-red-50 border border-red-200'
                       : 'text-brand-700 bg-brand-50 border border-brand-200'
@@ -1124,7 +1124,7 @@ export default function Settings() {
                 <button 
                   onClick={saveTaxSettings}
                   disabled={taxSaving}
-                  className="bg-brand-700 text-white px-8 py-3 rounded-lg font-bold hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all active:scale-[0.98] shadow-sm flex items-center gap-2"
+                  className="bg-brand-700 text-white px-8 py-3 rounded-[8px] font-bold hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all active:scale-[0.98] flex items-center gap-2"
                 >
                   {taxSaving && <Loader2 className="w-4 h-4 animate-spin" />}
                   Save Tax Configuration
@@ -1154,7 +1154,7 @@ export default function Settings() {
                 onChange={e => setNewDiscount(prev => ({ ...prev, name: e.target.value }))}
                 onKeyDown={e => e.key === 'Enter' && handleAddDiscount()}
                 placeholder="e.g. Happy Hour 10%"
-                className="flex-1 min-w-[140px] px-4 py-3 border border-soot-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:outline-none text-sm"
+                className="flex-1 min-w-[140px] px-4 py-3 border border-soot-200 rounded-[8px] focus:ring-2 focus:ring-brand-500 focus:outline-none text-sm"
               />
               <div className="min-w-[12rem]">
                 <SearchableSelect
@@ -1178,14 +1178,14 @@ export default function Settings() {
                   value={newDiscount.value || ''}
                   onChange={e => setNewDiscount(prev => ({ ...prev, value: parseFloat(e.target.value) || 0 }))}
                   placeholder={newDiscount.type === 'percent' ? '10' : '5'}
-                  className="w-24 px-4 py-3 border border-soot-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:outline-none text-sm text-right"
+                  className="w-24 px-4 py-3 border border-soot-200 rounded-[8px] focus:ring-2 focus:ring-brand-500 focus:outline-none text-sm text-right"
                 />
                 <span className="text-soot-500 text-sm">{newDiscount.type === 'percent' ? '%' : 'currency'}</span>
               </div>
               <button
                 onClick={handleAddDiscount}
                 disabled={!newDiscount.name.trim() || discountsSaving}
-                className="flex items-center gap-2 bg-brand-700 text-white px-5 py-3 rounded-lg font-medium hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm"
+                className="flex items-center gap-2 bg-brand-700 text-white px-5 py-3 rounded-[8px] font-medium hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm"
               >
                 <Plus className="w-4 h-4" />
                 Add
@@ -1193,7 +1193,7 @@ export default function Settings() {
             </div>
 
             {discountsFeedback && (
-              <div className={`mb-4 text-sm font-medium rounded-lg px-4 py-2 ${
+              <div className={`mb-4 text-sm font-medium rounded-[8px] px-4 py-2 ${
                 discountsFeedback.startsWith('error:')
                   ? 'text-red-700 bg-red-50 border border-red-200'
                   : 'text-brand-700 bg-brand-50 border border-brand-200'
@@ -1210,7 +1210,7 @@ export default function Settings() {
             ) : (() => {
               const displayList = discountsIncludeArchived ? discounts : discounts.filter(d => !d.archived);
               return displayList.length === 0 ? (
-                <div className="text-soot-400 py-8 text-center border border-dashed border-soot-200 rounded-xl">
+                <div className="text-soot-400 py-8 text-center border border-dashed border-soot-200 rounded-[11px]">
                   {discounts.length === 0 ? 'No discounts yet. Add your first discount above.' : "No active discounts. Enable 'Include archived' to see archived ones."}
                 </div>
               ) : (
@@ -1218,7 +1218,7 @@ export default function Settings() {
                   {displayList.map(d => (
                     <div
                       key={d.id}
-                      className={`flex items-center justify-between px-4 py-3 rounded-lg border transition-colors ${d.archived ? 'bg-soot-50/70 border-soot-100 opacity-90' : 'bg-soot-50 border-soot-100 group hover:border-soot-200'}`}
+                      className={`flex items-center justify-between px-4 py-3 rounded-[8px] border transition-colors ${d.archived ? 'bg-soot-50/70 border-soot-100 opacity-90' : 'bg-soot-50 border-soot-100 group hover:border-soot-200'}`}
                     >
                       {editingId === d.id && editingDraft ? (
                         <div className="flex flex-wrap gap-2 items-center flex-1">
@@ -1493,24 +1493,24 @@ function AppLogsPanel() {
             type="button"
             onClick={() => loadServer()}
             disabled={serverLoading}
-            className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-soot-600 bg-white border border-soot-200 rounded-lg hover:bg-soot-50 transition-colors disabled:opacity-50"
+            className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-soot-600 bg-white border border-soot-200 rounded-[8px] hover:bg-soot-50 transition-colors disabled:opacity-50"
           >
             <Loader2 className={`w-3.5 h-3.5 ${serverLoading ? 'animate-spin' : ''}`} />
             Refresh server
           </button>
-          <button onClick={handleCopy} className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-soot-600 bg-white border border-soot-200 rounded-lg hover:bg-soot-50 transition-colors">
+          <button onClick={handleCopy} className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-soot-600 bg-white border border-soot-200 rounded-[8px] hover:bg-soot-50 transition-colors">
             <Copy className="w-3.5 h-3.5" />
             {copyFeedback || 'Copy All'}
           </button>
-          <button onClick={handleDownload} className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-soot-600 bg-white border border-soot-200 rounded-lg hover:bg-soot-50 transition-colors">
+          <button onClick={handleDownload} className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-soot-600 bg-white border border-soot-200 rounded-[8px] hover:bg-soot-50 transition-colors">
             <Download className="w-3.5 h-3.5" />
             Export .txt
           </button>
-          <button onClick={handleDownloadJson} className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-soot-600 bg-white border border-soot-200 rounded-lg hover:bg-soot-50 transition-colors">
+          <button onClick={handleDownloadJson} className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-soot-600 bg-white border border-soot-200 rounded-[8px] hover:bg-soot-50 transition-colors">
             <Download className="w-3.5 h-3.5" />
             Export JSON
           </button>
-          <button onClick={handleClear} className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-red-600 bg-white border border-red-200 rounded-lg hover:bg-red-50 transition-colors">
+          <button onClick={handleClear} className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-red-600 bg-white border border-red-200 rounded-[8px] hover:bg-red-50 transition-colors">
             <Trash className="w-3.5 h-3.5" />
             Clear device
           </button>
@@ -1524,7 +1524,7 @@ function AppLogsPanel() {
               key={level}
               type="button"
               onClick={() => setFilter(level)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors border ${
+              className={`px-3 py-1.5 rounded-[8px] text-xs font-semibold transition-colors border ${
                 filter === level
                   ? 'bg-soot-800 text-white border-soot-800'
                   : 'bg-white text-soot-500 border-soot-200 hover:bg-soot-50'
@@ -1556,14 +1556,14 @@ function AppLogsPanel() {
             onChange={e => setRequestIdQ(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && loadServer()}
             placeholder="Request ID (server filter — Enter to refresh)"
-            className="flex-1 min-w-[200px] px-3 py-2 text-xs rounded-lg border border-soot-200 bg-white/80"
+            className="flex-1 min-w-[200px] px-3 py-2 text-xs rounded-[8px] border border-soot-200 bg-white/80"
           />
           <input
             type="text"
             value={textQ}
             onChange={e => setTextQ(e.target.value)}
             placeholder="Search text (client-side filter)"
-            className="flex-1 min-w-[200px] px-3 py-2 text-xs rounded-lg border border-soot-200 bg-white/80"
+            className="flex-1 min-w-[200px] px-3 py-2 text-xs rounded-[8px] border border-soot-200 bg-white/80"
           />
         </div>
       </div>
@@ -1620,7 +1620,7 @@ function LogRow({ entry, expanded, onToggle, formatTime }: { entry: LogEntry; ex
         )}
       </button>
       {expanded && hasData && (
-        <pre className="mx-4 mb-3 p-3 bg-soot-900 text-brand-400 rounded-lg text-[11px] font-mono overflow-auto max-h-48">
+        <pre className="mx-4 mb-3 p-3 bg-soot-900 text-brand-400 rounded-[8px] text-[11px] font-mono overflow-auto max-h-48">
           {JSON.stringify(entry.data, null, 2)}
         </pre>
       )}

@@ -130,7 +130,8 @@ def test_purchase_order_flow(client, app):
     r2 = client.post("/api/inventory-advanced/ingredients", headers=h, json={
         "name": "Tomatoes",
         "sku": "ING-TOM",
-        "unit": "kg"
+        "unit": "kg",
+        "preferred_supplier_id": sup_id,
     })
     ing_id = r2.get_json()["id"]
 
@@ -161,6 +162,36 @@ def test_purchase_order_flow(client, app):
     tom = next(i for i in ings if i["id"] == ing_id)
     assert tom["current_stock"] == 20
     assert tom["last_purchase_price"] == 2.50
+
+
+def test_purchase_order_rejects_material_from_another_supplier(client, app):
+    h = _auth_headers(client, app)
+    veg_supplier = client.post("/api/inventory-advanced/suppliers", headers=h, json={"name": "Veg Supplier"})
+    dairy_supplier = client.post("/api/inventory-advanced/suppliers", headers=h, json={"name": "Dairy Supplier"})
+    veg_supplier_id = veg_supplier.get_json()["id"]
+    dairy_supplier_id = dairy_supplier.get_json()["id"]
+    ingredient = client.post("/api/inventory-advanced/ingredients", headers=h, json={
+        "name": "Milk",
+        "sku": "ING-MILK",
+        "unit": "l",
+        "preferred_supplier_id": dairy_supplier_id,
+    })
+    ingredient_id = ingredient.get_json()["id"]
+
+    response = client.post("/api/inventory-advanced/purchase-orders", headers=h, json={
+        "supplier_id": veg_supplier_id,
+        "items": [
+            {
+                "ingredient_id": ingredient_id,
+                "quantity_ordered": 10,
+                "unit_price": 180,
+                "unit": "l",
+            }
+        ],
+    })
+
+    assert response.status_code == 400
+    assert "not linked" in response.get_json()["message"]
 
 
 def test_prepared_item_batch_deducts_ingredients(client, app):

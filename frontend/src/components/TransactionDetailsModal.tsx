@@ -224,7 +224,7 @@ export default function TransactionDetailsModal({
           <button
             type="button"
             onClick={onClose}
-            className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg hover:bg-soot-200 transition-colors"
+            className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-[8px] hover:bg-soot-200 transition-colors"
             aria-label="Close"
           >
             <X className="w-5 h-5 text-soot-500" />
@@ -234,7 +234,7 @@ export default function TransactionDetailsModal({
         {/* Content */}
         <div className="p-5 lg:p-6 overflow-y-auto flex-1 min-h-0">
           {error && (
-            <div className="mb-4 bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm font-medium">
+            <div className="mb-4 bg-red-50 border border-red-200 text-red-700 rounded-[8px] px-4 py-3 text-sm font-medium">
               {error}
             </div>
           )}
@@ -246,7 +246,7 @@ export default function TransactionDetailsModal({
           ) : (
             <div className="space-y-6">
               {/* Meta info */}
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4 bg-white/20 p-4 rounded-xl border border-white/20">
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4 bg-white/20 p-4 rounded-[11px] border border-white/20">
                 <div>
                   <p className="text-xs font-semibold text-soot-500 uppercase">
                     Date
@@ -285,7 +285,7 @@ export default function TransactionDetailsModal({
 
               {/* Order type / table / delivery */}
               {(details.order_type || details.order_snapshot) && (
-                <div className="bg-white/20 p-4 rounded-xl border border-white/20 space-y-2">
+                <div className="bg-white/20 p-4 rounded-[11px] border border-white/20 space-y-2">
                   <h4 className="text-sm font-bold text-soot-900">Order</h4>
                   {details.order_type && (
                     <p className="text-sm text-soot-800">
@@ -410,7 +410,7 @@ export default function TransactionDetailsModal({
             disabled={
               loading || actionLoading !== null || details?.status === "open"
             }
-            className="flex items-center justify-center gap-2 min-h-[44px] px-4 py-2 bg-white border border-soot-300 rounded-lg text-sm font-medium text-soot-700 hover:bg-soot-100 disabled:opacity-50 transition-colors"
+            className="flex items-center justify-center gap-2 min-h-[44px] px-4 py-2 bg-white border border-soot-300 rounded-[8px] text-sm font-medium text-soot-700 hover:bg-soot-100 disabled:opacity-50 transition-colors"
           >
             {actionLoading === "print" ? (
               <Loader2 className="w-4 h-4 animate-spin" />
@@ -425,7 +425,7 @@ export default function TransactionDetailsModal({
                 type="button"
                 onClick={handleUnarchive}
                 disabled={loading || actionLoading !== null}
-                className="flex items-center justify-center gap-2 min-h-[44px] px-4 py-2 bg-brand-600 text-white rounded-lg text-sm font-medium hover:bg-brand-700 disabled:opacity-50 transition-colors"
+                className="flex items-center justify-center gap-2 min-h-[44px] px-4 py-2 bg-brand-600 text-white rounded-[8px] text-sm font-medium hover:bg-brand-700 disabled:opacity-50 transition-colors"
               >
                 {actionLoading === "unarchive" ? (
                   <Loader2 className="w-4 h-4 animate-spin" />
@@ -439,7 +439,7 @@ export default function TransactionDetailsModal({
                 type="button"
                 onClick={handleArchive}
                 disabled={loading || actionLoading !== null}
-                className="flex items-center justify-center gap-2 min-h-[44px] px-4 py-2 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700 disabled:opacity-50 transition-colors"
+                className="flex items-center justify-center gap-2 min-h-[44px] px-4 py-2 bg-amber-600 text-white rounded-[8px] text-sm font-medium hover:bg-amber-700 disabled:opacity-50 transition-colors"
               >
                 {actionLoading === "archive" ? (
                   <Loader2 className="w-4 h-4 animate-spin" />
@@ -454,7 +454,7 @@ export default function TransactionDetailsModal({
               type="button"
               onClick={handlePermanentDelete}
               disabled={loading || actionLoading !== null}
-              className="flex items-center justify-center gap-2 min-h-[44px] px-4 py-2 bg-white border border-red-300 text-red-600 rounded-lg text-sm font-medium hover:bg-red-50 disabled:opacity-50 transition-colors"
+              className="flex items-center justify-center gap-2 min-h-[44px] px-4 py-2 bg-white border border-red-300 text-red-600 rounded-[8px] text-sm font-medium hover:bg-red-50 disabled:opacity-50 transition-colors"
             >
               {actionLoading === "delete" ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
@@ -473,7 +473,7 @@ export default function TransactionDetailsModal({
               details?.status === "open" ||
               actionLoading !== null
             }
-            className="flex items-center justify-center gap-2 min-h-[44px] px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 disabled:bg-neutral-300 disabled:text-neutral-500 transition-colors"
+            className="flex items-center justify-center gap-2 min-h-[44px] px-4 py-2 bg-red-600 text-white rounded-[8px] text-sm font-medium hover:bg-red-700 disabled:bg-neutral-300 disabled:text-neutral-500 transition-colors"
           >
             {actionLoading === "rollback" ? (
               <Loader2 className="w-4 h-4 animate-spin" />

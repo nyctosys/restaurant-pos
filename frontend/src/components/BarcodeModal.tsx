@@ -192,7 +192,7 @@ export default function BarcodeModal({ sku, title, onClose }: BarcodeModalProps)
       }}
     >
       <div
-        className="glass-floating w-full max-w-md mx-auto overflow-hidden max-h-[min(90vh,640px)] flex flex-col shadow-2xl"
+        className="glass-floating w-full max-w-md mx-auto overflow-hidden max-h-[min(90vh,640px)] flex flex-col"
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
@@ -203,7 +203,7 @@ export default function BarcodeModal({ sku, title, onClose }: BarcodeModalProps)
           <button
             type="button"
             onClick={onClose}
-            className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg bg-white/50 text-neutral-700 hover:bg-white/80 border border-neutral-300/80 transition-colors"
+            className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-[8px] bg-white/50 text-neutral-700 hover:bg-white/80 border border-neutral-300/80 transition-colors"
             aria-label="Close"
           >
             <X className="w-5 h-5" />
@@ -213,7 +213,7 @@ export default function BarcodeModal({ sku, title, onClose }: BarcodeModalProps)
         {/* Barcode — SKU is rendered by JsBarcode (displayValue); no duplicate line below */}
         <div className="p-6 flex flex-col items-center gap-4">
           <p className="text-sm font-semibold text-neutral-800 text-center px-1">{title}</p>
-          <div className="border border-white/40 rounded-xl p-4 bg-white/50 shadow-inner w-full max-w-sm flex justify-center">
+          <div className="border border-white/40 rounded-[11px] p-4 bg-white/50 w-full max-w-sm flex justify-center">
             <svg ref={svgRef} className="max-w-full h-auto" />
           </div>
         </div>
@@ -228,7 +228,7 @@ export default function BarcodeModal({ sku, title, onClose }: BarcodeModalProps)
               type="button"
               onClick={onClose}
               disabled={printing}
-              className="flex-1 min-h-[44px] px-4 py-2.5 rounded-lg text-sm font-semibold border-2 border-neutral-700/25 text-neutral-800 bg-white/70 hover:bg-white hover:border-neutral-700/40 transition-colors disabled:opacity-50"
+              className="flex-1 min-h-[44px] px-4 py-2.5 rounded-[8px] text-sm font-semibold border-2 border-neutral-700/25 text-neutral-800 bg-white/70 hover:bg-white hover:border-neutral-700/40 transition-colors disabled:opacity-50"
             >
               Close
             </button>
@@ -236,7 +236,7 @@ export default function BarcodeModal({ sku, title, onClose }: BarcodeModalProps)
               type="button"
               onClick={handlePrint}
               disabled={printing}
-              className="flex-1 flex items-center justify-center gap-2 min-h-[44px] px-4 py-2.5 bg-brand-700 text-white rounded-lg text-sm font-semibold hover:bg-brand-600 transition-colors disabled:opacity-50 shadow-sm"
+              className="flex-1 flex items-center justify-center gap-2 min-h-[44px] px-4 py-2.5 bg-brand-700 text-white rounded-[8px] text-sm font-semibold hover:bg-brand-600 transition-colors disabled:opacity-50"
             >
               <Printer className="w-4 h-4 shrink-0" />
               {printing ? 'Printing…' : 'Print Label'}

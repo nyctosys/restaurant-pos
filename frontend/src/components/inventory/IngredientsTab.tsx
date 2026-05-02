@@ -572,14 +572,14 @@ export default function IngredientsTab() {
         <div className="ml-auto flex items-center gap-2">
           <button
             onClick={handleOpenBulkAdd}
-            className="flex items-center gap-2 bg-brand-700 text-white px-4 py-2 rounded-lg font-medium hover:bg-brand-600 touch-target transition-colors"
+            className="flex items-center gap-2 bg-brand-700 text-white px-4 py-2 rounded-[8px] font-medium hover:bg-brand-600 touch-target transition-colors"
           >
             <Plus className="w-4 h-4" />
             Add material
           </button>
           <button
             onClick={handleOpenBulkRestock}
-            className="flex items-center gap-2 bg-white/70 border border-white/70 text-soot-700 px-4 py-2 rounded-lg font-medium hover:bg-white/90 touch-target transition-colors"
+            className="flex items-center gap-2 bg-white/70 border border-white/70 text-soot-700 px-4 py-2 rounded-[8px] font-medium hover:bg-white/90 touch-target transition-colors"
           >
             <Layers className="w-4 h-4" />
             Restock
@@ -667,7 +667,7 @@ export default function IngredientsTab() {
                     <td className="py-4 px-3 text-right">
                       <button 
                         onClick={() => handleOpenEdit(ing)}
-                        className="p-2 text-neutral-400 hover:text-brand-600 hover:bg-brand-50 rounded-lg transition-colors inline-block"
+                        className="p-2 text-neutral-400 hover:text-brand-600 hover:bg-brand-50 rounded-[8px] transition-colors inline-block"
                       >
                         <Pencil className="w-4 h-4" />
                       </button>
@@ -685,14 +685,14 @@ export default function IngredientsTab() {
            <div className="glass-floating w-full max-w-lg my-auto flex flex-col max-h-[90vh] overflow-hidden">
              <div className="flex items-center justify-between px-6 py-4 border-b border-neutral-200/60 bg-white/25 shrink-0">
                 <h3 className="text-lg font-bold text-neutral-900">{editingIngredient ? 'Edit material' : 'Add raw material'}</h3>
-                <button onClick={() => setShowModal(false)} className="p-1.5 rounded-lg hover:bg-neutral-200 transition-colors">
+                <button onClick={() => setShowModal(false)} className="p-1.5 rounded-[8px] hover:bg-neutral-200 transition-colors">
                   <X className="w-5 h-5 text-neutral-500" />
                 </button>
              </div>
 
              <form onSubmit={handleSubmit} className="p-6 space-y-4 overflow-y-auto min-h-0 flex-1">
                {formError && (
-                 <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-2 text-sm font-medium">
+                 <div className="bg-red-50 border border-red-200 text-red-700 rounded-[8px] px-4 py-2 text-sm font-medium">
                    {formError}
                  </div>
                )}
@@ -776,8 +776,8 @@ export default function IngredientsTab() {
                </div>
 
                <div className="flex gap-3 pt-4">
-                 <button type="button" onClick={() => setShowModal(false)} className="flex-1 px-4 py-2.5 border border-neutral-200 rounded-lg text-sm font-medium text-neutral-600 hover:bg-neutral-50 transition-colors">Cancel</button>
-                 <button type="submit" disabled={submitting} className="flex-1 px-4 py-2.5 bg-brand-700 text-white rounded-lg text-sm font-medium hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 touch-target">
+                 <button type="button" onClick={() => setShowModal(false)} className="flex-1 px-4 py-2.5 border border-neutral-200 rounded-[8px] text-sm font-medium text-neutral-600 hover:bg-neutral-50 transition-colors">Cancel</button>
+                 <button type="submit" disabled={submitting} className="flex-1 px-4 py-2.5 bg-brand-700 text-white rounded-[8px] text-sm font-medium hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 touch-target">
                    {submitting && <Loader2 className="w-4 h-4 animate-spin" />}
                    {editingIngredient ? 'Save changes' : 'Add material'}
                  </button>
@@ -792,14 +792,14 @@ export default function IngredientsTab() {
           <div className="glass-floating w-full max-w-3xl my-auto flex flex-col max-h-[90vh] overflow-hidden">
             <div className="flex items-center justify-between px-6 py-4 border-b border-neutral-200/60 bg-white/25 shrink-0">
               <h3 className="text-lg font-bold text-neutral-900">Restock materials</h3>
-              <button onClick={handleCloseBulkRestock} className="p-1.5 rounded-lg hover:bg-neutral-200 transition-colors">
+              <button onClick={handleCloseBulkRestock} className="p-1.5 rounded-[8px] hover:bg-neutral-200 transition-colors">
                 <X className="w-5 h-5 text-neutral-500" />
               </button>
             </div>
 
             <form onSubmit={handleSubmitBulkRestock} className="p-6 space-y-4 overflow-y-auto min-h-0 flex-1">
               {restockError && (
-                <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-2 text-sm font-medium">
+                <div className="bg-red-50 border border-red-200 text-red-700 rounded-[8px] px-4 py-2 text-sm font-medium">
                   {restockError}
                 </div>
               )}
@@ -832,7 +832,7 @@ export default function IngredientsTab() {
                     : null;
 
                   return (
-                    <div key={row.key} className="grid grid-cols-12 gap-2 items-end glass-card p-4 rounded-xl border border-white/40">
+                    <div key={row.key} className="grid grid-cols-12 gap-2 items-end glass-card p-4 rounded-[11px] border border-white/40">
                       <div className="col-span-12 md:col-span-4">
                         <label className="block text-xs font-semibold text-neutral-600 mb-1">Select material from inventory</label>
                         <SearchableSelect
@@ -919,7 +919,7 @@ export default function IngredientsTab() {
                         <button
                           type="button"
                           onClick={() => removeRestockRow(row.key)}
-                          className="p-2 rounded-lg text-neutral-500 hover:text-red-600 hover:bg-red-50 transition-colors"
+                          className="p-2 rounded-[8px] text-neutral-500 hover:text-red-600 hover:bg-red-50 transition-colors"
                           title={`Remove row ${idx + 1}`}
                         >
                           <X className="w-4 h-4" />
@@ -940,7 +940,7 @@ export default function IngredientsTab() {
               <button
                 type="button"
                 onClick={addRestockRow}
-                className="flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg border border-white/80 bg-white/70 hover:bg-white/90 transition-colors"
+                className="flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-[8px] border border-white/80 bg-white/70 hover:bg-white/90 transition-colors"
               >
                 <Plus className="w-4 h-4" />
                 Add another item
@@ -950,14 +950,14 @@ export default function IngredientsTab() {
                 <button
                   type="button"
                   onClick={handleCloseBulkRestock}
-                  className="flex-1 px-4 py-2.5 border border-neutral-200 rounded-lg text-sm font-medium text-neutral-600 hover:bg-neutral-50 transition-colors"
+                  className="flex-1 px-4 py-2.5 border border-neutral-200 rounded-[8px] text-sm font-medium text-neutral-600 hover:bg-neutral-50 transition-colors"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={restockSubmitting}
-                  className="flex-1 px-4 py-2.5 bg-brand-700 text-white rounded-lg text-sm font-medium hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 touch-target"
+                  className="flex-1 px-4 py-2.5 bg-brand-700 text-white rounded-[8px] text-sm font-medium hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 touch-target"
                 >
                   {restockSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
                   Restock All Items
@@ -972,21 +972,21 @@ export default function IngredientsTab() {
           <div className="glass-floating w-full max-w-5xl my-auto flex flex-col max-h-[90vh] overflow-hidden">
             <div className="flex items-center justify-between px-6 py-4 border-b border-neutral-200/60 bg-white/25 shrink-0">
               <h3 className="text-lg font-bold text-neutral-900">Add raw materials</h3>
-              <button onClick={handleCloseBulkAdd} className="p-1.5 rounded-lg hover:bg-neutral-200 transition-colors">
+              <button onClick={handleCloseBulkAdd} className="p-1.5 rounded-[8px] hover:bg-neutral-200 transition-colors">
                 <X className="w-5 h-5 text-neutral-500" />
               </button>
             </div>
 
             <form onSubmit={handleSubmitBulkAdd} className="p-6 space-y-4 overflow-y-auto min-h-0 flex-1">
               {bulkAddError && (
-                <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-2 text-sm font-medium">
+                <div className="bg-red-50 border border-red-200 text-red-700 rounded-[8px] px-4 py-2 text-sm font-medium">
                   {bulkAddError}
                 </div>
               )}
 
               <div className="space-y-4">
                 {bulkAddRows.map((row) => (
-                  <div key={row.key} className="grid grid-cols-12 gap-3 items-end glass-card p-4 rounded-xl border border-white/40">
+                  <div key={row.key} className="grid grid-cols-12 gap-3 items-end glass-card p-4 rounded-[11px] border border-white/40">
                     <div className="col-span-12 md:col-span-2">
                       <label className="block text-xs font-semibold text-neutral-600 mb-1">Supplier</label>
                       <SearchableSelect
@@ -1052,7 +1052,7 @@ export default function IngredientsTab() {
                       <button
                         type="button"
                         onClick={() => removeBulkAddRow(row.key)}
-                        className="p-2 rounded-lg text-neutral-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                        className="p-2 rounded-[8px] text-neutral-400 hover:text-red-600 hover:bg-red-50 transition-colors"
                       >
                         <X className="w-4 h-4" />
                       </button>
@@ -1065,7 +1065,7 @@ export default function IngredientsTab() {
                 <button
                   type="button"
                   onClick={addBulkAddRow}
-                  className="flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg border border-white/80 bg-white/70 hover:bg-white/90 transition-colors"
+                  className="flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-[8px] border border-white/80 bg-white/70 hover:bg-white/90 transition-colors"
                 >
                   <Plus className="w-4 h-4" />
                   Add another material
@@ -1076,14 +1076,14 @@ export default function IngredientsTab() {
                 <button
                   type="button"
                   onClick={handleCloseBulkAdd}
-                  className="flex-1 px-4 py-2.5 border border-neutral-200 rounded-lg text-sm font-medium text-neutral-600 hover:bg-neutral-50 transition-colors"
+                  className="flex-1 px-4 py-2.5 border border-neutral-200 rounded-[8px] text-sm font-medium text-neutral-600 hover:bg-neutral-50 transition-colors"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={bulkAddSubmitting}
-                  className="flex-1 px-4 py-2.5 bg-brand-700 text-white rounded-lg text-sm font-medium hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 touch-target"
+                  className="flex-1 px-4 py-2.5 bg-brand-700 text-white rounded-[8px] text-sm font-medium hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 touch-target"
                 >
                   {bulkAddSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
                   Create All Materials

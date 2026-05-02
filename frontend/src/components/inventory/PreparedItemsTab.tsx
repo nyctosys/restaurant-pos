@@ -251,7 +251,7 @@ export default function PreparedItemsTab() {
           </div>
           <button
             onClick={openCreate}
-            className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-brand-700 text-white text-sm font-semibold hover:bg-brand-600 touch-target"
+            className="inline-flex items-center gap-2 px-3 py-2 rounded-[8px] bg-brand-700 text-white text-sm font-semibold hover:bg-brand-600 touch-target"
           >
             <Plus className="w-4 h-4" /> New
           </button>
@@ -328,7 +328,7 @@ export default function PreparedItemsTab() {
           <button
             type="submit"
             disabled={submitting}
-            className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-brand-700 text-white text-sm font-semibold hover:bg-brand-600 disabled:opacity-50 touch-target"
+            className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 rounded-[8px] bg-brand-700 text-white text-sm font-semibold hover:bg-brand-600 disabled:opacity-50 touch-target"
           >
             <Save className="w-4 h-4" /> Make and deduct
           </button>
@@ -336,7 +336,7 @@ export default function PreparedItemsTab() {
       </div>
 
       {showForm && (
-        <div className="fixed inset-0 z-50 bg-black/30 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center p-4">
           <form onSubmit={handleSubmit} className="glass-card w-full max-w-3xl max-h-[90vh] overflow-y-auto p-5 space-y-4">
             <div className="flex items-center justify-between gap-3">
               <h3 className="font-bold text-soot-900">{editingItem ? 'Edit' : 'New'} Sauce/Marination</h3>
@@ -468,7 +468,7 @@ export default function PreparedItemsTab() {
               <button
                 type="submit"
                 disabled={submitting}
-                className="px-4 py-2 rounded-lg bg-brand-700 text-white text-sm font-semibold hover:bg-brand-600 disabled:opacity-50"
+                className="px-4 py-2 rounded-[8px] bg-brand-700 text-white text-sm font-semibold hover:bg-brand-600 disabled:opacity-50"
               >
                 {submitting ? 'Saving...' : 'Save'}
               </button>

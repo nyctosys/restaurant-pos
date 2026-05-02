@@ -165,7 +165,7 @@ export default function ReceiptSettings() {
              <Loader2 className="w-5 h-5 animate-spin" /> Loading settings...
           </div>
         ) : (
-          <div className="space-y-5 bg-soot-50 p-6 rounded-xl border border-soot-200">
+          <div className="space-y-5 bg-soot-50 p-6 rounded-[11px] border border-soot-200">
             <div>
               <label className="block text-sm font-semibold text-soot-800 mb-1">Business Name (optional)</label>
               <input
@@ -173,7 +173,7 @@ export default function ReceiptSettings() {
                 inputMode="text"
                 value={businessName}
                 onChange={(e) => setBusinessName(e.target.value)}
-                className="w-full px-4 py-3 border border-soot-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:outline-none"
+                className="w-full px-4 py-3 border border-soot-200 rounded-[8px] focus:ring-2 focus:ring-brand-500 focus:outline-none"
                 placeholder="e.g. Main Street Kitchen"
               />
             </div>
@@ -185,7 +185,7 @@ export default function ReceiptSettings() {
                     value={businessAddress}
                     onChange={(e) => setBusinessAddress(e.target.value)}
                     rows={2}
-                    className="w-full px-4 py-3 border border-soot-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:outline-none text-sm"
+                    className="w-full px-4 py-3 border border-soot-200 rounded-[8px] focus:ring-2 focus:ring-brand-500 focus:outline-none text-sm"
                     placeholder="123 Main Street"
                   />
                </div>
@@ -196,7 +196,7 @@ export default function ReceiptSettings() {
                     inputMode="tel"
                     value={businessPhone}
                     onChange={(e) => setBusinessPhone(e.target.value)}
-                    className="w-full px-4 py-3 border border-soot-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:outline-none text-sm"
+                    className="w-full px-4 py-3 border border-soot-200 rounded-[8px] focus:ring-2 focus:ring-brand-500 focus:outline-none text-sm"
                     placeholder="(555) 123-4567"
                   />
                </div>
@@ -215,7 +215,7 @@ export default function ReceiptSettings() {
                       onChange={handleLogoUpload}
                       className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                     />
-                    <div className="w-full px-4 py-3 border border-dashed border-soot-300 rounded-lg bg-white flex items-center justify-center gap-2 text-soot-500 hover:bg-soot-100 transition-colors pointer-events-none">
+                    <div className="w-full px-4 py-3 border border-dashed border-soot-300 rounded-[8px] bg-white flex items-center justify-center gap-2 text-soot-500 hover:bg-soot-100 transition-colors pointer-events-none">
                        <Upload className="w-4 h-4" /> <span>Choose File</span>
                     </div>
                  </div>
@@ -228,7 +228,7 @@ export default function ReceiptSettings() {
               <p className="mt-1 text-xs text-soot-500">Only image files under 1MB. For cleanest print use a high-contrast logo (black on white, no gradients).</p>
             </div>
 
-            <div className="rounded-lg bg-soot-100 border border-soot-200 p-3">
+            <div className="rounded-[8px] bg-soot-100 border border-soot-200 p-3">
               <p className="text-sm font-medium text-soot-800 mb-1">Clean print tips (like reference receipts)</p>
               <p className="text-xs text-soot-600">Use a simple, high-contrast logo and keep body font at 1× for sharpest text. Header and total can be 1–2× for a clear, professional look.</p>
             </div>
@@ -243,7 +243,7 @@ export default function ReceiptSettings() {
                   step={10}
                   value={logoHeight}
                   onChange={(e) => setLogoHeight(Number(e.target.value))}
-                  className="flex-1 h-2 bg-soot-200 rounded-lg appearance-none cursor-pointer accent-brand-600"
+                  className="flex-1 h-2 bg-soot-200 rounded-[8px] appearance-none cursor-pointer accent-brand-600"
                 />
                 <span className="text-sm font-medium text-soot-700 w-10">{logoHeight}px</span>
               </div>
@@ -260,7 +260,7 @@ export default function ReceiptSettings() {
                   step={1}
                   value={headerFontScale}
                   onChange={(e) => setHeaderFontScale(Number(e.target.value))}
-                  className="flex-1 h-2 bg-soot-200 rounded-lg appearance-none cursor-pointer accent-brand-600"
+                  className="flex-1 h-2 bg-soot-200 rounded-[8px] appearance-none cursor-pointer accent-brand-600"
                 />
                 <span className="text-sm font-medium text-soot-700 w-8">{headerFontScale}x</span>
               </div>
@@ -276,7 +276,7 @@ export default function ReceiptSettings() {
                   step={1}
                   value={bodyFontScale}
                   onChange={(e) => setBodyFontScale(Number(e.target.value))}
-                  className="flex-1 h-2 bg-soot-200 rounded-lg appearance-none cursor-pointer accent-brand-600"
+                  className="flex-1 h-2 bg-soot-200 rounded-[8px] appearance-none cursor-pointer accent-brand-600"
                 />
                 <span className="text-sm font-medium text-soot-700 w-8">{bodyFontScale}x</span>
               </div>
@@ -292,7 +292,7 @@ export default function ReceiptSettings() {
                   step={1}
                   value={totalFontScale}
                   onChange={(e) => setTotalFontScale(Number(e.target.value))}
-                  className="flex-1 h-2 bg-soot-200 rounded-lg appearance-none cursor-pointer accent-brand-600"
+                  className="flex-1 h-2 bg-soot-200 rounded-[8px] appearance-none cursor-pointer accent-brand-600"
                 />
                 <span className="text-sm font-medium text-soot-700 w-8">{totalFontScale}x</span>
               </div>
@@ -304,7 +304,7 @@ export default function ReceiptSettings() {
                 value={footerMessage}
                 onChange={(e) => setFooterMessage(e.target.value)}
                 rows={3}
-                className="w-full px-4 py-3 border border-soot-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:outline-none"
+                className="w-full px-4 py-3 border border-soot-200 rounded-[8px] focus:ring-2 focus:ring-brand-500 focus:outline-none"
                 placeholder="e.g. Thank you for shopping!"
               />
             </div>
@@ -312,9 +312,9 @@ export default function ReceiptSettings() {
             <div className="border-t border-soot-200 pt-5">
               <p className="text-sm font-semibold text-soot-800 mb-3">Extra footer lines</p>
               <p className="text-xs text-soot-500 mb-2">Optional lines below the main footer (e.g. website, branch code, terms).</p>
-              <input type="text" inputMode="text" value={footerLine1} onChange={(e) => setFooterLine1(e.target.value)} placeholder="e.g. Visit: https://example.com" className="w-full px-4 py-2 border border-soot-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none mb-2" />
-              <input type="text" inputMode="text" value={footerLine2} onChange={(e) => setFooterLine2(e.target.value)} placeholder="e.g. Branch code: 820989" className="w-full px-4 py-2 border border-soot-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none mb-2" />
-              <input type="text" inputMode="text" value={footerLine3} onChange={(e) => setFooterLine3(e.target.value)} placeholder="e.g. Terms and conditions: Discount valid 30 days" className="w-full px-4 py-2 border border-soot-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none" />
+              <input type="text" inputMode="text" value={footerLine1} onChange={(e) => setFooterLine1(e.target.value)} placeholder="e.g. Visit: https://example.com" className="w-full px-4 py-2 border border-soot-200 rounded-[8px] text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none mb-2" />
+              <input type="text" inputMode="text" value={footerLine2} onChange={(e) => setFooterLine2(e.target.value)} placeholder="e.g. Branch code: 820989" className="w-full px-4 py-2 border border-soot-200 rounded-[8px] text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none mb-2" />
+              <input type="text" inputMode="text" value={footerLine3} onChange={(e) => setFooterLine3(e.target.value)} placeholder="e.g. Terms and conditions: Discount valid 30 days" className="w-full px-4 py-2 border border-soot-200 rounded-[8px] text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none" />
             </div>
 
             <div className="border-t border-soot-200 pt-5">
@@ -323,31 +323,31 @@ export default function ReceiptSettings() {
               <div className="grid grid-cols-2 gap-3 mb-3">
                 <div>
                   <label className="block text-xs font-medium text-soot-600 mb-0.5">GST#</label>
-                  <input type="text" inputMode="numeric" value={gstNumber} onChange={(e) => setGstNumber(e.target.value)} placeholder="e.g. 3277876276814" className="w-full px-4 py-2 border border-soot-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none" />
+                  <input type="text" inputMode="numeric" value={gstNumber} onChange={(e) => setGstNumber(e.target.value)} placeholder="e.g. 3277876276814" className="w-full px-4 py-2 border border-soot-200 rounded-[8px] text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none" />
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-soot-600 mb-0.5">NTN#</label>
-                  <input type="text" inputMode="text" value={ntnNumber} onChange={(e) => setNtnNumber(e.target.value)} placeholder="e.g. 4555916-4" className="w-full px-4 py-2 border border-soot-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none" />
+                  <input type="text" inputMode="text" value={ntnNumber} onChange={(e) => setNtnNumber(e.target.value)} placeholder="e.g. 4555916-4" className="w-full px-4 py-2 border border-soot-200 rounded-[8px] text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none" />
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-3 mb-2">
                 <div>
                   <label className="block text-xs font-medium text-soot-600 mb-0.5">Custom 1 label</label>
-                  <input type="text" inputMode="text" value={customId1Label} onChange={(e) => setCustomId1Label(e.target.value)} placeholder="e.g. FBR Invoice" className="w-full px-4 py-2 border border-soot-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none" />
+                  <input type="text" inputMode="text" value={customId1Label} onChange={(e) => setCustomId1Label(e.target.value)} placeholder="e.g. FBR Invoice" className="w-full px-4 py-2 border border-soot-200 rounded-[8px] text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none" />
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-soot-600 mb-0.5">Custom 1 value</label>
-                  <input type="text" inputMode="text" value={customId1Value} onChange={(e) => setCustomId1Value(e.target.value)} placeholder="e.g. 174747EISK5376524" className="w-full px-4 py-2 border border-soot-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none" />
+                  <input type="text" inputMode="text" value={customId1Value} onChange={(e) => setCustomId1Value(e.target.value)} placeholder="e.g. 174747EISK5376524" className="w-full px-4 py-2 border border-soot-200 rounded-[8px] text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none" />
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-soot-600 mb-0.5">Custom 2 label</label>
-                  <input type="text" inputMode="text" value={customId2Label} onChange={(e) => setCustomId2Label(e.target.value)} placeholder="e.g. CHK" className="w-full px-4 py-2 border border-soot-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none" />
+                  <input type="text" inputMode="text" value={customId2Label} onChange={(e) => setCustomId2Label(e.target.value)} placeholder="e.g. CHK" className="w-full px-4 py-2 border border-soot-200 rounded-[8px] text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none" />
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-soot-600 mb-0.5">Custom 2 value</label>
-                  <input type="text" inputMode="text" value={customId2Value} onChange={(e) => setCustomId2Value(e.target.value)} placeholder="e.g. 1935-2-20250925" className="w-full px-4 py-2 border border-soot-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none" />
+                  <input type="text" inputMode="text" value={customId2Value} onChange={(e) => setCustomId2Value(e.target.value)} placeholder="e.g. 1935-2-20250925" className="w-full px-4 py-2 border border-soot-200 rounded-[8px] text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none" />
                 </div>
               </div>
             </div>
@@ -355,13 +355,13 @@ export default function ReceiptSettings() {
             <div className="border-t border-soot-200 pt-5">
               <p className="text-sm font-semibold text-soot-800 mb-1">QR code on receipt</p>
               <p className="text-xs text-soot-500 mb-2">URL or text to encode as a QR code (e.g. invoice URL, store link). Printed below footer when set.</p>
-              <input type="text" inputMode="url" value={qrCodeContent} onChange={(e) => setQrCodeContent(e.target.value)} placeholder="e.g. https://example.com/invoice" className="w-full px-4 py-3 border border-soot-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:outline-none text-sm" />
+              <input type="text" inputMode="url" value={qrCodeContent} onChange={(e) => setQrCodeContent(e.target.value)} placeholder="e.g. https://example.com/invoice" className="w-full px-4 py-3 border border-soot-200 rounded-[8px] focus:ring-2 focus:ring-brand-500 focus:outline-none text-sm" />
             </div>
 
             <button 
               onClick={handleSave}
               disabled={saving}
-              className="mt-4 bg-brand-700 text-white px-6 py-3 rounded-lg font-bold hover:bg-brand-600 disabled:opacity-50 transition-colors flex items-center gap-2"
+              className="mt-4 bg-brand-700 text-white px-6 py-3 rounded-[8px] font-bold hover:bg-brand-600 disabled:opacity-50 transition-colors flex items-center gap-2"
             >
               {saving && <Loader2 className="w-4 h-4 animate-spin" />}
               Save Receipt Layout
@@ -371,10 +371,10 @@ export default function ReceiptSettings() {
       </div>
 
       {/* Live Preview */}
-      <div className="flex items-start justify-center p-8 bg-soot-900 rounded-xl relative overflow-hidden">
+      <div className="flex items-start justify-center p-8 bg-soot-900 rounded-[11px] relative overflow-hidden">
         {/* Subtle patterned background or grid could go here */}
         
-        <div className="receipt-paper w-72 shadow-2xl p-6 font-mono text-sm shadow-black/20 transform rotate-1 rounded-sm">
+        <div className="receipt-paper w-72 p-6 font-mono text-sm transform rotate-1 rounded-sm">
           {logoUrl && (
             <div className="flex justify-center mb-4 w-full">
                <img src={logoUrl} alt="Store Logo" className="w-full object-contain grayscale" style={{ maxHeight: Math.min(logoHeight, 120) }} />

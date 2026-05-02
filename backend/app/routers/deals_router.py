@@ -1,11 +1,11 @@
 from datetime import datetime, timezone
-from typing import List
+from typing import Any, List
 
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
-from app.models import db, User, Product, ComboItem
+from app.models import db, User, Product, ComboItem, SaleItem
 from app.services.product_pricing import effective_sale_price
 from app.services.recipe_variants import (
     normalize_combo_category_name,
@@ -13,6 +13,7 @@ from app.services.recipe_variants import (
     normalize_variant_key,
 )
 from app.deps import get_current_user, require_owner
+from app.routers.common import yes
 from app.routers.menu import _normalize_variants_list
 
 deals_router = APIRouter(prefix="/api/inventory-advanced/deals", tags=["deals"])
@@ -36,45 +37,57 @@ class DealCreate(BaseModel):
     combo_items: List[ComboItemCreate]
 
 
-def _list_deals_impl(current_user: User) -> dict[str, list[dict]]:
-    # Returns all products that are deals (restaurant menu promotions).
-    deals = Product.query.filter_by(is_deal=True, archived_at=None).all()
-    output: list[dict] = []
-    for d in deals:
-        items: list[dict] = []
-        for ci in d.combo_items:
-            items.append(
-                {
-                    "id": ci.id,
-                    "product_id": ci.product_id,
-                    "product_title": ci.child_product.title if ci.child_product else None,
-                    "quantity": ci.quantity,
-                    "selection_type": normalize_combo_selection_type(getattr(ci, "selection_type", None)),
-                    "category_name": normalize_combo_category_name(getattr(ci, "category_name", None)),
-                    "variant_key": normalize_variant_key(getattr(ci, "variant_key", None)),
-                }
-            )
-        output.append(
+def _deal_variant_labels(raw: Any) -> list[str]:
+    return [str(variant.get("name") or "").strip() for variant in _normalize_variants_list(raw) if str(variant.get("name") or "").strip()]
+
+
+def _deal_to_dict(deal: Product) -> dict:
+    items: list[dict] = []
+    for ci in deal.combo_items:
+        items.append(
             {
-                "id": d.id,
-                "sku": d.sku,
-                "title": d.title,
-                "base_price": float(d.base_price),
-                "sale_price": effective_sale_price(d),
-                "section": (d.section or "").strip() or "Deals",
-                "variants": _normalize_variants_list(getattr(d, "variants", None)),
-                "combo_items": items,
+                "id": ci.id,
+                "product_id": ci.product_id,
+                "product_title": ci.child_product.title if ci.child_product else None,
+                "quantity": ci.quantity,
+                "selection_type": normalize_combo_selection_type(getattr(ci, "selection_type", None)),
+                "category_name": normalize_combo_category_name(getattr(ci, "category_name", None)),
+                "variant_key": normalize_variant_key(getattr(ci, "variant_key", None)),
             }
         )
-    return {"deals": output}
+    return {
+        "id": deal.id,
+        "sku": deal.sku,
+        "title": deal.title,
+        "base_price": float(deal.base_price),
+        "sale_price": effective_sale_price(deal),
+        "section": (deal.section or "").strip() or "Deals",
+        "variants": _deal_variant_labels(getattr(deal, "variants", None)),
+        "combo_items": items,
+        "archived_at": deal.archived_at.isoformat() if getattr(deal, "archived_at", None) else None,
+    }
 
 
-def _create_deal_impl(payload: DealCreate, current_user: User) -> dict[str, object]:
-    existing = Product.query.filter_by(sku=payload.sku).first()
-    if existing:
+def _list_deals_impl(current_user: User, include_archived: str | None = None) -> dict[str, list[dict]]:
+    # Returns all products that are deals (restaurant menu promotions).
+    query = Product.query.filter_by(is_deal=True)
+    if not yes(include_archived):
+        query = query.filter(Product.archived_at == None)  # noqa: E711
+    return {"deals": [_deal_to_dict(deal) for deal in query.all()]}
+
+
+def _validate_deal_payload(payload: DealCreate, deal_id: int | None = None) -> tuple[dict[str, object], list[dict[str, object]]] | JSONResponse:
+    sku = (payload.sku or "").strip()
+    title = (payload.title or "").strip()
+    if not sku or not title:
+        return JSONResponse(status_code=400, content={"message": "Deal title and SKU are required"})
+
+    existing = Product.query.filter_by(sku=sku).first()
+    if existing and (deal_id is None or existing.id != deal_id):
         return JSONResponse(status_code=400, content={"message": "SKU already exists"})
 
-    variant_labels = _normalize_variants_list(payload.variants)
+    variant_objects = _normalize_variants_list(payload.variants)
+    variant_labels = _deal_variant_labels(payload.variants)
     label_set = set(variant_labels)
 
     for ci in payload.combo_items:
@@ -143,7 +156,7 @@ def _create_deal_impl(payload: DealCreate, current_user: User) -> dict[str, obje
                 status_code=400,
                 content={"message": f"Combo line {index + 1} references a menu item that is unavailable."},
             )
-        if getattr(product, "is_deal", False):
+        if product.id == deal_id or getattr(product, "is_deal", False):
             return JSONResponse(
                 status_code=400,
                 content={"message": "Deals cannot include another deal as a combo line."},
@@ -158,34 +171,82 @@ def _create_deal_impl(payload: DealCreate, current_user: User) -> dict[str, obje
             }
         )
 
+    return (
+        {
+            "sku": sku,
+            "title": title,
+            "sale_price": float(sale_price),
+            "variants": variant_objects,
+        },
+        normalized_combo_items,
+    )
+
+
+def _replace_combo_items(deal: Product, combo_items: list[dict[str, object]]) -> None:
+    deal.combo_items.clear()
+    db.session.flush()
+    for ci_data in combo_items:
+        db.session.add(
+            ComboItem(
+                combo_id=deal.id,
+                product_id=ci_data["product_id"],
+                quantity=ci_data["quantity"],
+                selection_type=ci_data["selection_type"],
+                category_name=ci_data["category_name"] or None,
+                variant_key=ci_data["variant_key"],
+            )
+        )
+
+
+def _create_deal_impl(payload: DealCreate, current_user: User) -> dict[str, object]:
+    validated = _validate_deal_payload(payload)
+    if isinstance(validated, JSONResponse):
+        return validated
+    deal_data, normalized_combo_items = validated
+
+    existing = Product.query.filter_by(sku=deal_data["sku"]).first()
+    if existing:
+        return JSONResponse(status_code=400, content={"message": "SKU already exists"})
+
     combo = Product(
-        sku=payload.sku,
-        title=payload.title,
+        sku=deal_data["sku"],
+        title=deal_data["title"],
         base_price=0,
-        sale_price=float(sale_price),
-        variants=variant_labels,
+        sale_price=deal_data["sale_price"],
+        variants=deal_data["variants"],
         is_deal=True,
         section="Deals",
     )
     db.session.add(combo)
     db.session.flush()
-
-    for ci_data in normalized_combo_items:
-        ci = ComboItem(
-            combo_id=combo.id,
-            product_id=ci_data["product_id"],
-            quantity=ci_data["quantity"],
-            selection_type=ci_data["selection_type"],
-            category_name=ci_data["category_name"] or None,
-            variant_key=ci_data["variant_key"],
-        )
-        db.session.add(ci)
+    _replace_combo_items(combo, normalized_combo_items)
 
     db.session.commit()
     return {"id": combo.id, "message": "Deal created successfully"}
 
 
-def _delete_deal_impl(deal_id: int, current_user: User) -> dict[str, object]:
+def _update_deal_impl(deal_id: int, payload: DealCreate, current_user: User) -> dict[str, object]:
+    deal = db.session.get(Product, deal_id)
+    if not deal or not deal.is_deal:
+        return JSONResponse(status_code=404, content={"message": "Deal not found"})
+
+    validated = _validate_deal_payload(payload, deal_id=deal_id)
+    if isinstance(validated, JSONResponse):
+        return validated
+    deal_data, normalized_combo_items = validated
+
+    deal.sku = deal_data["sku"]
+    deal.title = deal_data["title"]
+    deal.base_price = 0
+    deal.sale_price = deal_data["sale_price"]
+    deal.variants = deal_data["variants"]
+    deal.section = "Deals"
+    _replace_combo_items(deal, normalized_combo_items)
+    db.session.commit()
+    return {"id": deal.id, "message": "Deal updated successfully", "deal": _deal_to_dict(deal)}
+
+
+def _archive_deal_impl(deal_id: int, current_user: User) -> dict[str, object]:
     """Soft-delete: archive the deal product so past sales keep valid product_id / combo rows."""
     deal = db.session.get(Product, deal_id)
     if not deal or not deal.is_deal:
@@ -201,9 +262,36 @@ def _delete_deal_impl(deal_id: int, current_user: User) -> dict[str, object]:
     }
 
 
+def _unarchive_deal_impl(deal_id: int, current_user: User) -> dict[str, object]:
+    deal = db.session.get(Product, deal_id)
+    if not deal or not deal.is_deal:
+        return JSONResponse(status_code=404, content={"message": "Deal not found"})
+    deal.archived_at = None
+    db.session.commit()
+    return {"message": "Deal restored to menu."}
+
+
+def _delete_deal_permanent_impl(deal_id: int, current_user: User) -> dict[str, object]:
+    deal = db.session.get(Product, deal_id)
+    if not deal or not deal.is_deal:
+        return JSONResponse(status_code=404, content={"message": "Deal not found"})
+    sale_items_count = SaleItem.query.filter_by(product_id=deal_id).count()
+    try:
+        SaleItem.query.filter_by(product_id=deal_id).update({"product_id": None}, synchronize_session=False)
+        db.session.delete(deal)
+        db.session.commit()
+        return {
+            "message": "Deal permanently deleted.",
+            "related_kept": {"sale_items_cleared": sale_items_count},
+        }
+    except Exception as exc:
+        db.session.rollback()
+        return JSONResponse(status_code=500, content={"message": "Error deleting deal", "error": str(exc)})
+
+
 @deals_router.get("/")
-def list_deals(current_user: User = Depends(get_current_user)):
-    return _list_deals_impl(current_user)
+def list_deals(include_archived: str | None = None, current_user: User = Depends(get_current_user)):
+    return _list_deals_impl(current_user, include_archived=include_archived)
 
 
 @deals_router.post("/")
@@ -211,15 +299,32 @@ def create_deal(payload: DealCreate, current_user: User = Depends(require_owner)
     return _create_deal_impl(payload, current_user)
 
 
+@deals_router.put("/{deal_id}")
+def update_deal(deal_id: int, payload: DealCreate, current_user: User = Depends(require_owner)):
+    return _update_deal_impl(deal_id, payload, current_user)
+
+
+@deals_router.patch("/{deal_id}/archive")
+def archive_deal(deal_id: int, current_user: User = Depends(require_owner)):
+    return _archive_deal_impl(deal_id, current_user)
+
+
+@deals_router.patch("/{deal_id}/unarchive")
+def unarchive_deal(deal_id: int, current_user: User = Depends(require_owner)):
+    return _unarchive_deal_impl(deal_id, current_user)
+
+
 @deals_router.delete("/{deal_id}")
-def delete_deal(deal_id: int, current_user: User = Depends(require_owner)):
-    return _delete_deal_impl(deal_id, current_user)
+def delete_deal(deal_id: int, permanent: str | None = None, current_user: User = Depends(require_owner)):
+    if yes(permanent):
+        return _delete_deal_permanent_impl(deal_id, current_user)
+    return _archive_deal_impl(deal_id, current_user)
 
 
 # New canonical namespace: menu management owns deals/combos.
 @menu_deals_router.get("/")
-def list_menu_deals(current_user: User = Depends(get_current_user)):
-    return _list_deals_impl(current_user)
+def list_menu_deals(include_archived: str | None = None, current_user: User = Depends(get_current_user)):
+    return _list_deals_impl(current_user, include_archived=include_archived)
 
 
 @menu_deals_router.post("/")
@@ -227,6 +332,23 @@ def create_menu_deal(payload: DealCreate, current_user: User = Depends(require_o
     return _create_deal_impl(payload, current_user)
 
 
+@menu_deals_router.put("/{deal_id}")
+def update_menu_deal(deal_id: int, payload: DealCreate, current_user: User = Depends(require_owner)):
+    return _update_deal_impl(deal_id, payload, current_user)
+
+
+@menu_deals_router.patch("/{deal_id}/archive")
+def archive_menu_deal(deal_id: int, current_user: User = Depends(require_owner)):
+    return _archive_deal_impl(deal_id, current_user)
+
+
+@menu_deals_router.patch("/{deal_id}/unarchive")
+def unarchive_menu_deal(deal_id: int, current_user: User = Depends(require_owner)):
+    return _unarchive_deal_impl(deal_id, current_user)
+
+
 @menu_deals_router.delete("/{deal_id}")
-def delete_menu_deal(deal_id: int, current_user: User = Depends(require_owner)):
-    return _delete_deal_impl(deal_id, current_user)
+def delete_menu_deal(deal_id: int, permanent: str | None = None, current_user: User = Depends(require_owner)):
+    if yes(permanent):
+        return _delete_deal_permanent_impl(deal_id, current_user)
+    return _archive_deal_impl(deal_id, current_user)
