@@ -441,6 +441,71 @@ table {
   border-color: var(--apple-hairline);
 }
 
+table th,
+table td {
+  border-color: var(--apple-hairline);
+}
+
+.app-table-shell {
+  overflow: hidden;
+  border-radius: 18px;
+  background: rgb(255 255 255 / 0.82);
+  border: 1px solid rgb(255 255 255 / 0.7);
+}
+
+.app-table-scroll {
+  overflow-x: auto;
+}
+
+.app-table {
+  width: 100%;
+  text-align: left;
+  border-collapse: separate;
+  border-spacing: 0;
+  color: var(--apple-ink);
+}
+
+.app-table thead {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.app-table th {
+  background: rgb(245 245 247 / 0.96) !important;
+  color: #6e6e73;
+  border-bottom: 1px solid #d2d2d7 !important;
+  padding: 0.75rem 1rem;
+  font-size: 0.6875rem;
+  line-height: 1rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+
+.app-table td {
+  border-bottom: 1px solid rgb(210 210 215 / 0.64) !important;
+  padding: 0.875rem 1rem;
+  vertical-align: middle;
+}
+
+.app-table tbody tr {
+  background: transparent;
+}
+
+.app-table tbody tr:nth-child(even) {
+  background: rgb(0 0 0 / 0.015);
+}
+
+.app-table tbody tr:hover {
+  background: rgb(0 102 204 / 0.07) !important;
+}
+
+.app-table tbody tr:last-child td {
+  border-bottom: 0 !important;
+}
+
 .dark body {
   background: #000000;
   color: #f5f5f7;
@@ -469,6 +534,103 @@ table {
   color: #f5f5f7;
 }
 
+.dark table {
+  color: #f5f5f7;
+  border-color: rgb(255 255 255 / 0.12);
+}
+
+.dark table thead,
+.dark table thead tr,
+.dark table th {
+  background-color: rgb(42 42 44 / 0.96) !important;
+  color: #a1a1a6;
+  border-color: rgb(255 255 255 / 0.14) !important;
+}
+
+.dark table tbody {
+  background-color: rgb(29 29 31 / 0.72);
+}
+
+.dark table tbody tr {
+  border-color: rgb(255 255 255 / 0.1) !important;
+  transition:
+    background-color var(--apple-motion) ease,
+    color var(--apple-motion) ease,
+    border-color var(--apple-motion) ease;
+}
+
+.dark table tbody tr:hover {
+  background-color: rgb(0 102 204 / 0.16) !important;
+}
+
+.dark table tbody tr[class*="bg-brand-50"] {
+  background-color: rgb(6 59 109 / 0.26) !important;
+}
+
+.dark table tbody tr[class*="bg-orange-50"],
+.dark table tbody tr[class*="bg-amber-50"] {
+  background-color: rgb(120 53 15 / 0.24) !important;
+}
+
+.dark table tbody tr[class*="bg-neutral-50"],
+.dark table tbody tr[class*="bg-white"] {
+  background-color: rgb(39 39 41 / 0.82) !important;
+}
+
+.dark .app-table-shell {
+  background: rgb(29 29 31 / 0.96);
+  border-color: rgb(255 255 255 / 0.14);
+}
+
+.dark .app-table {
+  color: #f5f5f7;
+}
+
+.dark .app-table th {
+  background: rgb(42 42 44 / 0.98) !important;
+  color: #d2d2d7;
+  border-bottom-color: rgb(255 255 255 / 0.18) !important;
+}
+
+.dark .app-table td {
+  border-bottom-color: rgb(255 255 255 / 0.11) !important;
+}
+
+.dark .app-table tbody tr {
+  background: transparent !important;
+}
+
+.dark .app-table tbody tr:nth-child(even) {
+  background: rgb(255 255 255 / 0.025) !important;
+}
+
+.dark .app-table tbody tr:hover {
+  background: rgb(41 151 255 / 0.18) !important;
+}
+
+.dark .app-table tbody tr[class*="bg-brand-50"] {
+  background: rgb(41 151 255 / 0.12) !important;
+}
+
+.dark .app-table tbody tr[class*="bg-orange-50"],
+.dark .app-table tbody tr[class*="bg-amber-50"] {
+  background: rgb(245 158 11 / 0.14) !important;
+}
+
+.dark .menu-items-table td,
+.dark .menu-items-table td [class*="text-neutral-"] {
+  color: #f5f5f7 !important;
+}
+
+.dark .menu-items-table td [class*="text-soot-"],
+.dark .menu-items-table td .font-mono {
+  color: #e8e8ed !important;
+}
+
+.dark .menu-items-table td [class*="text-brand-"] {
+  color: #8ecbff !important;
+}
+
 .dark .bg-white,
 .dark .bg-white\/95,
 .dark .bg-white\/90,
@@ -489,6 +651,111 @@ table {
 .dark .bg-neutral-100,
 .dark .bg-neutral-100\/80 {
   background-color: rgb(39 39 41 / 0.94) !important;
+}
+
+.dark .hover\:bg-white:hover,
+.dark .hover\:bg-white\/95:hover,
+.dark .hover\:bg-white\/90:hover,
+.dark .hover\:bg-white\/80:hover,
+.dark .hover\:bg-white\/75:hover,
+.dark .hover\:bg-white\/70:hover,
+.dark .hover\:bg-white\/60:hover,
+.dark .hover\:bg-white\/50:hover,
+.dark .hover\:bg-white\/40:hover,
+.dark .hover\:bg-white\/30:hover,
+.dark .hover\:bg-white\/25:hover,
+.dark .hover\:bg-white\/20:hover,
+.dark .hover\:bg-white\/10:hover {
+  background-color: rgb(255 255 255 / 0.08) !important;
+}
+
+.dark .hover\:bg-neutral-50:hover,
+.dark .hover\:bg-neutral-100:hover,
+.dark .hover\:bg-neutral-200:hover,
+.dark .hover\:bg-soot-50:hover,
+.dark .hover\:bg-soot-100:hover,
+.dark .hover\:bg-soot-200:hover {
+  background-color: rgb(255 255 255 / 0.08) !important;
+}
+
+.dark .hover\:bg-brand-50:hover,
+.dark .hover\:bg-brand-100:hover {
+  background-color: rgb(41 151 255 / 0.18) !important;
+}
+
+.dark .hover\:bg-red-50:hover {
+  background-color: rgb(239 68 68 / 0.16) !important;
+}
+
+.dark .hover\:bg-amber-50:hover,
+.dark .hover\:bg-orange-50:hover {
+  background-color: rgb(245 158 11 / 0.16) !important;
+}
+
+.dark button[class*="bg-brand-700"]:not(:disabled):hover,
+.dark button[class*="bg-brand-600"]:not(:disabled):hover,
+.dark a[class*="bg-brand-700"]:hover,
+.dark a[class*="bg-brand-600"]:hover {
+  background-color: #58adff !important;
+  border-color: #8ecbff !important;
+  box-shadow: 0 0 0 1px rgb(255 255 255 / 0.06) inset;
+}
+
+.dark .hover\:text-soot-700:hover,
+.dark .hover\:text-soot-900:hover,
+.dark .hover\:text-neutral-800:hover,
+.dark .hover\:text-neutral-900:hover {
+  color: #ffffff !important;
+}
+
+.dark .hover\:text-brand-600:hover,
+.dark .hover\:text-brand-700:hover,
+.dark .hover\:text-brand-800:hover {
+  color: #8ecbff !important;
+}
+
+.dark .hover\:text-red-500:hover,
+.dark .hover\:text-red-600:hover,
+.dark .hover\:text-red-700:hover {
+  color: #fca5a5 !important;
+}
+
+.dark .hover\:text-amber-600:hover,
+.dark .hover\:text-orange-600:hover {
+  color: #fcd34d !important;
+}
+
+.dark .app-table tbody tr:hover,
+.dark .app-table tbody tr[class*="bg-white"]:hover,
+.dark .app-table tbody tr[class*="bg-neutral-50"]:hover,
+.dark .app-table tbody tr[class*="bg-brand-50"]:hover,
+.dark .app-table tbody tr[class*="bg-orange-50"]:hover,
+.dark .app-table tbody tr[class*="bg-amber-50"]:hover {
+  background: rgb(41 151 255 / 0.24) !important;
+}
+
+.dark .kot-primary:not(:disabled):hover {
+  background-color: #0077ed !important;
+  border-color: #58adff !important;
+  transform: translateY(-1px);
+}
+
+.dark .table-select-button:not(:disabled):not([class*="bg-brand-500"]):hover {
+  background-color: rgb(41 151 255 / 0.22) !important;
+  border-color: #2997ff !important;
+  color: #f5f5f7 !important;
+  transform: translateY(-1px);
+}
+
+.settings-layout,
+.settings-content {
+  min-height: 0;
+}
+
+.settings-nav,
+.settings-content {
+  scrollbar-gutter: stable;
+  -webkit-overflow-scrolling: touch;
 }
 
 .dark .border-white,

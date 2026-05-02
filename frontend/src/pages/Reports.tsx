@@ -376,7 +376,9 @@ export default function Reports() {
 
           {/* Recent Transactions */}
           <section className="shrink-0">
-            <h3 className="text-lg font-bold text-soot-900 mb-4">Recent transactions</h3>
+            <h3 className="mb-4 flex items-center gap-2 text-lg font-bold text-soot-900">
+              <ReceiptText className="h-5 w-5 text-soot-600" /> Recent transactions
+            </h3>
             {loading && sales.length === 0 ? (
                <div className="py-12 flex justify-center text-soot-400">
                  <Loader2 className="w-6 h-6 animate-spin" />
@@ -386,11 +388,11 @@ export default function Reports() {
                 <p className="font-medium">No transactions found for this period.</p>
               </div>
             ) : (
-              <div className="glass-card overflow-hidden border border-white/60 bg-white/70">
-                <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse min-w-[760px]">
+              <div className="glass-card app-table-shell">
+                <div className="app-table-scroll">
+                <table className="app-table min-w-[760px]">
                   <thead>
-                    <tr className="bg-white/40 border-b border-soot-200/80 text-xs uppercase text-soot-600 font-semibold tracking-wider">
+                    <tr>
                       <th aria-sort={salesSortKey === 'id' ? (salesSortDirection === 'asc' ? 'ascending' : 'descending') : 'none'} className="py-3 px-3 lg:px-4 xl:py-2 xl:px-3 xl:text-[11px]">
                         <button type="button" onClick={() => handleSalesSort('id')} className="flex items-center gap-2 text-left transition-colors hover:text-soot-700 focus:outline-none focus-visible:text-soot-900">
                           <span>Transaction ID</span>
@@ -429,7 +431,7 @@ export default function Reports() {
                       <tr 
                         key={sale.id} 
                         onClick={() => setSelectedSaleId(sale.id)}
-                        className={`border-b border-soot-100 hover:bg-white/30 cursor-pointer transition-colors min-h-[48px] xl:min-h-0 ${sale.status === 'refunded' ? 'opacity-60' : ''} ${sale.archived_at ? 'bg-white/20' : ''}`}
+                        className={`cursor-pointer transition-colors min-h-[48px] xl:min-h-0 ${sale.status === 'refunded' ? 'opacity-60' : ''} ${sale.archived_at ? 'bg-white/20' : ''}`}
                       >
                         <td className="py-3 px-3 lg:px-4 xl:py-2 xl:px-3 text-sm font-medium text-soot-900">#ORD-{sale.id}</td>
                         <td className="py-3 px-3 lg:px-4 xl:py-2 xl:px-3 text-sm text-soot-600">{getFormatDate(sale.created_at)}</td>
@@ -468,11 +470,11 @@ export default function Reports() {
                 <p className="font-medium">No stock movements for this period.</p>
               </div>
             ) : (
-              <div className="glass-card overflow-hidden border border-white/60 bg-white/70">
-                <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse min-w-[520px]">
+              <div className="glass-card app-table-shell">
+                <div className="app-table-scroll">
+                <table className="app-table min-w-[520px]">
                   <thead>
-                    <tr className="bg-white/40 border-b border-soot-200/80 text-xs uppercase text-soot-600 font-semibold tracking-wider">
+                    <tr>
                       <th aria-sort={stockSortKey === 'created_at' ? (stockSortDirection === 'asc' ? 'ascending' : 'descending') : 'none'} className="py-3 px-3 lg:px-4 xl:py-2 xl:px-3 xl:text-[11px]">
                         <button type="button" onClick={() => handleStockSort('created_at')} className="flex items-center gap-2 text-left transition-colors hover:text-soot-700 focus:outline-none focus-visible:text-soot-900">
                           <span>Date & time</span>
@@ -501,7 +503,7 @@ export default function Reports() {
                   </thead>
                   <tbody>
                     {sortedStockTransactions.map((tx) => (
-                      <tr key={tx.id} className="border-b border-soot-100 hover:bg-white/30 min-h-[48px] xl:min-h-0">
+                      <tr key={tx.id} className="min-h-[48px] xl:min-h-0">
                         <td className="py-3 px-3 lg:px-4 xl:py-2 xl:px-3 text-sm text-soot-600">{getFormatDate(tx.created_at)}</td>
                         <td className="py-3 px-3 lg:px-4 xl:py-2 xl:px-3 text-sm font-medium text-soot-900">
                           {tx.ingredient_name ?? (tx.product_title ? tx.product_title : tx.ingredient_id != null ? `#${tx.ingredient_id}` : '—')}

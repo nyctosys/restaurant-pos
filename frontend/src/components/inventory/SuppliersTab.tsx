@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, X, Loader2, Pencil } from 'lucide-react';
-import { get, post, put, getUserMessage } from '../../api';
+import { Plus, X, Loader2, Pencil, Trash2 } from 'lucide-react';
+import { del, get, post, put, getUserMessage } from '../../api';
+import { showConfirm } from '../ConfirmDialog';
 import { showToast } from '../Toast';
 import { generateAutoSku } from '../../utils/sku';
 
@@ -32,6 +33,7 @@ export default function SuppliersTab() {
   const [formNotes, setFormNotes] = useState('');
   const [formError, setFormError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [deletingSupplierId, setDeletingSupplierId] = useState<number | null>(null);
 
   useEffect(() => {
     fetchSuppliers();
@@ -125,6 +127,27 @@ export default function SuppliersTab() {
     setFormSku(nextSku);
   }, [editingSupplier, formName, formSkuTouched, suppliers]);
 
+  const handleDeleteSupplier = async (supplier: Supplier) => {
+    const confirmed = await showConfirm({
+      title: 'Archive supplier?',
+      message: `${supplier.name} will be removed from active supplier lists. Existing purchase orders stay in history, and linked materials will be unassigned.`,
+      confirmLabel: 'Archive supplier',
+      variant: 'danger',
+    });
+    if (!confirmed) return;
+
+    setDeletingSupplierId(supplier.id);
+    try {
+      await del(`/inventory-advanced/suppliers/${supplier.id}`);
+      showToast('Supplier archived successfully', 'success');
+      await fetchSuppliers();
+    } catch (error) {
+      showToast(getUserMessage(error), 'error');
+    } finally {
+      setDeletingSupplierId(null);
+    }
+  };
+
 
 
   return (
@@ -170,6 +193,14 @@ export default function SuppliersTab() {
                   <div className="absolute top-4 right-4 flex gap-1 ">
                     <button onClick={() => handleOpenEdit(s)} className="p-1.5 text-neutral-400 hover:text-brand-600 hover:bg-brand-50 rounded-md transition-colors touch-target" title="Edit supplier">
                       <Pencil className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => handleDeleteSupplier(s)}
+                      disabled={deletingSupplierId === s.id}
+                      className="p-1.5 text-neutral-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors touch-target disabled:cursor-not-allowed disabled:opacity-60"
+                      title="Archive supplier"
+                    >
+                      {deletingSupplierId === s.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
                     </button>
                   </div>
                </div>

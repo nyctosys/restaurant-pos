@@ -83,16 +83,16 @@ export default function PurchaseOrdersTab() {
   const [receiving, setReceiving] = useState(false);
 
   useEffect(() => {
-    fetchData();
+    void fetchData();
   }, []);
 
-  const fetchData = async () => {
+  const fetchData = async (forceRefresh = false) => {
     setLoading(true);
     try {
       const [poRes, supRes, ingRes] = await Promise.all([
-        get<{ purchase_orders: PurchaseOrder[] }>('/inventory-advanced/purchase-orders'),
-        get<{ suppliers: Supplier[] }>('/inventory-advanced/suppliers'),
-        get<{ ingredients: Ingredient[] }>('/inventory-advanced/ingredients')
+        get<{ purchase_orders: PurchaseOrder[] }>('/inventory-advanced/purchase-orders', { forceRefresh }),
+        get<{ suppliers: Supplier[] }>('/inventory-advanced/suppliers', { forceRefresh }),
+        get<{ ingredients: Ingredient[] }>('/inventory-advanced/ingredients', { forceRefresh })
       ]);
       setPos(poRes.purchase_orders || []);
       setSuppliers(supRes.suppliers || []);
@@ -286,7 +286,7 @@ export default function PurchaseOrdersTab() {
         showToast('Purchase Order created', 'success');
       }
       closeOrderModal();
-      fetchData();
+      await fetchData(true);
     } catch (err) {
       showToast(getUserMessage(err), 'error');
     } finally {
@@ -318,7 +318,7 @@ export default function PurchaseOrdersTab() {
         received_date: new Date().toISOString()
       });
       showToast('Stock updated successfully', 'success');
-      fetchData();
+      await fetchData(true);
     } catch (err) {
       showToast(getUserMessage(err), 'error');
     }
@@ -358,7 +358,7 @@ export default function PurchaseOrdersTab() {
       showToast('Received stock updated', 'success');
       setPartialReceivePo(null);
       setReceiveQuantities({});
-      fetchData();
+      await fetchData(true);
     } catch (err) {
       showToast(getUserMessage(err), 'error');
     } finally {
@@ -380,7 +380,7 @@ export default function PurchaseOrdersTab() {
       await post(`/inventory-advanced/purchase-orders/${po.id}/cancel`, {});
       showToast('PO cancelled', 'success');
       setSelectedView('cancelled');
-      fetchData();
+      await fetchData(true);
     } catch (err) {
       showToast(getUserMessage(err), 'error');
     }
@@ -398,8 +398,9 @@ export default function PurchaseOrdersTab() {
 
     try {
       await del(`/inventory-advanced/purchase-orders/${po.id}`);
+      setPos((prev) => prev.filter((row) => row.id !== po.id));
       showToast('PO deleted', 'success');
-      fetchData();
+      await fetchData(true);
     } catch (err) {
       showToast(getUserMessage(err), 'error');
     }

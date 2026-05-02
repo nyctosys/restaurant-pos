@@ -67,6 +67,24 @@ describe('request', () => {
     await expect(get('/menu-items/', { cacheTtlMs: 0, forceRefresh: true })).rejects.toThrow(ApiError);
   });
 
+  it('maps detail-only backend errors into ApiError body', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      text: () => Promise.resolve(JSON.stringify({ detail: 'Only purchase orders with no received stock can be deleted' })),
+      headers: new Headers(),
+    });
+    const { ApiError } = await import('../api/errors');
+    try {
+      await request('/inventory-advanced/purchase-orders/1', { method: 'DELETE' });
+      expect.fail('should have thrown');
+    } catch (e) {
+      expect(e).toBeInstanceOf(ApiError);
+      expect((e as InstanceType<typeof ApiError>).body.message).toBe('Only purchase orders with no received stock can be deleted');
+      expect((e as InstanceType<typeof ApiError>).userMessage).toBe('Only purchase orders with no received stock can be deleted');
+    }
+  });
+
   it('throws on network failure', async () => {
     mockFetch.mockRejectedValueOnce(new Error('Failed to fetch'));
     const { ApiError } = await import('../api/errors');

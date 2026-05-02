@@ -280,7 +280,8 @@ export async function request<T = unknown>(
     if (!res.ok) {
       const errBody: ApiErrorBody = {
         error: bodyJson.error ?? `Error ${res.status}`,
-        message: bodyJson.message ?? bodyJson.error ?? `Request failed (${res.status})`,
+        message: bodyJson.message ?? bodyJson.error ?? (typeof bodyJson.detail === 'string' ? bodyJson.detail : undefined) ?? `Request failed (${res.status})`,
+        detail: bodyJson.detail,
         details: (bodyJson as ApiErrorBody).details,
         code: (bodyJson as ApiErrorBody).code,
         requestId: (bodyJson as ApiErrorBody).requestId ?? requestId,

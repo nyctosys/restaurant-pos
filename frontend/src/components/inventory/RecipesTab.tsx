@@ -13,6 +13,7 @@ type Product = {
   base_price: number;
   sale_price?: number;
   variants?: { name: string; basePrice: number; salePrice: number; sku?: string }[];
+  is_deal?: boolean;
 };
 
 type Ingredient = {
@@ -119,10 +120,11 @@ export default function RecipesTab() {
 
   const bomSections = useMemo((): BomSectionModel[] => {
     if (!selectedProduct) return [];
-    const orderedKeys: string[] = [''];
     const variantNames = (selectedProduct.variants || [])
       .map((v) => (v?.name || '').trim())
       .filter(Boolean);
+    const hasVariantScopes = variantNames.length > 0;
+    const orderedKeys: string[] = hasVariantScopes ? [] : [''];
     for (const n of variantNames) {
       if (!orderedKeys.includes(n)) orderedKeys.push(n);
     }
@@ -131,6 +133,7 @@ export default function RecipesTab() {
     recipePreparedItems.forEach((ri) => fromData.add(vkNorm(ri.variant_key)));
     recipeExtraCosts.forEach((ec) => fromData.add(vkNorm(ec.variant_key)));
     fromData.forEach((k) => {
+      if (hasVariantScopes && k === '') return;
       if (!orderedKeys.includes(k)) orderedKeys.push(k);
     });
 
@@ -174,6 +177,19 @@ export default function RecipesTab() {
   }, []);
 
   useEffect(() => {
+    if (!selectedProduct) return;
+    const firstVariant = (selectedProduct.variants || [])
+      .map((variant) => (variant?.name || '').trim())
+      .find(Boolean);
+    if (firstVariant && !recipeVariantScope) {
+      setRecipeVariantScope(firstVariant);
+    }
+    if (!firstVariant && recipeVariantScope) {
+      setRecipeVariantScope('');
+    }
+  }, [selectedProduct, recipeVariantScope]);
+
+  useEffect(() => {
     if (formMaterialType === 'ingredient' && formIngredientId) {
       const ing = ingredients.find((i) => i.id.toString() === formIngredientId);
       if (ing) {
@@ -207,7 +223,7 @@ export default function RecipesTab() {
         get<{ ingredients: Ingredient[] }>('/inventory-advanced/ingredients'),
         get<{ prepared_items: PreparedItem[] }>('/inventory-advanced/prepared-items')
       ]);
-      setProducts(prodRes.products || []);
+      setProducts((prodRes.products || []).filter((product) => !product.is_deal));
       setIngredients(ingRes.ingredients || []);
       setPreparedItems(preparedRes.prepared_items || []);
     } catch (e) {
@@ -237,9 +253,13 @@ export default function RecipesTab() {
   /** Call when user picks a menu item. Resets recipe scope only when switching products. */
   const selectProductForRecipe = (productId: number) => {
     const switchingProduct = selectedProductId !== productId;
+    const product = products.find((item) => item.id === productId);
+    const firstVariant = (product?.variants || [])
+      .map((variant) => (variant?.name || '').trim())
+      .find(Boolean);
     setSelectedProductId(productId);
     if (switchingProduct) {
-      setRecipeVariantScope('');
+      setRecipeVariantScope(firstVariant || '');
     }
     setShowAddForm(false);
     setShowExtraCostForm(false);
@@ -380,18 +400,11 @@ export default function RecipesTab() {
 
   const scopeOptions =
     selectedProduct && selectedProduct.variants && selectedProduct.variants.length > 0
-      ? [
-          {
-            value: '',
-            label: 'Base (default — used when no variant-specific BOM exists)',
-            searchText: 'base default',
-          },
-          ...selectedProduct.variants.map((variant) => ({
+      ? selectedProduct.variants.map((variant) => ({
             value: variant?.name || '',
             label: `Variant: ${variant?.name || 'Select Variant'}`,
             searchText: variant?.name || '',
-          })),
-        ]
+          }))
       : [{ value: '', label: 'Base recipe', searchText: 'base' }];
 
   const hasAnyBomLines =
@@ -471,7 +484,9 @@ export default function RecipesTab() {
                     className="glass-card border-soot-200/80 px-2 py-1.5 text-sm"
                   />
                   <p className="text-[10px] text-soot-500 mt-0.5">
-                    Only this variant/base BOM is shown. New lines use the same scope.
+                    {selectedProduct.variants && selectedProduct.variants.length > 0
+                      ? 'Only this variant BOM is shown. New lines use the same scope.'
+                      : 'Only this base BOM is shown. New lines use the same scope.'}
                   </p>
                 </div>
               </div>
@@ -510,22 +525,22 @@ export default function RecipesTab() {
                   <p className="text-sm mt-1">Add raw materials to track inventory when this item is sold.</p>
                 </div>
               ) : (
-                <div className="rounded-lg border border-soot-200/80 bg-white/40 overflow-hidden">
+                <div className="app-table-shell">
                   <div className="px-2 py-1 md:px-2 flex flex-wrap justify-between gap-2 text-xs font-semibold text-soot-800 bg-soot-50/90 border-b border-soot-200/60">
                     <span>{activeBomSection.label}</span>
                     <span className="text-[11px] font-normal text-soot-600 tabular-nums">
                       {formatCurrency(activeBomSection.sectionCost)} · {viewRowCount} line{viewRowCount === 1 ? '' : 's'}
                     </span>
                   </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-[11px] md:text-xs border-collapse min-w-[480px]">
-                      <thead className="sticky top-0 z-[1] bg-white/95 backdrop-blur-sm shadow-sm">
-                        <tr className="text-left uppercase tracking-wide text-soot-500 border-b border-soot-200/80">
-                          <th className="py-1 px-2 font-semibold">Name</th>
-                          <th className="py-1 px-2 font-semibold">Qty</th>
-                          <th className="py-1 px-2 font-semibold text-right">Unit cost</th>
-                          <th className="py-1 px-2 font-semibold text-right text-brand-800">Total</th>
-                          <th className="py-1 px-1 w-9" aria-label="Actions" />
+                  <div className="app-table-scroll">
+                    <table className="app-table text-[11px] md:text-xs min-w-[480px]">
+                      <thead>
+                        <tr>
+                          <th>Name</th>
+                          <th>Qty</th>
+                          <th className="text-right">Unit cost</th>
+                          <th className="text-right text-brand-800">Total</th>
+                          <th className="w-9" aria-label="Actions" />
                         </tr>
                       </thead>
                       <tbody>
@@ -541,7 +556,7 @@ export default function RecipesTab() {
                                     ref={(el) => {
                                       rowRefs.current.set(`ing-${ri.id}`, el);
                                     }}
-                                    className="border-b border-soot-100/80 hover:bg-white/60"
+                                    className="transition-colors"
                                   >
                                     <td className="py-1 px-2 align-middle">
                                       <div className="font-semibold text-soot-900 truncate max-w-[14rem] md:max-w-none leading-tight" title={tip}>
@@ -583,7 +598,7 @@ export default function RecipesTab() {
                                       ref={(el) => {
                                         rowRefs.current.set(`prep-${ri.id}`, el);
                                       }}
-                                      className="border-b border-brand-100/80 bg-brand-50/30 hover:bg-brand-50/50"
+                                      className="bg-brand-50/30 transition-colors"
                                     >
                                       <td className="py-1 px-2 align-middle">
                                         <div className="font-semibold text-soot-900 truncate max-w-[14rem] leading-tight" title={tip}>
@@ -614,7 +629,7 @@ export default function RecipesTab() {
                                       </td>
                                     </tr>
                                     {components.length > 0 && (
-                                      <tr className="bg-brand-50/20 border-b border-brand-100/60">
+                                      <tr className="bg-brand-50/20">
                                         <td colSpan={5} className="py-1.5 px-3 text-[11px] text-soot-600">
                                           <details>
                                             <summary className="cursor-pointer font-medium text-soot-700 select-none">
@@ -646,7 +661,7 @@ export default function RecipesTab() {
                                 );
                               })}
                               {activeBomSection.extraRows.map((ec) => (
-                                <tr key={`extra-${ec.id}`} className="border-b border-orange-100/80 bg-orange-50/40">
+                                <tr key={`extra-${ec.id}`} className="bg-orange-50/40">
                                   <td className="py-1 px-2 align-middle font-semibold text-soot-900">{ec.name}</td>
                                   <td className="py-1 px-2 align-middle text-soot-500">—</td>
                                   <td className="py-1 px-2 align-middle text-right text-soot-500 text-[11px]">Extra</td>
@@ -682,7 +697,7 @@ export default function RecipesTab() {
             {/* Sticky bottom actions */}
             <div className="sticky bottom-0 z-10 shrink-0 border-t border-soot-200/80 bg-white/95 backdrop-blur-md px-2 py-2 shadow-[0_-4px_12px_rgba(0,0,0,0.06)]">
               {!showAddForm && !showExtraCostForm ? (
-                <div className="space-y-2">
+                <div className="flex flex-col gap-2 sm:flex-row">
                   <button
                     type="button"
                     onClick={() => {
@@ -691,7 +706,7 @@ export default function RecipesTab() {
                         addFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
                       );
                     }}
-                    className="w-full flex items-center justify-center gap-2 py-3 rounded-[8px] border-2 border-dashed border-orange-300 text-orange-700 font-semibold hover:bg-orange-50 hover:border-orange-400 transition-colors touch-target"
+                    className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-[8px] border border-soot-200 bg-white/80 text-soot-800 text-sm font-medium hover:bg-white transition-colors touch-target"
                   >
                     <Plus className="w-5 h-5" /> Add Extra Cost
                   </button>
@@ -703,7 +718,7 @@ export default function RecipesTab() {
                         addFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
                       );
                     }}
-                    className="w-full flex items-center justify-center gap-2 py-3 rounded-[8px] border-2 border-dashed border-brand-300 text-brand-700 font-semibold hover:bg-brand-50 hover:border-brand-400 transition-colors touch-target"
+                    className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-[8px] bg-brand-700 text-white text-sm font-medium hover:bg-brand-600 transition-colors touch-target"
                   >
                     <Plus className="w-5 h-5" /> Add Ingredient or Sauce to Recipe
                   </button>
@@ -764,38 +779,39 @@ export default function RecipesTab() {
                         <option value="prepared">Sauce/Marination</option>
                       </select>
                     </div>
-                    <div>
-                      <label className="block text-xs font-semibold text-soot-600 uppercase tracking-wider mb-1">Ingredient</label>
-                      <SearchableSelect
-                        value={formIngredientId}
-                        onChange={setFormIngredientId}
-                        placeholder="Select ingredient"
-                        searchPlaceholder="Search ingredients..."
-                        options={ingredients.map((ingredient) => ({
-                          value: String(ingredient.id),
-                          label: `${ingredient.name} (${ingredient.unit})`,
-                          searchText: ingredient.name,
-                        }))}
-                        disabled={formMaterialType !== 'ingredient'}
-                        className="glass-card border-0 px-3 py-2"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-semibold text-soot-600 uppercase tracking-wider mb-1">Sauce / Marination</label>
-                      <SearchableSelect
-                        value={formPreparedItemId}
-                        onChange={setFormPreparedItemId}
-                        placeholder="Select sauce/marination"
-                        searchPlaceholder="Search sauces..."
-                        options={preparedItems.map((item) => ({
-                          value: String(item.id),
-                          label: `${item.name} (${item.unit})`,
-                          searchText: item.name,
-                        }))}
-                        disabled={formMaterialType !== 'prepared'}
-                        className="glass-card border-0 px-3 py-2"
-                      />
-                    </div>
+                    {formMaterialType === 'ingredient' ? (
+                      <div>
+                        <label className="block text-xs font-semibold text-soot-600 uppercase tracking-wider mb-1">Ingredient</label>
+                        <SearchableSelect
+                          value={formIngredientId}
+                          onChange={setFormIngredientId}
+                          placeholder="Select ingredient"
+                          searchPlaceholder="Search ingredients..."
+                          options={ingredients.map((ingredient) => ({
+                            value: String(ingredient.id),
+                            label: `${ingredient.name} (${ingredient.unit})`,
+                            searchText: ingredient.name,
+                          }))}
+                          className="glass-card border-0 px-3 py-2"
+                        />
+                      </div>
+                    ) : (
+                      <div>
+                        <label className="block text-xs font-semibold text-soot-600 uppercase tracking-wider mb-1">Sauce / Marination</label>
+                        <SearchableSelect
+                          value={formPreparedItemId}
+                          onChange={setFormPreparedItemId}
+                          placeholder="Select sauce/marination"
+                          searchPlaceholder="Search sauces..."
+                          options={preparedItems.map((item) => ({
+                            value: String(item.id),
+                            label: `${item.name} (${item.unit})`,
+                            searchText: item.name,
+                          }))}
+                          className="glass-card border-0 px-3 py-2"
+                        />
+                      </div>
+                    )}
                     <div className="sm:col-span-2">
                       <label className="block text-xs font-semibold text-soot-600 uppercase tracking-wider mb-1">
                         Quantity per portion

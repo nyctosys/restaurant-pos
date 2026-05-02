@@ -754,35 +754,37 @@ export default function IngredientsTab() {
              <p className="text-sm">Click "Add material" to start tracking inventory.</p>
            </div>
         ) : (
-          <table className="w-full text-left border-collapse">
-            <thead className="sticky top-0 z-10 shadow-sm bg-white">
-              <tr className="border-b-2 border-soot-200 text-sm uppercase text-soot-500 font-semibold tracking-wider">
-                <th aria-sort={sortKey === 'name' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'} className="py-3 px-3 bg-white">
+          <div className="app-table-shell">
+          <div className="app-table-scroll">
+          <table className="app-table">
+            <thead>
+              <tr>
+                <th aria-sort={sortKey === 'name' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}>
                   <button type="button" onClick={() => handleSort('name')} className="flex items-center gap-2 text-left transition-colors hover:text-soot-700 focus:outline-none focus-visible:text-soot-900">
                     <span>Item</span>
                     {renderSortIcon('name')}
                   </button>
                 </th>
-                <th className="py-3 px-3 bg-white">Brand</th>
-                <th aria-sort={sortKey === 'current_stock' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'} className="py-3 px-3 text-right bg-white">
+                <th>Brand</th>
+                <th aria-sort={sortKey === 'current_stock' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'} className="text-right">
                   <button type="button" onClick={() => handleSort('current_stock')} className="ml-auto flex items-center gap-2 text-right transition-colors hover:text-soot-700 focus:outline-none focus-visible:text-soot-900">
                     <span>Stock</span>
                     {renderSortIcon('current_stock')}
                   </button>
                 </th>
-                <th aria-sort={sortKey === 'average_cost' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'} className="py-3 px-3 text-right bg-white">
+                <th aria-sort={sortKey === 'average_cost' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'} className="text-right">
                   <button type="button" onClick={() => handleSort('average_cost')} className="ml-auto flex items-center gap-2 text-right transition-colors hover:text-soot-700 focus:outline-none focus-visible:text-soot-900">
                     <span>Purchase Unit Cost</span>
                     {renderSortIcon('average_cost')}
                   </button>
                 </th>
-                <th aria-sort={sortKey === 'supplier' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'} className="py-3 px-3 hidden md:table-cell bg-white">
+                <th aria-sort={sortKey === 'supplier' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'} className="hidden md:table-cell">
                   <button type="button" onClick={() => handleSort('supplier')} className="flex items-center gap-2 text-left transition-colors hover:text-soot-700 focus:outline-none focus-visible:text-soot-900">
                     <span>Supplier</span>
                     {renderSortIcon('supplier')}
                   </button>
                 </th>
-                <th aria-sort={sortKey === 'id' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'} className="py-3 px-3 text-right bg-white">
+                <th aria-sort={sortKey === 'id' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'} className="text-right">
                   <button type="button" onClick={() => handleSort('id')} className="ml-auto flex items-center gap-2 text-right transition-colors hover:text-soot-700 focus:outline-none focus-visible:text-soot-900">
                     <span>Actions</span>
                     {renderSortIcon('id')}
@@ -790,14 +792,14 @@ export default function IngredientsTab() {
                 </th>
               </tr>
             </thead>
-            <tbody className="glass-card">
+            <tbody>
               {sortedIngredients.map(ing => {
                 const supplier = suppliers.find(s => s.id === ing.preferred_supplier_id);
                 const isLowStock = ing.current_stock <= ing.minimum_stock;
                 const purchaseUnitCost = getPurchasedUnitCost(ing);
                 
                 return (
-                  <tr key={ing.id} className="border-b border-white/20 hover:bg-white/40 transition-colors">
+                  <tr key={ing.id} className="transition-colors">
                     <td className="py-4 px-3">
                       <div className="font-bold text-soot-900">{ing.name}</div>
                       <div className="text-xs text-soot-500 font-mono mt-0.5">{ing.sku || '-'}</div>
@@ -834,6 +836,8 @@ export default function IngredientsTab() {
               })}
             </tbody>
           </table>
+          </div>
+          </div>
         )}
       </div>
 

@@ -438,9 +438,9 @@ export default function MenuItemsTab() {
               <p className="text-sm">Click &quot;Add menu item&quot; to get started.</p>
             </div>
           ) : (
-            <div className="overflow-hidden rounded-[18px] border border-neutral-200/80 bg-white dark:border-neutral-800 dark:bg-neutral-950">
-              <div className="max-h-[calc(100vh-18rem)] min-h-[22rem] overflow-auto overscroll-contain lg:max-h-[calc(100vh-16rem)]">
-                <table className="w-full min-w-[980px] text-left border-separate border-spacing-0">
+            <div className="app-table-shell">
+              <div className="app-table-scroll max-h-[calc(100vh-18rem)] min-h-[22rem] overscroll-contain lg:max-h-[calc(100vh-16rem)]">
+                <table className="app-table menu-items-table min-w-[980px]">
                   <colgroup>
                     <col className="w-[13%]" />
                     <col className="w-[24%]" />
@@ -451,10 +451,10 @@ export default function MenuItemsTab() {
                     <col className="w-[12%]" />
                   </colgroup>
               <thead>
-                <tr className="border-b border-neutral-200 text-[11px] uppercase text-neutral-500 font-semibold tracking-[0.08em] dark:border-neutral-800 dark:text-neutral-400">
+                <tr>
                   <th
                     aria-sort={sortKey === 'sku' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}
-                    className="sticky top-0 z-10 border-b border-neutral-200 bg-neutral-50/95 px-4 py-3 dark:border-neutral-800 dark:bg-neutral-900/95"
+                    className="sticky top-0 z-10"
                   >
                     <button
                       type="button"
@@ -467,7 +467,7 @@ export default function MenuItemsTab() {
                   </th>
                   <th
                     aria-sort={sortKey === 'title' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}
-                    className="sticky top-0 z-10 border-b border-neutral-200 bg-neutral-50/95 px-4 py-3 dark:border-neutral-800 dark:bg-neutral-900/95"
+                    className="sticky top-0 z-10"
                   >
                     <button
                       type="button"
@@ -480,7 +480,7 @@ export default function MenuItemsTab() {
                   </th>
                   <th
                     aria-sort={sortKey === 'section' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}
-                    className="sticky top-0 z-10 border-b border-neutral-200 bg-neutral-50/95 px-4 py-3 dark:border-neutral-800 dark:bg-neutral-900/95"
+                    className="sticky top-0 z-10"
                   >
                     <button
                       type="button"
@@ -493,7 +493,7 @@ export default function MenuItemsTab() {
                   </th>
                   <th
                     aria-sort={sortKey === 'base_price' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}
-                    className="sticky top-0 z-10 border-b border-neutral-200 bg-neutral-50/95 px-4 py-3 dark:border-neutral-800 dark:bg-neutral-900/95"
+                    className="sticky top-0 z-10"
                   >
                     <button
                       type="button"
@@ -506,7 +506,7 @@ export default function MenuItemsTab() {
                   </th>
                   <th
                     aria-sort={sortKey === 'sale_price' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}
-                    className="sticky top-0 z-10 border-b border-neutral-200 bg-neutral-50/95 px-4 py-3 dark:border-neutral-800 dark:bg-neutral-900/95"
+                    className="sticky top-0 z-10"
                   >
                     <button
                       type="button"
@@ -517,12 +517,12 @@ export default function MenuItemsTab() {
                       {renderSortIcon('sale_price')}
                     </button>
                   </th>
-                  <th className="sticky top-0 z-10 border-b border-neutral-200 bg-neutral-50/95 px-4 py-3 text-left text-neutral-500 font-semibold dark:border-neutral-800 dark:bg-neutral-900/95 dark:text-neutral-400">
+                  <th className="sticky top-0 z-10 text-left">
                     Unit
                   </th>
                   <th
                     aria-sort={sortKey === 'archived_at' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}
-                    className="sticky top-0 z-10 border-b border-neutral-200 bg-neutral-50/95 px-4 py-3 text-right dark:border-neutral-800 dark:bg-neutral-900/95"
+                    className="sticky top-0 z-10 text-right"
                   >
                     <button
                       type="button"
@@ -535,11 +535,11 @@ export default function MenuItemsTab() {
                   </th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-neutral-200/80 bg-white dark:divide-neutral-800 dark:bg-neutral-950">
+              <tbody>
                 {sortedProducts.map(p => (
                   <Fragment key={p.id}>
                   <tr
-                    className={`group transition-colors hover:bg-brand-50/45 dark:hover:bg-brand-950/25 ${
+                    className={`group transition-colors ${
                       p.archived_at ? 'bg-neutral-50/80 text-neutral-500 dark:bg-neutral-900/60 dark:text-neutral-400' : ''
                     }`}
                   >

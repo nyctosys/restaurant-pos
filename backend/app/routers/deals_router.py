@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from typing import Any, List
+from typing import List
 
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends
@@ -7,14 +7,9 @@ from fastapi.responses import JSONResponse
 
 from app.models import db, User, Product, ComboItem, SaleItem
 from app.services.product_pricing import effective_sale_price
-from app.services.recipe_variants import (
-    normalize_combo_category_name,
-    normalize_combo_selection_type,
-    normalize_variant_key,
-)
+from app.services.recipe_variants import normalize_combo_category_name, normalize_combo_selection_type
 from app.deps import get_current_user, require_owner
 from app.routers.common import yes
-from app.routers.menu import _normalize_variants_list
 
 deals_router = APIRouter(prefix="/api/inventory-advanced/deals", tags=["deals"])
 menu_deals_router = APIRouter(prefix="/api/menu/deals", tags=["menu-deals"])
@@ -37,10 +32,6 @@ class DealCreate(BaseModel):
     combo_items: List[ComboItemCreate]
 
 
-def _deal_variant_labels(raw: Any) -> list[str]:
-    return [str(variant.get("name") or "").strip() for variant in _normalize_variants_list(raw) if str(variant.get("name") or "").strip()]
-
-
 def _deal_to_dict(deal: Product) -> dict:
     items: list[dict] = []
     for ci in deal.combo_items:
@@ -52,7 +43,7 @@ def _deal_to_dict(deal: Product) -> dict:
                 "quantity": ci.quantity,
                 "selection_type": normalize_combo_selection_type(getattr(ci, "selection_type", None)),
                 "category_name": normalize_combo_category_name(getattr(ci, "category_name", None)),
-                "variant_key": normalize_variant_key(getattr(ci, "variant_key", None)),
+                "variant_key": "",
             }
         )
     return {
@@ -62,7 +53,7 @@ def _deal_to_dict(deal: Product) -> dict:
         "base_price": float(deal.base_price),
         "sale_price": effective_sale_price(deal),
         "section": (deal.section or "").strip() or "Deals",
-        "variants": _deal_variant_labels(getattr(deal, "variants", None)),
+        "variants": [],
         "combo_items": items,
         "archived_at": deal.archived_at.isoformat() if getattr(deal, "archived_at", None) else None,
     }
@@ -85,30 +76,6 @@ def _validate_deal_payload(payload: DealCreate, deal_id: int | None = None) -> t
     existing = Product.query.filter_by(sku=sku).first()
     if existing and (deal_id is None or existing.id != deal_id):
         return JSONResponse(status_code=400, content={"message": "SKU already exists"})
-
-    variant_objects = _normalize_variants_list(payload.variants)
-    variant_labels = _deal_variant_labels(payload.variants)
-    label_set = set(variant_labels)
-
-    for ci in payload.combo_items:
-        ci_vk = normalize_variant_key(ci.variant_key)
-        if ci_vk and ci_vk not in label_set:
-            return JSONResponse(
-                status_code=400,
-                content={
-                    "message": f'Combo line variant "{ci_vk}" must be one of the deal variants or empty (base).',
-                },
-            )
-
-    if not variant_labels:
-        for ci in payload.combo_items:
-            if normalize_variant_key(ci.variant_key):
-                return JSONResponse(
-                    status_code=400,
-                    content={
-                        "message": "Add deal variants first, or leave combo line variant empty for base-only deals.",
-                    },
-                )
 
     sale_price = payload.sale_price if payload.sale_price is not None else payload.base_price
     if sale_price is None:
@@ -140,7 +107,7 @@ def _validate_deal_payload(payload: DealCreate, deal_id: int | None = None) -> t
                     "category_name": category_name,
                     "product_id": None,
                     "quantity": quantity,
-                    "variant_key": normalize_variant_key(ci.variant_key),
+                    "variant_key": "",
                 }
             )
             continue
@@ -167,7 +134,7 @@ def _validate_deal_payload(payload: DealCreate, deal_id: int | None = None) -> t
                 "category_name": "",
                 "product_id": product_id,
                 "quantity": quantity,
-                "variant_key": normalize_variant_key(ci.variant_key),
+                "variant_key": "",
             }
         )
 
@@ -176,7 +143,7 @@ def _validate_deal_payload(payload: DealCreate, deal_id: int | None = None) -> t
             "sku": sku,
             "title": title,
             "sale_price": float(sale_price),
-            "variants": variant_objects,
+            "variants": [],
         },
         normalized_combo_items,
     )
@@ -193,7 +160,7 @@ def _replace_combo_items(deal: Product, combo_items: list[dict[str, object]]) ->
                 quantity=ci_data["quantity"],
                 selection_type=ci_data["selection_type"],
                 category_name=ci_data["category_name"] or None,
-                variant_key=ci_data["variant_key"],
+                variant_key="",
             )
         )
 

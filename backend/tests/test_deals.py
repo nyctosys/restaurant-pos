@@ -315,10 +315,11 @@ def test_deal_edit_archive_restore_and_permanent_delete(client, app):
     assert edited["title"] == "Edited Combo"
     assert edited["sku"] == "EDIT-COMBO-2"
     assert edited["sale_price"] == 8.5
-    assert edited["variants"] == ["Regular", "Large"]
+    assert edited["variants"] == []
     assert len(edited["combo_items"]) == 2
     assert any(ci["product_id"] == fries_id and ci["quantity"] == 2 for ci in edited["combo_items"])
     assert any(ci["selection_type"] == "category" and ci["category_name"] == "Drinks" for ci in edited["combo_items"])
+    assert all((ci.get("variant_key") or "") == "" for ci in edited["combo_items"])
 
     archive_res = client.patch(f"/api/menu/deals/{deal_id}/archive", headers=h)
     assert archive_res.status_code == 200

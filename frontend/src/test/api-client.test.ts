@@ -36,6 +36,16 @@ describe('getUserMessage', () => {
     expect(getUserMessage(new Error('Network failed'))).toBe('Network failed');
   });
 
+  it('uses detail when backend sends it instead of message', () => {
+    const err = new ApiError(400, { detail: 'Cannot delete this purchase order' });
+    expect(getUserMessage(err)).toBe('Cannot delete this purchase order');
+  });
+
+  it('falls back when backend error fields are blank', () => {
+    const err = new ApiError(500, { message: '   ', error: '' });
+    expect(getUserMessage(err)).toBe('An error occurred');
+  });
+
   it('returns string for unknown', () => {
     expect(getUserMessage('something')).toBe('something');
     expect(getUserMessage(null)).toBe('An error occurred');

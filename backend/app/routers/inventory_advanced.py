@@ -304,6 +304,24 @@ def update_supplier(
     return {"message": "Supplier updated", "supplier": _supplier_to_dict(supplier, list(supplier.ingredients))}
 
 
+@inventory_advanced_router.delete("/suppliers/{supplier_id}")
+def delete_supplier(
+    supplier_id: int,
+    current_user: User = Depends(get_current_user),
+):
+    supplier = db.session.get(Supplier, supplier_id)
+    if not supplier:
+        return JSONResponse(status_code=404, content={"message": "Not found"})
+
+    supplier.is_active = False
+    Ingredient.query.filter_by(preferred_supplier_id=supplier.id).update(
+        {"preferred_supplier_id": None},
+        synchronize_session=False,
+    )
+    db.session.commit()
+    return {"message": "Supplier archived"}
+
+
 # --- Ingredients ---
 
 @inventory_advanced_router.get("/ingredients")
@@ -722,7 +740,7 @@ def delete_recipe_extra_cost(extra_cost_id: int, current_user: User = Depends(ge
 def list_purchase_orders(current_user: User = Depends(get_current_user)):
     pos = PurchaseOrder.query.order_by(PurchaseOrder.created_at.desc()).all()
     return {"purchase_orders": [{
-        "id": p.id, "po_number": p.po_number, "supplier_id": p.supplier_id,
+        "id": p.id, "po_number": p.po_number, "supplier_id": p.supplier_id, "supplier_name": p.supplier.name if p.supplier else None,
         "status": _po_status_value(p),
         "total_amount": p.total_amount,
         "expected_delivery": p.expected_delivery.isoformat() if p.expected_delivery else None,
@@ -797,8 +815,15 @@ def delete_purchase_order(po_id: int, current_user: User = Depends(get_current_u
             content={"message": "Only purchase orders with no received stock can be deleted"},
         )
 
-    db.session.delete(po)
-    db.session.commit()
+    try:
+        db.session.delete(po)
+        db.session.commit()
+    except Exception as exc:
+        db.session.rollback()
+        return JSONResponse(
+            status_code=500,
+            content={"message": "Error deleting purchase order", "error": str(exc) or "Delete failed"},
+        )
     return {"message": "PO deleted"}
 
 @inventory_advanced_router.post("/purchase-orders/{po_id}/receive")

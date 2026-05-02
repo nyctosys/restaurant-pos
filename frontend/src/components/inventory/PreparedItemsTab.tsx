@@ -244,7 +244,7 @@ export default function PreparedItemsTab() {
 
   return (
     <div className="grid grid-cols-1 xl:grid-cols-[1fr_24rem] gap-4 px-4 lg:px-6 py-4">
-      <div className="glass-card overflow-hidden">
+      <div className="glass-card app-table-shell">
         <div className="p-4 border-b border-white/20 bg-white/20 flex items-center justify-between gap-3">
           <div>
             <h3 className="font-bold text-soot-900">Marinations & Sauces</h3>
@@ -258,20 +258,20 @@ export default function PreparedItemsTab() {
           </button>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-white/25 text-soot-500 uppercase text-xs">
+        <div className="app-table-scroll">
+          <table className="app-table text-sm">
+            <thead>
               <tr>
-                <th className="text-left px-4 py-3">Name</th>
-                <th className="text-left px-4 py-3">Type</th>
-                <th className="text-right px-4 py-3">Stock</th>
-                <th className="text-right px-4 py-3">Cost per yield</th>
-                <th className="text-left px-4 py-3">Formula</th>
+                <th>Name</th>
+                <th>Type</th>
+                <th className="text-right">Stock</th>
+                <th className="text-right">Cost per yield</th>
+                <th>Formula</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-white/20">
+            <tbody>
               {items.map((item) => (
-                <tr key={item.id} className="hover:bg-white/25 cursor-pointer" onClick={() => openEdit(item)}>
+                <tr key={item.id} className="cursor-pointer" onClick={() => openEdit(item)}>
                   <td className="px-4 py-3">
                     <div className="font-semibold text-soot-900">{item.name}</div>
                     <div className="text-xs text-soot-500 font-mono">{item.sku}</div>

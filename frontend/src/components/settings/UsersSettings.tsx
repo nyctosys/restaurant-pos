@@ -216,7 +216,7 @@ export default function UsersSettings() {
         </div>
       </div>
 
-      <div className="glass-card overflow-x-auto">
+      <div className="glass-card app-table-shell">
         {loading ? (
           <div className="p-8 flex justify-center text-soot-400">
             <Loader2 className="w-6 h-6 animate-spin" />
@@ -226,28 +226,29 @@ export default function UsersSettings() {
             No users found.
           </div>
         ) : (
-          <table className="min-w-[720px] w-full text-left">
-            <thead className="bg-white/20 border-b border-soot-200">
+          <div className="app-table-scroll">
+          <table className="app-table min-w-[720px]">
+            <thead>
               <tr>
-                <th aria-sort={sortKey === 'username' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'} className="px-6 py-3 text-xs font-semibold text-soot-500 uppercase tracking-wider">
+                <th aria-sort={sortKey === 'username' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}>
                   <button type="button" onClick={() => handleSort('username')} className="flex items-center gap-2 text-left transition-colors hover:text-soot-700 focus:outline-none focus-visible:text-soot-900">
                     <span>Username</span>
                     {renderSortIcon('username')}
                   </button>
                 </th>
-                <th aria-sort={sortKey === 'branch_name' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'} className="px-6 py-3 text-xs font-semibold text-soot-500 uppercase tracking-wider">
+                <th aria-sort={sortKey === 'branch_name' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}>
                   <button type="button" onClick={() => handleSort('branch_name')} className="flex items-center gap-2 text-left transition-colors hover:text-soot-700 focus:outline-none focus-visible:text-soot-900">
                     <span>Branch</span>
                     {renderSortIcon('branch_name')}
                   </button>
                 </th>
-                <th aria-sort={sortKey === 'role' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'} className="px-6 py-3 text-xs font-semibold text-soot-500 uppercase tracking-wider">
+                <th aria-sort={sortKey === 'role' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}>
                   <button type="button" onClick={() => handleSort('role')} className="flex items-center gap-2 text-left transition-colors hover:text-soot-700 focus:outline-none focus-visible:text-soot-900">
                     <span>Role</span>
                     {renderSortIcon('role')}
                   </button>
                 </th>
-                <th aria-sort={sortKey === 'archived_at' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'} className="px-6 py-3 text-xs font-semibold text-soot-500 uppercase tracking-wider text-right">
+                <th aria-sort={sortKey === 'archived_at' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'} className="text-right">
                   <button type="button" onClick={() => handleSort('archived_at')} className="ml-auto flex items-center gap-2 text-right transition-colors hover:text-soot-700 focus:outline-none focus-visible:text-soot-900">
                     <span>Actions</span>
                     {renderSortIcon('archived_at')}
@@ -255,9 +256,9 @@ export default function UsersSettings() {
                 </th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-soot-100">
+            <tbody>
               {sortedUsers.map((user) => (
-                <tr key={user.id} className={`hover:bg-white/25 transition-colors ${user.archived_at ? 'bg-white/20 opacity-90' : ''}`}>
+                <tr key={user.id} className={`transition-colors ${user.archived_at ? 'bg-white/20 opacity-90' : ''}`}>
                   <td className="px-6 py-4 font-medium text-soot-900">
                     {user.username}
                     {user.archived_at && <span className="ml-2 text-xs font-bold bg-amber-100 text-amber-700 px-2 py-0.5 rounded border border-amber-200">Archived</span>}
@@ -311,6 +312,7 @@ export default function UsersSettings() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
 

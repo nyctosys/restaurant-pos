@@ -8,6 +8,7 @@ export const API_BASE = import.meta.env.VITE_API_URL || '/api';
 export interface ApiErrorBody {
   error?: string;
   message?: string;
+  detail?: unknown;
   details?: unknown;
   /** Correlates with server `X-Request-ID` and Settings → App Logs */
   requestId?: string;
@@ -34,6 +35,39 @@ function formatValidationMessage(details: unknown): string | null {
   return loc ? `${loc}: ${first.msg}` : first.msg;
 }
 
+function asNonEmptyString(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim();
+  return normalized ? normalized : null;
+}
+
+function formatDetailMessage(detail: unknown): string | null {
+  const direct = asNonEmptyString(detail);
+  if (direct) return direct;
+  if (Array.isArray(detail)) {
+    return formatValidationMessage(detail);
+  }
+  if (detail && typeof detail === 'object') {
+    const detailObj = detail as Record<string, unknown>;
+    return (
+      asNonEmptyString(detailObj.message) ??
+      asNonEmptyString(detailObj.error) ??
+      asNonEmptyString(detailObj.detail)
+    );
+  }
+  return null;
+}
+
+function normalizeMessage(...values: unknown[]): string {
+  for (const value of values) {
+    const direct = asNonEmptyString(value);
+    if (direct) return direct;
+    const fromDetail = formatDetailMessage(value);
+    if (fromDetail) return fromDetail;
+  }
+  return 'An error occurred';
+}
+
 export class ApiError extends Error {
   status: number;
   body: ApiErrorBody;
@@ -46,10 +80,10 @@ export class ApiError extends Error {
 
   get userMessage(): string {
     if (this.status === 422) {
-      const validationMessage = formatValidationMessage(this.body.details);
+      const validationMessage = formatValidationMessage(this.body.details ?? this.body.detail);
       if (validationMessage) return validationMessage;
     }
-    return this.body.message ?? this.body.error ?? this.message;
+    return normalizeMessage(this.body.message, this.body.error, this.body.detail, this.message);
   }
 
   /** User-facing message plus request reference when available (for support / logs). */
@@ -68,8 +102,12 @@ export function isApiError(e: unknown): e is ApiError {
 /** Get a user-facing message from an unknown error (API or network). */
 export function getUserMessage(e: unknown): string {
   if (isApiError(e)) return e.userMessage;
-  if (e instanceof Error) return e.message;
-  return String(e ?? 'An error occurred');
+  if (e instanceof Error) return normalizeMessage(e.message);
+  if (e && typeof e === 'object') {
+    const maybeObject = e as Record<string, unknown>;
+    return normalizeMessage(maybeObject.message, maybeObject.error, maybeObject.detail);
+  }
+  return normalizeMessage(e);
 }
 
 /** Prefer message + request id for toasts and diagnostics. */

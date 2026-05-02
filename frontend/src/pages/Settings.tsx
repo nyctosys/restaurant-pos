@@ -515,12 +515,12 @@ export default function Settings() {
   };
 
   return (
-    <div className="flex flex-col lg:flex-row h-full min-h-0 bg-transparent overflow-hidden">
+    <div className="settings-layout flex h-full min-h-0 flex-col bg-transparent overflow-hidden lg:flex-row">
       
       {/* Sidebar Nav — scrollable on short viewports; xl+ wider rail */}
       <div
         ref={settingsNavScrollRef}
-        className="w-full lg:w-56 xl:w-64 shrink-0 glass-card border-b lg:border-b-0 lg:border-r border-white/20 p-3 lg:p-4 overflow-y-auto max-h-[min(50vh,420px)] lg:max-h-none lg:min-h-0 m-0 lg:m-2"
+        className="settings-nav w-full lg:w-56 xl:w-64 shrink-0 glass-card border-b lg:border-b-0 lg:border-r border-white/20 p-3 lg:p-4 overflow-y-auto overscroll-contain max-h-[min(42vh,360px)] lg:max-h-[calc(100%-1rem)] lg:min-h-0 m-0 lg:m-2"
       >
         <h2 className="text-lg font-bold text-soot-900 mb-4 lg:mb-6 px-2 lg:px-4">System Settings</h2>
         <nav className="space-y-1">
@@ -542,7 +542,7 @@ export default function Settings() {
       </div>
 
       {/* Main Settings Area */}
-      <div className="flex-1 min-w-0 min-h-0 page-padding lg:py-6 xl:py-8 overflow-auto">
+      <div className="settings-content flex-1 min-w-0 min-h-0 page-padding lg:py-6 xl:py-8 overflow-y-auto overflow-x-hidden overscroll-contain">
         
         {activeTab === 'general' && (
           <div className="max-w-2xl xl:max-w-3xl">

@@ -80,6 +80,67 @@ def test_update_supplier_sku(client, app):
     assert supplier["phone"] == "12345"
 
 
+def test_soft_delete_supplier_hides_it_unlinks_ingredients_and_keeps_po_name(client, app):
+    h = _auth_headers(client, app)
+    create_supplier = client.post(
+        "/api/inventory-advanced/suppliers",
+        headers=h,
+        json={"name": "Archive Me Supplier", "sku": "SUP-ARCHIVE-ME"},
+    )
+    assert create_supplier.status_code == 200
+    supplier_id = create_supplier.get_json()["id"]
+
+    create_ingredient = client.post(
+        "/api/inventory-advanced/ingredients",
+        headers=h,
+        json={
+            "name": "Archive Test Ingredient",
+            "sku": "ING-ARCHIVE-TEST",
+            "unit": "kg",
+            "preferred_supplier_id": supplier_id,
+        },
+    )
+    assert create_ingredient.status_code == 200
+    ingredient_id = create_ingredient.get_json()["id"]
+
+    create_po = client.post(
+        "/api/inventory-advanced/purchase-orders",
+        headers=h,
+        json={
+            "supplier_id": supplier_id,
+            "items": [
+                {
+                    "ingredient_id": ingredient_id,
+                    "quantity_ordered": 5,
+                    "unit_price": 10,
+                    "unit": "kg",
+                }
+            ],
+        },
+    )
+    assert create_po.status_code == 200
+
+    delete_supplier = client.delete(f"/api/inventory-advanced/suppliers/{supplier_id}", headers=h)
+    assert delete_supplier.status_code == 200
+    assert delete_supplier.get_json()["message"] == "Supplier archived"
+
+    listed_suppliers = client.get("/api/inventory-advanced/suppliers", headers=h).get_json()["suppliers"]
+    assert all(supplier["id"] != supplier_id for supplier in listed_suppliers)
+
+    listed_ingredients = client.get("/api/inventory-advanced/ingredients", headers=h).get_json()["ingredients"]
+    ingredient = next(row for row in listed_ingredients if row["id"] == ingredient_id)
+    assert ingredient["preferred_supplier_id"] is None
+
+    listed_pos = client.get("/api/inventory-advanced/purchase-orders", headers=h).get_json()["purchase_orders"]
+    purchase_order = next(row for row in listed_pos if row["supplier_id"] == supplier_id)
+    assert purchase_order["supplier_name"] == "Archive Me Supplier"
+
+    with app.app_context():
+        supplier = db.session.get(Supplier, supplier_id)
+        assert supplier is not None
+        assert supplier.is_active is False
+
+
 def test_recipe_mapping_and_product_deletion(client, app):
     h = _auth_headers(client, app)
 
@@ -297,6 +358,35 @@ def test_purchase_order_delete_removes_unreceived_order(client, app):
 
     listed = client.get("/api/inventory-advanced/purchase-orders", headers=h).get_json()["purchase_orders"]
     assert all(po["id"] != po_id for po in listed)
+
+
+def test_purchase_order_delete_returns_message_when_delete_fails(client, app, monkeypatch):
+    h = _auth_headers(client, app)
+
+    supplier = client.post("/api/inventory-advanced/suppliers", headers=h, json={"name": "Delete Error Supplier"})
+    supplier_id = supplier.get_json()["id"]
+    ingredient = client.post("/api/inventory-advanced/ingredients", headers=h, json={
+        "name": "Delete Error Mayo",
+        "sku": "ING-DELETE-PO-ERROR",
+        "unit": "kg",
+        "preferred_supplier_id": supplier_id,
+    })
+    ingredient_id = ingredient.get_json()["id"]
+    created = client.post("/api/inventory-advanced/purchase-orders", headers=h, json={
+        "supplier_id": supplier_id,
+        "items": [{"ingredient_id": ingredient_id, "quantity_ordered": 5, "unit_price": 100, "unit": "kg"}],
+    })
+    po_id = created.get_json()["id"]
+
+    def fail_commit(_self):
+        raise RuntimeError("forced delete failure")
+
+    monkeypatch.setattr(type(db.session), "commit", fail_commit, raising=False)
+
+    deleted = client.delete(f"/api/inventory-advanced/purchase-orders/{po_id}", headers=h)
+    assert deleted.status_code == 500
+    assert deleted.get_json()["message"] == "Error deleting purchase order"
+    assert deleted.get_json()["error"] == "forced delete failure"
 
 
 def test_purchase_order_edit_and_delete_reject_received_stock(client, app):

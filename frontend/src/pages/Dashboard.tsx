@@ -158,6 +158,11 @@ function normalizeDealVariantKey(value?: string | null): string {
   return (value || '').trim();
 }
 
+function shouldShowCurrentOrderVariant(value?: string | null): boolean {
+  const normalized = (value || '').trim();
+  return normalized.length > 0 && normalized.toLowerCase() !== 'default';
+}
+
 function getDealComboItemsForVariant(deal: Deal | undefined, variant?: string): DealComboItem[] {
   if (!deal) return [];
   const rows = deal.combo_items || [];
@@ -1581,16 +1586,16 @@ export default function Dashboard() {
                   </div>
                   
                   <div className="flex-1 min-w-0 flex flex-col">
-                    <div className="flex justify-between items-start gap-2">
-                      <p className="text-sm font-bold text-neutral-800 leading-tight pr-6">{item.title}</p>
-                      <button type="button" onClick={(e) => { e.stopPropagation(); handleRemoveItem(item.uniqueId); }} className="absolute top-2 right-2 p-1.5 rounded-md text-neutral-400 hover:text-red-500 hover:bg-red-50 transition-colors" aria-label="Remove line">
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="min-w-0 flex-1 text-sm font-bold text-neutral-800 leading-tight">{item.title}</p>
+                      <button type="button" onClick={(e) => { e.stopPropagation(); handleRemoveItem(item.uniqueId); }} className="shrink-0 p-1.5 rounded-md text-neutral-400 hover:text-red-500 hover:bg-red-50 transition-colors" aria-label="Remove line">
                         <Trash2 className="w-4 h-4" />
                       </button>
                     </div>
 
                     {/* Variant selector — compact but still reads as a control */}
                     {showVariantSelector ? (
-                      <div className="mt-1.5 w-full max-w-[min(100%,8.5rem)]">
+                      <div className="mt-1.5 w-full max-w-[calc(100%-2.25rem)]">
                         <label htmlFor={`cart-variant-${item.uniqueId.replace(/\W/g, '-')}`} className="sr-only">
                           Variant
                         </label>
@@ -1603,7 +1608,7 @@ export default function Dashboard() {
                           dropdownClassName="min-w-[8.5rem]"
                         />
                       </div>
-                    ) : item.variant ? (
+                    ) : shouldShowCurrentOrderVariant(item.variant) ? (
                       <span className="inline-block mt-0.5 px-1.5 py-0.5 bg-neutral-200/80 text-neutral-700 text-[10px] font-bold rounded">
                         {item.variant}
                       </span>
@@ -1617,7 +1622,7 @@ export default function Dashboard() {
                             className="inline-flex items-center rounded-full border border-brand-200 bg-brand-50 px-2 py-1 text-[10px] font-bold text-brand-800"
                           >
                             {selection.category_name}: {selection.product_title}
-                            {selection.variant ? ` (${selection.variant})` : ''}
+                            {shouldShowCurrentOrderVariant(selection.variant) ? ` (${selection.variant})` : ''}
                           </span>
                         ))}
                       </div>
@@ -1906,7 +1911,7 @@ export default function Dashboard() {
                               key={t}
                               type="button"
                               onClick={() => setDineInTable(t)}
-                              className={`py-2.5 rounded-[11px] text-xs font-bold border-2 transition-all active:scale-95 text-center ${
+                              className={`table-select-button py-2.5 rounded-[11px] text-xs font-bold border-2 transition-all active:scale-95 text-center ${
                                 selected
                                   ? 'border-brand-500 bg-brand-500 text-white'
                                   : 'border-white/80 bg-white text-neutral-700 hover:border-brand-300 hover:bg-brand-50'
@@ -2096,7 +2101,7 @@ export default function Dashboard() {
         <div className="p-4 lg:p-5 border-t border-black/10 bg-white/70 shrink-0">
           {orderType === 'dine_in' && !editingOpenSaleId ? (
             <div className="grid grid-cols-1 gap-2.5">
-              <button type="button" onClick={handleGenerateKot} disabled={cart.length === 0 || checkoutSubmitting} className="w-full bg-brand-600 hover:bg-brand-700 disabled:bg-neutral-200 disabled:text-neutral-400 disabled:border-neutral-200 disabled:cursor-not-allowed text-white py-4 rounded-[11px] font-bold text-[15px] transition-all active:scale-[0.98] flex items-center justify-center gap-2">
+              <button type="button" onClick={handleGenerateKot} disabled={cart.length === 0 || checkoutSubmitting} className="kot-primary w-full bg-brand-600 hover:bg-brand-700 disabled:bg-neutral-200 disabled:text-neutral-400 disabled:border-neutral-200 disabled:cursor-not-allowed text-white py-4 rounded-[11px] font-bold text-[15px] transition-all active:scale-[0.98] flex items-center justify-center gap-2">
                 <ClipboardList className="w-5 h-5" /> {checkoutSubmitting ? 'Working…' : 'Send to Kitchen (KOT)'}
               </button>
               <p className="text-center text-xs text-neutral-400 font-medium">To collect payment, open Active Dine-in Orders.</p>
@@ -2107,7 +2112,7 @@ export default function Dashboard() {
                 type="button"
                 onClick={() => void submitTakeawayDeliveryKotAndPay()}
                 disabled={cart.length === 0 || checkoutSubmitting}
-                className="w-full bg-brand-600 hover:bg-brand-700 disabled:bg-neutral-200 disabled:text-neutral-400 disabled:cursor-not-allowed text-white py-4 rounded-[11px] font-bold text-[15px] transition-all active:scale-[0.98] flex items-center justify-center gap-2"
+                className="kot-primary w-full bg-brand-600 hover:bg-brand-700 disabled:bg-neutral-200 disabled:text-neutral-400 disabled:cursor-not-allowed text-white py-4 rounded-[11px] font-bold text-[15px] transition-all active:scale-[0.98] flex items-center justify-center gap-2"
               >
                 <ClipboardList className="w-5 h-5" /> {checkoutSubmitting ? 'Working…' : 'Send to Kitchen (KOT)'}
               </button>

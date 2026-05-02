@@ -23,8 +23,6 @@ interface ComboItem {
   quantity: number;
   selection_type?: 'product' | 'category';
   category_name?: string;
-  /** Empty = base combo (all deal variants); otherwise must match a deal variant label. */
-  variant_key?: string;
 }
 
 interface Deal {
@@ -34,7 +32,6 @@ interface Deal {
   base_price: number;
   sale_price?: number;
   section?: string;
-  variants?: string[];
   combo_items: ComboItem[];
   archived_at?: string | null;
 }
@@ -55,8 +52,6 @@ export default function DealsTab() {
     title: '',
     sku: '',
     sale_price: '',
-    /** Comma-separated deal variant labels (optional). Used for variant-specific combo lines. */
-    variants: '',
     combo_items: [] as ComboItem[]
   });
 
@@ -72,15 +67,6 @@ export default function DealsTab() {
         .sort((left, right) => left.localeCompare(right, undefined, { sensitivity: 'base' }))
         .map(section => ({ value: section, label: section })),
     [products]
-  );
-
-  const dealVariantOptions = useMemo(
-    () =>
-      formData.variants
-        .split(',')
-        .map(s => s.trim())
-        .filter(Boolean),
-    [formData.variants]
   );
 
   const fetchData = useCallback(async () => {
@@ -108,24 +94,21 @@ export default function DealsTab() {
   }, [fetchData]);
 
   const resetForm = () => {
-    setFormData({ title: '', sku: '', sale_price: '', variants: '', combo_items: [] });
+    setFormData({ title: '', sku: '', sale_price: '', combo_items: [] });
     setEditingDealId(null);
     setFormSkuTouched(false);
   };
 
   const buildPayload = () => {
-    const variantList = dealVariantOptions;
     return {
       title: formData.title,
       sku: formData.sku,
       sale_price: Number(formData.sale_price),
-      variants: variantList,
-      combo_items: formData.combo_items.map(({ product_id, quantity, variant_key, selection_type, category_name }) => ({
+      combo_items: formData.combo_items.map(({ product_id, quantity, selection_type, category_name }) => ({
         selection_type: selection_type || 'product',
         product_id: (selection_type || 'product') === 'product' ? Number(product_id) : null,
         category_name: (selection_type || 'product') === 'category' ? (category_name || '').trim() : '',
         quantity: Number(quantity),
-        variant_key: (variant_key || '').trim()
       }))
     };
   };
@@ -182,13 +165,11 @@ export default function DealsTab() {
       title: deal.title,
       sku: deal.sku,
       sale_price: String(deal.sale_price ?? deal.base_price ?? ''),
-      variants: (deal.variants || []).join(', '),
       combo_items: (deal.combo_items || []).map(item => ({
         product_id: item.product_id,
         quantity: item.quantity,
         selection_type: item.selection_type || 'product',
         category_name: item.category_name || '',
-        variant_key: item.variant_key || '',
       })),
     });
     setShowForm(true);
@@ -251,7 +232,7 @@ export default function DealsTab() {
       ...prev,
       combo_items: [
         ...prev.combo_items,
-        { product_id: undefined, quantity: 1, variant_key: '', selection_type: 'product', category_name: '' },
+        { product_id: undefined, quantity: 1, selection_type: 'product', category_name: '' },
       ]
     }));
   };
@@ -296,7 +277,8 @@ export default function DealsTab() {
           <p className="text-soot-600 font-medium">
             Bundle menu items into promotions. Deals use the <span className="font-semibold text-soot-800">Deals</span>{' '}
             section and appear on the order screen (category filter &quot;Deals&quot; when needed). Ingredient depletion
-            follows each bundled item&apos;s recipe (BOM), same as regular menu items.
+            follows each bundled item&apos;s recipe (BOM), same as regular menu items. Deals themselves do not carry a
+            separate BOM.
           </p>
         </div>
         <button
@@ -336,22 +318,6 @@ export default function DealsTab() {
           <h3 className="text-lg font-bold text-soot-900 mb-4">{editingDealId ? 'Edit Deal' : 'Create New Deal'}</h3>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <div className="md:col-span-3">
-                <label className="block text-sm font-semibold text-soot-700 mb-2">
-                  Deal variants <span className="text-soot-500 font-normal">(optional)</span>
-                </label>
-                <input
-                  type="text"
-                  value={formData.variants}
-                  onChange={e => setFormData({ ...formData, variants: e.target.value })}
-                  className="w-full bg-white/50 border border-soot-200 rounded-[11px] px-4 py-3 focus:ring-2 focus:ring-brand-500 transition-all font-medium touch-target outline-none"
-                  placeholder="e.g. Regular, Large — comma-separated"
-                />
-                <p className="text-xs text-soot-500 mt-1.5">
-                  If set, you can tag each combo line for a variant (or leave as base for all). POS will require a
-                  variant pick when the deal has variants.
-                </p>
-              </div>
               <div>
                 <label className="block text-sm font-semibold text-soot-700 mb-2">Deal Title</label>
                 <input
@@ -483,19 +449,6 @@ export default function DealsTab() {
                         className="w-full bg-white border border-soot-200 rounded-[8px] px-3 py-2 font-medium focus:ring-2 focus:ring-brand-400 outline-none"
                       />
                     </div>
-                    {dealVariantOptions.length > 0 && (
-                      <div className="w-full sm:w-44 shrink-0">
-                        <label className="block text-xs font-semibold text-soot-600 mb-1">Combo for variant</label>
-                        <SearchableSelect
-                          value={item.variant_key || ''}
-                          onChange={(value) => updateComboItem(index, 'variant_key', value)}
-                          placeholder="Base (all)"
-                          searchPlaceholder="Search variants…"
-                          options={dealVariantOptions.map((variant) => ({ value: variant, label: variant }))}
-                          className="border-soot-200 bg-white px-3 py-2 font-medium"
-                        />
-                      </div>
-                    )}
                     <button
                       type="button"
                       onClick={() => removeComboItem(index)}
@@ -565,15 +518,6 @@ export default function DealsTab() {
                       Archived
                     </span>
                   )}
-                  {deal.variants && deal.variants.length > 0 && (
-                    <div className="flex flex-wrap gap-1 mt-2">
-                      {deal.variants.map(v => (
-                        <span key={v} className="text-[10px] font-bold uppercase tracking-wide text-brand-800 bg-white/80 border border-brand-200 px-1.5 py-0.5 rounded">
-                          {v}
-                        </span>
-                      ))}
-                    </div>
-                  )}
                 </div>
                 <div className="flex items-center gap-1 opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity">
                   <button
@@ -622,9 +566,6 @@ export default function DealsTab() {
                         {(item.selection_type || 'product') === 'category'
                           ? `Choose any from ${item.category_name || 'category'}`
                           : item.product_title}
-                        {item.variant_key ? (
-                          <span className="text-[10px] font-bold text-brand-700 ml-2">({item.variant_key})</span>
-                        ) : null}
                       </span>
                     </li>
                   ))}
