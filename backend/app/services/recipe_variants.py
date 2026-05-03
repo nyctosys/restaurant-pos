@@ -13,11 +13,37 @@ def normalize_variant_key(raw: str | None) -> str:
 
 
 def normalize_combo_selection_type(raw: str | None) -> str:
-    return "category" if (raw or "").strip().lower() == "category" else "product"
+    normalized = (raw or "").strip().lower().replace("-", "_").replace(" ", "_")
+    if normalized in {"category", "single_category"}:
+        return "category"
+    if normalized in {"multiple_category", "multi_category", "multiple_categories", "category_group"}:
+        return "multiple_category"
+    return "product"
 
 
 def normalize_combo_category_name(raw: str | None) -> str:
     return (raw or "").strip()
+
+
+def normalize_combo_category_names(raw: object) -> list[str]:
+    if not isinstance(raw, list):
+        return []
+    seen: set[str] = set()
+    normalized: list[str] = []
+    for value in raw:
+        name = normalize_combo_category_name(str(value) if value is not None else None)
+        key = name.casefold()
+        if name and key not in seen:
+            seen.add(key)
+            normalized.append(name)
+    return normalized
+
+
+def combo_category_label(category_names: list[str], fallback: str | None = None) -> str:
+    names = normalize_combo_category_names(category_names)
+    if names:
+        return " / ".join(names)
+    return normalize_combo_category_name(fallback)
 
 
 def combo_items_for_variant(product: "Product", variant_key: str | None) -> list["ComboItem"]:

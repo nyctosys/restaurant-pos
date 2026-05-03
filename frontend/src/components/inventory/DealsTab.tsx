@@ -14,6 +14,7 @@ interface Product {
   base_price: number;
   section?: string;
   sale_price?: number;
+  variants?: { name: string; basePrice: number; salePrice: number; sku?: string }[];
 }
 
 interface ComboItem {
@@ -21,11 +22,10 @@ interface ComboItem {
   product_id?: number | null;
   product_title?: string;
   quantity: number;
-  selection_type?: 'product' | 'category';
+  selection_type?: 'product' | 'category' | 'multiple_category';
   category_name?: string;
-  group_label?: string;
-  choice_group_key?: string;
-  distinct_picks_in_group?: boolean;
+  category_names?: string[];
+  variant_key?: string;
 }
 
 interface Deal {
@@ -113,17 +113,18 @@ export default function DealsTab() {
           quantity,
           selection_type,
           category_name,
-          group_label,
-          choice_group_key,
-          distinct_picks_in_group,
+          category_names,
+          variant_key,
         }) => ({
           selection_type: selection_type || 'product',
           product_id: (selection_type || 'product') === 'product' ? Number(product_id) : null,
           category_name: (selection_type || 'product') === 'category' ? (category_name || '').trim() : '',
+          category_names:
+            (selection_type || 'product') === 'multiple_category'
+              ? Array.from(new Set((category_names || []).map(name => name.trim()).filter(Boolean)))
+              : [],
           quantity: Number(quantity),
-          group_label: (group_label || '').trim(),
-          choice_group_key: (choice_group_key || '').trim(),
-          distinct_picks_in_group: Boolean(distinct_picks_in_group),
+          variant_key: (variant_key || '').trim(),
         })
       )
     };
@@ -151,7 +152,15 @@ export default function DealsTab() {
       if (selectionType === 'category') {
         return !item.category_name?.trim();
       }
-      return !Number.isInteger(Number(item.product_id)) || Number(item.product_id) <= 0;
+      if (selectionType === 'multiple_category') {
+        return Array.from(new Set((item.category_names || []).map(name => name.trim()).filter(Boolean))).length < 2;
+      }
+      const productId = Number(item.product_id);
+      if (!Number.isInteger(productId) || productId <= 0) {
+        return true;
+      }
+      const selectedProduct = products.find((product) => product.id === productId);
+      return Boolean(selectedProduct?.variants?.length) && !item.variant_key?.trim();
     });
     if (invalidRowIndex >= 0) {
       showToast(`Complete combo line ${invalidRowIndex + 1} before saving deal`, 'error');
@@ -186,9 +195,8 @@ export default function DealsTab() {
         quantity: item.quantity,
         selection_type: item.selection_type || 'product',
         category_name: item.category_name || '',
-        group_label: item.group_label || '',
-        choice_group_key: item.choice_group_key || '',
-        distinct_picks_in_group: Boolean(item.distinct_picks_in_group),
+        category_names: item.category_names || [],
+        variant_key: item.variant_key || '',
       })),
     });
     setShowForm(true);
@@ -256,18 +264,53 @@ export default function DealsTab() {
           quantity: 1,
           selection_type: 'product',
           category_name: '',
-          group_label: '',
-          choice_group_key: '',
-          distinct_picks_in_group: false,
+          category_names: [],
+          variant_key: '',
         },
       ]
     }));
   };
 
-  const updateComboItem = (index: number, field: keyof ComboItem, value: string | number | null | undefined) => {
-    const newItems = [...formData.combo_items];
-    newItems[index] = { ...newItems[index], [field]: value };
-    setFormData(prev => ({ ...prev, combo_items: newItems }));
+  const updateComboItem = (
+    index: number,
+    field: keyof ComboItem,
+    value: string | number | boolean | null | undefined
+  ) => {
+    setFormData(prev => {
+      const newItems = [...prev.combo_items];
+      newItems[index] = { ...newItems[index], [field]: value };
+      return { ...prev, combo_items: newItems };
+    });
+  };
+
+  const setComboItemSelectionType = (index: number, selectionType: ComboItem['selection_type']) => {
+    setFormData(prev => {
+      const nextItems = [...prev.combo_items];
+      nextItems[index] = {
+        ...nextItems[index],
+        selection_type: selectionType,
+        product_id: selectionType === 'product' ? nextItems[index].product_id : undefined,
+        category_name: selectionType === 'category' ? nextItems[index].category_name || '' : '',
+        category_names: selectionType === 'multiple_category' ? nextItems[index].category_names || [] : [],
+        variant_key: selectionType === 'product' ? nextItems[index].variant_key || '' : '',
+      };
+      return { ...prev, combo_items: nextItems };
+    });
+  };
+
+  const toggleComboItemCategory = (index: number, categoryName: string) => {
+    setFormData(prev => {
+      const nextItems = [...prev.combo_items];
+      const current = nextItems[index]?.category_names || [];
+      const exists = current.some(name => name.toLowerCase() === categoryName.toLowerCase());
+      nextItems[index] = {
+        ...nextItems[index],
+        category_names: exists
+          ? current.filter(name => name.toLowerCase() !== categoryName.toLowerCase())
+          : [...current, categoryName],
+      };
+      return { ...prev, combo_items: nextItems };
+    });
   };
 
   const removeComboItem = (index: number) => {
@@ -276,6 +319,17 @@ export default function DealsTab() {
       combo_items: prev.combo_items.filter((_, i) => i !== index)
     }));
   };
+
+  const fixedItemVariantOptions = useCallback(
+    (productId?: number | null) => {
+      if (!productId) return [];
+      const product = products.find((item) => item.id === productId);
+      return (product?.variants || [])
+        .map((variant) => ({ value: variant.name, label: variant.name }))
+        .filter((variant, index, options) => options.findIndex(option => option.value === variant.value) === index);
+    },
+    [products]
+  );
 
   useEffect(() => {
     if (formSkuTouched) {
@@ -404,7 +458,7 @@ export default function DealsTab() {
                     <div className="flex flex-wrap gap-2">
                       <button
                         type="button"
-                        onClick={() => updateComboItem(index, 'selection_type', 'product')}
+                        onClick={() => setComboItemSelectionType(index, 'product')}
                         className={`rounded-full px-3 py-1.5 text-xs font-bold transition-colors ${
                           (item.selection_type || 'product') === 'product'
                             ? 'bg-brand-600 text-white'
@@ -415,17 +469,7 @@ export default function DealsTab() {
                       </button>
                       <button
                         type="button"
-                        onClick={() =>
-                          setFormData(prev => {
-                            const nextItems = [...prev.combo_items];
-                            nextItems[index] = {
-                              ...nextItems[index],
-                              selection_type: 'category',
-                              product_id: undefined,
-                            };
-                            return { ...prev, combo_items: nextItems };
-                          })
-                        }
+                        onClick={() => setComboItemSelectionType(index, 'category')}
                         className={`rounded-full px-3 py-1.5 text-xs font-bold transition-colors ${
                           (item.selection_type || 'product') === 'category'
                             ? 'bg-brand-600 text-white'
@@ -434,12 +478,27 @@ export default function DealsTab() {
                       >
                         Category choice
                       </button>
+                      <button
+                        type="button"
+                        onClick={() => setComboItemSelectionType(index, 'multiple_category')}
+                        className={`rounded-full px-3 py-1.5 text-xs font-bold transition-colors ${
+                          (item.selection_type || 'product') === 'multiple_category'
+                            ? 'bg-brand-600 text-white'
+                            : 'bg-white text-soot-600 border border-soot-200 hover:border-brand-300'
+                        }`}
+                      >
+                        Multiple category choice
+                      </button>
                     </div>
 
                     <div className="flex flex-wrap gap-4 items-end">
                     <div className="flex-1 min-w-[200px]">
                       <label className="block text-xs font-semibold text-soot-600 mb-1">
-                        {(item.selection_type || 'product') === 'category' ? 'Category' : 'Menu Item'}
+                        {(item.selection_type || 'product') === 'category'
+                          ? 'Category'
+                          : (item.selection_type || 'product') === 'multiple_category'
+                            ? 'Categories'
+                            : 'Menu Item'}
                       </label>
                       {(item.selection_type || 'product') === 'category' ? (
                         <SearchableSelect
@@ -450,19 +509,57 @@ export default function DealsTab() {
                           options={categoryOptions}
                           className="border-soot-200 bg-white px-3 py-2 font-medium"
                         />
+                      ) : (item.selection_type || 'product') === 'multiple_category' ? (
+                        <div className="flex flex-wrap gap-2 rounded-[8px] border border-soot-200 bg-white px-3 py-2">
+                          {categoryOptions.map(option => {
+                            const checked = (item.category_names || []).some(name => name.toLowerCase() === option.value.toLowerCase());
+                            return (
+                              <button
+                                key={option.value}
+                                type="button"
+                                onClick={() => toggleComboItemCategory(index, option.value)}
+                                className={`rounded-full px-3 py-1.5 text-xs font-bold transition-colors ${
+                                  checked
+                                    ? 'bg-brand-600 text-white'
+                                    : 'bg-soot-50 text-soot-600 border border-soot-200 hover:border-brand-300'
+                                }`}
+                              >
+                                {option.label}
+                              </button>
+                            );
+                          })}
+                          {categoryOptions.length === 0 && (
+                            <p className="text-xs font-medium text-soot-500">Add menu categories before using this choice.</p>
+                          )}
+                        </div>
                       ) : (
-                        <SearchableSelect
-                          value={item.product_id ? String(item.product_id) : ''}
-                          onChange={(value) => updateComboItem(index, 'product_id', parseInt(value, 10))}
-                          placeholder="Select product…"
-                          searchPlaceholder="Search menu items…"
-                          options={products.map((product) => ({
-                            value: String(product.id),
-                            label: `${product.title} (${formatCurrency(product.sale_price ?? product.base_price)})`,
-                            searchText: `${product.sku} ${product.title} ${(product.section || '').trim()}`,
-                          }))}
-                          className="border-soot-200 bg-white px-3 py-2 font-medium"
-                        />
+                        <div className="space-y-2">
+                          <SearchableSelect
+                            value={item.product_id ? String(item.product_id) : ''}
+                            onChange={(value) => {
+                              updateComboItem(index, 'product_id', parseInt(value, 10));
+                              updateComboItem(index, 'variant_key', '');
+                            }}
+                            placeholder="Select product…"
+                            searchPlaceholder="Search menu items…"
+                            options={products.map((product) => ({
+                              value: String(product.id),
+                              label: `${product.title} (${formatCurrency(product.sale_price ?? product.base_price)})`,
+                              searchText: `${product.sku} ${product.title} ${(product.section || '').trim()}`,
+                            }))}
+                            className="border-soot-200 bg-white px-3 py-2 font-medium"
+                          />
+                          {fixedItemVariantOptions(item.product_id).length > 0 && (
+                            <SearchableSelect
+                              value={item.variant_key || ''}
+                              onChange={(value) => updateComboItem(index, 'variant_key', value)}
+                              placeholder="Choose variant…"
+                              searchPlaceholder="Search variants…"
+                              options={fixedItemVariantOptions(item.product_id)}
+                              className="border-soot-200 bg-white px-3 py-2 font-medium"
+                            />
+                          )}
+                        </div>
                       )}
                     </div>
                     <div className="w-24 shrink-0">
@@ -484,41 +581,14 @@ export default function DealsTab() {
                       <Trash2 className="w-5 h-5" />
                     </button>
                     </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                      <div>
-                        <label className="block text-xs font-semibold text-soot-600 mb-1">Group label (POS)</label>
-                        <input
-                          type="text"
-                          value={item.group_label || ''}
-                          onChange={e => updateComboItem(index, 'group_label', e.target.value)}
-                          placeholder="e.g. Burgers"
-                          className="w-full bg-white border border-soot-200 rounded-[8px] px-3 py-2 text-sm font-medium focus:ring-2 focus:ring-brand-400 outline-none"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-semibold text-soot-600 mb-1">Choice group key</label>
-                        <input
-                          type="text"
-                          value={item.choice_group_key || ''}
-                          onChange={e => updateComboItem(index, 'choice_group_key', e.target.value)}
-                          placeholder="e.g. protein-a"
-                          className="w-full bg-white border border-soot-200 rounded-[8px] px-3 py-2 text-sm font-medium focus:ring-2 focus:ring-brand-400 outline-none"
-                        />
-                      </div>
-                      <label className="flex items-center gap-2 cursor-pointer select-none text-sm font-semibold text-soot-700 pt-6 sm:pt-0 sm:items-end sm:pb-2">
-                        <input
-                          type="checkbox"
-                          checked={Boolean(item.distinct_picks_in_group)}
-                          onChange={e => updateComboItem(index, 'distinct_picks_in_group', e.target.checked)}
-                          className="rounded border-soot-300 text-brand-600 focus:ring-brand-500"
-                        />
-                        Distinct picks in group
-                      </label>
-                    </div>
                     {(item.selection_type || 'product') === 'category' && (
                       <p className="text-xs text-soot-500">
                         Cashier will choose any menu item from this category on the dashboard before adding the deal.
-                        Use the same choice group key + distinct picks so two slots cannot select the same menu item.
+                      </p>
+                    )}
+                    {(item.selection_type || 'product') === 'multiple_category' && (
+                      <p className="text-xs text-soot-500">
+                        Cashier will choose one of these categories, then one item from that category.
                       </p>
                     )}
                   </div>
@@ -624,6 +694,8 @@ export default function DealsTab() {
                         <span className="font-bold text-soot-900 mr-2">{item.quantity}x</span>
                         {(item.selection_type || 'product') === 'category'
                           ? `Choose any from ${item.category_name || 'category'}`
+                          : (item.selection_type || 'product') === 'multiple_category'
+                            ? `Choose one from ${(item.category_names || []).join(' / ') || item.category_name || 'selected categories'}`
                           : item.product_title}
                       </span>
                     </li>

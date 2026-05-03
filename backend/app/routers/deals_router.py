@@ -7,7 +7,12 @@ from fastapi.responses import JSONResponse
 
 from app.models import db, User, Product, ComboItem, SaleItem
 from app.services.product_pricing import effective_sale_price
-from app.services.recipe_variants import normalize_combo_category_name, normalize_combo_selection_type
+from app.services.recipe_variants import (
+    combo_category_label,
+    normalize_combo_category_name,
+    normalize_combo_category_names,
+    normalize_combo_selection_type,
+)
 from app.deps import get_current_user, require_owner
 from app.routers.common import yes
 
@@ -21,9 +26,7 @@ class ComboItemCreate(BaseModel):
     variant_key: str = ""
     selection_type: str = "product"
     category_name: str = ""
-    group_label: str = ""
-    choice_group_key: str = ""
-    distinct_picks_in_group: bool = False
+    category_names: list[str] = Field(default_factory=list)
 
 
 class DealCreate(BaseModel):
@@ -38,18 +41,21 @@ class DealCreate(BaseModel):
 def _deal_to_dict(deal: Product) -> dict:
     items: list[dict] = []
     for ci in deal.combo_items:
+        selection_type = normalize_combo_selection_type(getattr(ci, "selection_type", None))
+        category_names = normalize_combo_category_names(getattr(ci, "category_names", None))
+        category_name = normalize_combo_category_name(getattr(ci, "category_name", None))
+        if selection_type == "multiple_category":
+            category_name = combo_category_label(category_names, category_name)
         items.append(
             {
                 "id": ci.id,
                 "product_id": ci.product_id,
                 "product_title": ci.child_product.title if ci.child_product else None,
                 "quantity": ci.quantity,
-                "selection_type": normalize_combo_selection_type(getattr(ci, "selection_type", None)),
-                "category_name": normalize_combo_category_name(getattr(ci, "category_name", None)),
+                "selection_type": selection_type,
+                "category_name": category_name,
+                "category_names": category_names,
                 "variant_key": (getattr(ci, "variant_key", None) or "").strip(),
-                "group_label": (getattr(ci, "group_label", None) or "").strip(),
-                "choice_group_key": (getattr(ci, "choice_group_key", None) or "").strip(),
-                "distinct_picks_in_group": bool(getattr(ci, "distinct_picks_in_group", False)),
             }
         )
     return {
@@ -91,7 +97,10 @@ def _validate_deal_payload(payload: DealCreate, deal_id: int | None = None) -> t
 
     normalized_combo_items: list[dict[str, object]] = []
     for index, ci in enumerate(payload.combo_items):
+        category_names = normalize_combo_category_names(ci.category_names)
         selection_type = normalize_combo_selection_type(ci.selection_type)
+        if selection_type == "product" and category_names:
+            selection_type = "multiple_category" if len(category_names) > 1 else "category"
         quantity = int(ci.quantity)
         if quantity <= 0:
             return JSONResponse(
@@ -101,26 +110,30 @@ def _validate_deal_payload(payload: DealCreate, deal_id: int | None = None) -> t
         category_name = normalize_combo_category_name(ci.category_name)
         product_id = int(ci.product_id) if ci.product_id is not None else None
         variant_key_line = (ci.variant_key or "").strip()[:100]
-        group_label = (ci.group_label or "").strip()[:120] or None
-        choice_group_key = (ci.choice_group_key or "").strip()[:80] or None
-        distinct_picks = bool(ci.distinct_picks_in_group)
 
-        if selection_type == "category":
-            if not category_name:
+        if selection_type in {"category", "multiple_category"}:
+            if selection_type == "multiple_category":
+                if len(category_names) < 2:
+                    return JSONResponse(
+                        status_code=400,
+                        content={"message": f"Combo line {index + 1} needs at least two categories for multiple-category choice."},
+                    )
+                category_name = combo_category_label(category_names)
+            elif not category_name:
                 return JSONResponse(
                     status_code=400,
                     content={"message": f"Combo line {index + 1} needs a category for pick-any selection."},
                 )
+            else:
+                category_names = [category_name]
             normalized_combo_items.append(
                 {
                     "selection_type": selection_type,
                     "category_name": category_name,
+                    "category_names": category_names,
                     "product_id": None,
                     "quantity": quantity,
                     "variant_key": variant_key_line,
-                    "group_label": group_label,
-                    "choice_group_key": choice_group_key,
-                    "distinct_picks_in_group": distinct_picks,
                 }
             )
             continue
@@ -145,12 +158,10 @@ def _validate_deal_payload(payload: DealCreate, deal_id: int | None = None) -> t
             {
                 "selection_type": selection_type,
                 "category_name": "",
+                "category_names": [],
                 "product_id": product_id,
                 "quantity": quantity,
                 "variant_key": variant_key_line,
-                "group_label": group_label,
-                "choice_group_key": choice_group_key,
-                "distinct_picks_in_group": distinct_picks,
             }
         )
 
@@ -176,10 +187,8 @@ def _replace_combo_items(deal: Product, combo_items: list[dict[str, object]]) ->
                 quantity=ci_data["quantity"],
                 selection_type=ci_data["selection_type"],
                 category_name=ci_data["category_name"] or None,
+                category_names=ci_data.get("category_names") or [],
                 variant_key=str(ci_data.get("variant_key") or "").strip()[:100],
-                group_label=ci_data.get("group_label"),
-                choice_group_key=ci_data.get("choice_group_key"),
-                distinct_picks_in_group=bool(ci_data.get("distinct_picks_in_group")),
             )
         )
 

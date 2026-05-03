@@ -34,8 +34,10 @@ from app.services.printer_background import run_print_kot_and_stamp_job, run_pri
 from app.services.printer_service import PrinterService
 from app.services.product_pricing import effective_sale_price_for_variant
 from app.services.recipe_variants import (
+    combo_category_label,
     combo_items_for_variant,
     normalize_combo_category_name,
+    normalize_combo_category_names,
     normalize_combo_selection_type,
     normalize_variant_key,
     prepared_recipe_rows_for_variant,
@@ -475,7 +477,7 @@ def _validate_deal_selections(
 
     def _combo_row_requires_pos_selection(row: Any) -> bool:
         st = normalize_combo_selection_type(getattr(row, "selection_type", None))
-        if st == "category":
+        if st in {"category", "multiple_category"}:
             return True
         if st != "product":
             return False
@@ -552,13 +554,17 @@ def _validate_deal_selections(
             )
 
         row_st = normalize_combo_selection_type(getattr(combo_row, "selection_type", None))
-        if row_st == "category":
-            expected_category = normalize_combo_category_name(getattr(combo_row, "category_name", None))
+        if row_st in {"category", "multiple_category"}:
+            if row_st == "multiple_category":
+                expected_categories = normalize_combo_category_names(getattr(combo_row, "category_names", None))
+            else:
+                expected_categories = [normalize_combo_category_name(getattr(combo_row, "category_name", None))]
+            expected_keys = {name.casefold() for name in expected_categories if name}
             selected_category = normalize_combo_category_name(getattr(selected_product, "section", None))
-            if not expected_category or selected_category.casefold() != expected_category.casefold():
+            if not expected_keys or selected_category.casefold() not in expected_keys:
                 return None, _json_error(
                     "Bad Request",
-                    f'Item at index {item_index}: "{selected_product.title}" is not in category "{expected_category}"',
+                    f'Item at index {item_index}: "{selected_product.title}" is not in category "{combo_category_label(expected_categories)}"',
                     400,
                 )
         else:
@@ -596,8 +602,14 @@ def _validate_deal_selections(
         for row in missing_rows:
             st = normalize_combo_selection_type(getattr(row, "selection_type", None))
             if st == "category":
+                labels.append(normalize_combo_category_name(getattr(row, "category_name", None)) or f"row {row.id}")
+            elif st == "multiple_category":
                 labels.append(
-                    normalize_combo_category_name(getattr(row, "category_name", None)) or f"row {row.id}"
+                    combo_category_label(
+                        normalize_combo_category_names(getattr(row, "category_names", None)),
+                        getattr(row, "category_name", None),
+                    )
+                    or f"row {row.id}"
                 )
             else:
                 ch = getattr(row, "child_product", None)
@@ -608,25 +620,6 @@ def _validate_deal_selections(
             f'Item at index {item_index}: complete deal choices for: {names}',
             400,
         )
-
-    # Optional: rows sharing choice_group_key with distinct_picks_in_group must not repeat the same menu item.
-    group_buckets: dict[str, list[int]] = {}
-    for row in selection_rows:
-        gk = (getattr(row, "choice_group_key", None) or "").strip()
-        if not gk or not bool(getattr(row, "distinct_picks_in_group", False)):
-            continue
-        sel = selections_by_row.get(int(row.id))
-        if not sel:
-            continue
-        group_buckets.setdefault(gk, []).append(int(sel["product_id"]))
-
-    for gk, pids in group_buckets.items():
-        if len(pids) != len(set(pids)):
-            return None, _json_error(
-                "Bad Request",
-                f'Item at index {item_index}: deal selections in group "{gk}" must use different menu items.',
-                400,
-            )
 
     return normalized_selections, None
 
@@ -950,10 +943,16 @@ def _deduct_product_inventory_and_create_sale_items(
             selection_type = normalize_combo_selection_type(getattr(combo_item, "selection_type", None))
             child = combo_item.child_product
             child_variant = ""
-            if selection_type == "category":
+            if selection_type in {"category", "multiple_category"}:
                 selection = selection_lookup.get(int(combo_item.id))
                 if selection is None:
-                    category_name = normalize_combo_category_name(getattr(combo_item, "category_name", None))
+                    if selection_type == "multiple_category":
+                        category_name = combo_category_label(
+                            normalize_combo_category_names(getattr(combo_item, "category_names", None)),
+                            getattr(combo_item, "category_name", None),
+                        )
+                    else:
+                        category_name = normalize_combo_category_name(getattr(combo_item, "category_name", None))
                     return (
                         False,
                         f'Choose a menu item for "{category_name}" in deal "{product.title}" before checkout.',

@@ -172,6 +172,14 @@ def _init_database_core() -> None:
                 except (OperationalError, ProgrammingError):
                     db.session.rollback()
                 try:
+                    dname = db.engine.dialect.name
+                    col_sql = "JSONB NOT NULL DEFAULT '[]'::jsonb" if dname == "postgresql" else "JSON NOT NULL DEFAULT '[]'"
+                    db.session.execute(text(f"ALTER TABLE combo_items ADD COLUMN category_names {col_sql}"))
+                    db.session.commit()
+                    print("Added 'category_names' column to 'combo_items' table.")
+                except (OperationalError, ProgrammingError):
+                    db.session.rollback()
+                try:
                     db.session.execute(text("ALTER TABLE suppliers ADD COLUMN sku VARCHAR(100)"))
                     db.session.commit()
                     print("Added 'sku' column to 'suppliers' table.")
@@ -207,37 +215,6 @@ def _init_database_core() -> None:
                     db.session.execute(text("ALTER TABLE sale_items ADD COLUMN inventory_allocations JSON"))
                     db.session.commit()
                     print("Added 'inventory_allocations' column to 'sale_items' table.")
-                except (OperationalError, ProgrammingError):
-                    db.session.rollback()
-                # Deal combo rows: group metadata (model expects these columns on existing DBs).
-                try:
-                    db.session.execute(text("ALTER TABLE combo_items ADD COLUMN group_label VARCHAR(120)"))
-                    db.session.commit()
-                    print("Added 'group_label' column to 'combo_items' table.")
-                except (OperationalError, ProgrammingError):
-                    db.session.rollback()
-                try:
-                    db.session.execute(text("ALTER TABLE combo_items ADD COLUMN choice_group_key VARCHAR(80)"))
-                    db.session.commit()
-                    print("Added 'choice_group_key' column to 'combo_items' table.")
-                except (OperationalError, ProgrammingError):
-                    db.session.rollback()
-                try:
-                    dname_ci = db.engine.dialect.name
-                    if dname_ci == "postgresql":
-                        db.session.execute(
-                            text(
-                                "ALTER TABLE combo_items ADD COLUMN distinct_picks_in_group BOOLEAN NOT NULL DEFAULT false"
-                            )
-                        )
-                    else:
-                        db.session.execute(
-                            text(
-                                "ALTER TABLE combo_items ADD COLUMN distinct_picks_in_group INTEGER NOT NULL DEFAULT 0"
-                            )
-                        )
-                    db.session.commit()
-                    print("Added 'distinct_picks_in_group' column to 'combo_items' table.")
                 except (OperationalError, ProgrammingError):
                     db.session.rollback()
                 if db.engine.dialect.name == "postgresql":

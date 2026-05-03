@@ -25,12 +25,10 @@ type DealComboItem = {
   product_id?: number | null;
   product_title?: string | null;
   quantity: number;
-  selection_type?: 'product' | 'category';
+  selection_type?: 'product' | 'category' | 'multiple_category';
   category_name?: string;
+  category_names?: string[];
   variant_key?: string;
-  group_label?: string;
-  choice_group_key?: string;
-  distinct_picks_in_group?: boolean;
 };
 
 type Deal = {
@@ -177,13 +175,38 @@ function getDealComboItemsForVariant(deal: Deal | undefined, variant?: string): 
 }
 
 function isCategoryChoiceRow(row: DealComboItem): boolean {
-  return (row.selection_type || 'product') === 'category';
+  return ['category', 'multiple_category'].includes(row.selection_type || 'product');
+}
+
+function getChoiceRowCategories(row: DealComboItem): string[] {
+  if ((row.selection_type || 'product') === 'multiple_category') {
+    const seen = new Set<string>();
+    return (row.category_names || [])
+      .map(name => (name || '').trim())
+      .filter(name => {
+        const key = name.toLowerCase();
+        if (!name || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+  }
+  const single = (row.category_name || '').trim();
+  return single ? [single] : [];
+}
+
+function getChoiceRowLabel(row: DealComboItem): string {
+  const categories = getChoiceRowCategories(row);
+  return categories.length ? categories.join(' / ') : row.category_name || 'Category';
 }
 
 function rowNeedsFixedItemVariant(row: DealComboItem, catalog: Product[]): boolean {
   if (isCategoryChoiceRow(row) || !row.product_id) return false;
   const p = catalog.find(x => x.id === row.product_id);
   return Boolean(p?.variants && p.variants.length > 1);
+}
+
+function getDefaultProductVariant(product: Product | undefined): string {
+  return product?.variants?.[0]?.name?.trim() || '';
 }
 
 function isDealConfigurableRow(row: DealComboItem, catalog: Product[]): boolean {
@@ -252,8 +275,7 @@ export default function Dashboard() {
   const [dealConfigurator, setDealConfigurator] = useState<{
     product: Product;
     variant: string;
-    selections: Record<number, { productId: string; variant: string }>;
-    step: 'configure' | 'review';
+    selections: Record<number, { productId: string; variant: string; categoryName?: string }>;
   } | null>(null);
   const [checkoutSlowNotice, setCheckoutSlowNotice] = useState(false);
   /** Set when resuming an open dine-in sale from Active Dine-in → Modify */
@@ -445,19 +467,21 @@ export default function Dashboard() {
               const reconstructed = activeRows
                 .filter(isCategoryChoiceRow)
                 .map(row => {
-                  const expectedCategory = (row.category_name || '').trim().toLowerCase();
+                  const expectedCategories = getChoiceRowCategories(row);
+                  const expectedKeys = new Set(expectedCategories.map(category => category.toLowerCase()));
                   const matchIndex = remainingChildren.findIndex(child => {
                     const childProduct = products.find(product => product.id === child.product_id);
-                    return ((childProduct?.section || '').trim().toLowerCase()) === expectedCategory;
+                    return expectedKeys.has((childProduct?.section || '').trim().toLowerCase());
                   });
                   if (matchIndex < 0) return null;
                   const child = remainingChildren.splice(matchIndex, 1)[0];
+                  const childProduct = products.find(product => product.id === child.product_id);
                   const childVariant = (child.variant_sku_suffix || '').trim();
                   return {
                     combo_item_id: row.id,
                     product_id: child.product_id,
                     product_title: child.product_title || 'Item',
-                    category_name: row.category_name || '',
+                    category_name: (childProduct?.section || '').trim() || getChoiceRowLabel(row),
                     ...(childVariant ? { variant: childVariant } : {}),
                   };
                 })
@@ -708,8 +732,8 @@ export default function Dashboard() {
   );
 
   const dealNeedsConfigurator = useCallback(
-    (product: Product) => (dealsById.get(product.id)?.combo_items || []).some(row => isDealConfigurableRow(row, products)),
-    [dealsById, products]
+    (product: Product) => (dealsById.get(product.id)?.combo_items || []).length > 0,
+    [dealsById]
   );
 
   // Categories: settings sections, plus "Deals" when any deal product exists (section may be missing from settings JSON).
@@ -748,14 +772,17 @@ export default function Dashboard() {
       const initialSelections: Record<number, { productId: string; variant: string }> = {};
       for (const r of cfgRows) {
         if (rowNeedsFixedItemVariant(r, products)) {
-          initialSelections[r.id] = { productId: String(r.product_id || ''), variant: '' };
+          const fixedProduct = products.find(p => p.id === r.product_id);
+          initialSelections[r.id] = {
+            productId: String(r.product_id || ''),
+            variant: getDefaultProductVariant(fixedProduct),
+          };
         }
       }
       setDealConfigurator({
         product,
         variant: defaultVariant || '',
         selections: initialSelections,
-        step: 'configure',
       });
       return;
     }
@@ -804,24 +831,7 @@ export default function Dashboard() {
     });
   };
 
-  const excludedProductIdsForDealRow = useCallback(
-    (row: DealComboItem): Set<number> => {
-      if (!dealConfigurator) return new Set();
-      const gk = (row.choice_group_key || '').trim();
-      if (!gk || !row.distinct_picks_in_group) return new Set();
-      const taken = new Set<number>();
-      for (const r of activeDealConfigRows) {
-        if (r.id === row.id) continue;
-        if ((r.choice_group_key || '').trim() !== gk || !r.distinct_picks_in_group) continue;
-        const pid = parseInt(dealConfigurator.selections[r.id]?.productId || '', 10);
-        if (Number.isFinite(pid) && pid > 0) taken.add(pid);
-      }
-      return taken;
-    },
-    [activeDealConfigRows, dealConfigurator]
-  );
-
-  const handleDealContinueToReview = () => {
+  const handleDealConfirmAddToCart = () => {
     if (!dealConfigurator) return;
     const rows = activeDealConfigRows.filter(row => isDealConfigurableRow(row, products));
 
@@ -830,7 +840,7 @@ export default function Dashboard() {
         const rawSelection = dealConfigurator.selections[row.id];
         const selectedProductId = parseInt(rawSelection?.productId || '', 10);
         if (!selectedProductId) {
-          setNotification({ type: 'error', msg: `Choose an item from ${row.category_name || 'this category'}.` });
+          setNotification({ type: 'error', msg: `Choose an item from ${getChoiceRowLabel(row)}.` });
           setTimeout(() => setNotification(null), 3000);
           return;
         }
@@ -855,13 +865,6 @@ export default function Dashboard() {
         }
       }
     }
-
-    setDealConfigurator(current => (current ? { ...current, step: 'review' } : current));
-  };
-
-  const handleDealConfirmAddToCart = () => {
-    if (!dealConfigurator) return;
-    const rows = activeDealConfigRows.filter(row => isDealConfigurableRow(row, products));
     const nextSelections: DealSelection[] = [];
 
     for (const row of rows) {
@@ -875,7 +878,7 @@ export default function Dashboard() {
           combo_item_id: row.id,
           product_id: selectedProduct.id,
           product_title: selectedProduct.title,
-          category_name: row.category_name || '',
+          category_name: (selectedProduct.section || '').trim() || getChoiceRowLabel(row),
           ...(variant ? { variant } : {}),
         });
       } else if (row.product_id) {
@@ -1487,9 +1490,7 @@ export default function Dashboard() {
                 <p className="text-xs font-black uppercase tracking-[0.18em] text-brand-700">Configure Deal</p>
                 <h2 className="mt-1 text-2xl font-black text-neutral-900">{dealConfigurator.product.title}</h2>
                 <p className="mt-1 text-sm font-medium text-neutral-600">
-                  {dealConfigurator.step === 'review'
-                    ? 'Review your choices, then add this deal to the order.'
-                    : 'Configure each group slot (item and variant where needed), then review.'}
+                  Configure each bundled item and add the deal to the order.
                 </p>
               </div>
               <button
@@ -1502,7 +1503,7 @@ export default function Dashboard() {
               </button>
             </div>
 
-            {dealConfigurator.product.variants?.length > 0 && dealConfigurator.step === 'configure' && (
+            {dealConfigurator.product.variants?.length > 0 && (
               <div className="mt-5">
                 <label className="mb-2 block text-xs font-bold uppercase tracking-wide text-neutral-600">Deal variant</label>
                 <SearchableSelect
@@ -1515,7 +1516,11 @@ export default function Dashboard() {
                       const nextSel: Record<number, { productId: string; variant: string }> = {};
                       for (const r of cfgRows) {
                         if (rowNeedsFixedItemVariant(r, products)) {
-                          nextSel[r.id] = { productId: String(r.product_id || ''), variant: '' };
+                          const fixedProduct = products.find(p => p.id === r.product_id);
+                          nextSel[r.id] = {
+                            productId: String(r.product_id || ''),
+                            variant: getDefaultProductVariant(fixedProduct),
+                          };
                         }
                       }
                       return { ...current, variant: value, selections: nextSel };
@@ -1532,231 +1537,222 @@ export default function Dashboard() {
               </div>
             )}
 
-            {dealConfigurator.step === 'configure' ? (
-              <div className="mt-5 space-y-4">
-                {activeDealConfigRows.map((row, rowIdx) => {
-                  const prev = activeDealConfigRows[rowIdx - 1];
-                  const groupLabel = (row.group_label || '').trim();
-                  const showGroupHeader =
-                    Boolean(groupLabel) && groupLabel !== (prev?.group_label || '').trim();
-                  const header = showGroupHeader ? (
-                    <div
-                      key={`hdr-${row.id}`}
-                      className="text-[11px] font-black uppercase tracking-[0.14em] text-brand-700"
-                    >
-                      {groupLabel}
-                    </div>
-                  ) : null;
-
-                  if (!isDealConfigurableRow(row, products)) {
-                    return (
-                      <div key={row.id} className="space-y-2">
-                        {header}
-                        <div className="flex items-center justify-between rounded-[18px] border border-white/60 bg-white/70 px-4 py-3">
-                          <div>
-                            <p className="text-sm font-bold text-neutral-900">{row.product_title || 'Menu item'}</p>
-                            <p className="text-xs font-medium text-neutral-500">Included automatically</p>
-                          </div>
-                          <span className="rounded-full bg-neutral-100 px-3 py-1 text-xs font-black text-neutral-700">
-                            {row.quantity}x
-                          </span>
-                        </div>
-                      </div>
-                    );
-                  }
-
-                  if (isCategoryChoiceRow(row)) {
-                    const categoryName = row.category_name || 'Category';
-                    const excluded = excludedProductIdsForDealRow(row);
-                    const categoryProducts = (menuProductsBySection.get(categoryName) || []).filter(
-                      product => !excluded.has(product.id)
-                    );
-                    const selectedState = dealConfigurator.selections[row.id] || { productId: '', variant: '' };
-                    const selectedProduct = categoryProducts.find(product => String(product.id) === selectedState.productId);
-                    return (
-                      <div key={row.id} className="space-y-2">
-                        {header}
-                        <div className="rounded-[18px] border border-white/60 bg-white/70 p-4">
-                          <div className="mb-3 flex items-center justify-between gap-3">
-                            <div>
-                              <p className="text-sm font-bold text-neutral-900">{categoryName}</p>
-                              <p className="text-xs font-medium text-neutral-500">
-                                Pick {row.quantity}x from this category
-                                {row.distinct_picks_in_group && row.choice_group_key
-                                  ? ` · different item per "${row.choice_group_key}"`
-                                  : ''}
-                              </p>
-                            </div>
-                            <span className="rounded-full bg-brand-50 px-3 py-1 text-xs font-black text-brand-700">
-                              Required
-                            </span>
-                          </div>
-                          <div className="grid gap-2 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
-                            <div className="min-w-0">
-                              <label className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-neutral-500">
-                                Item
-                              </label>
-                              <SearchableSelect
-                                value={selectedState.productId}
-                                onChange={(value) =>
-                                  setDealConfigurator(current =>
-                                    current
-                                      ? {
-                                          ...current,
-                                          selections: {
-                                            ...current.selections,
-                                            [row.id]: { productId: value, variant: '' },
-                                          },
-                                        }
-                                      : current
-                                  )
-                                }
-                                options={categoryProducts.map(product => ({
-                                  value: String(product.id),
-                                  label: `${product.title} (${formatCurrency(product.base_price)})`,
-                                  searchText: `${product.sku} ${product.title}`,
-                                }))}
-                                placeholder={`Choose from ${categoryName}…`}
-                                searchPlaceholder={`Search ${categoryName.toLowerCase()}…`}
-                                emptyMessage={`No menu items found in ${categoryName}.`}
-                                className="border-white/70 bg-white px-3 py-3 font-semibold"
-                              />
-                            </div>
-                            <div className="min-w-0">
-                              {selectedProduct?.variants?.length ? (
-                                <>
-                                  <label className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-neutral-500">
-                                    Variant
-                                  </label>
-                                  <SearchableSelect
-                                    value={selectedState.variant}
-                                    onChange={(value) =>
-                                      setDealConfigurator(current =>
-                                        current
-                                          ? {
-                                              ...current,
-                                              selections: {
-                                                ...current.selections,
-                                                [row.id]: { productId: selectedState.productId, variant: value },
-                                              },
-                                            }
-                                          : current
-                                      )
-                                    }
-                                    options={selectedProduct.variants.map(variant => ({
-                                      value: variant.name,
-                                      label: `${variant.name} (${formatCurrency(variant.salePrice)})`,
-                                    }))}
-                                    placeholder="Variant…"
-                                    searchPlaceholder="Search variants…"
-                                    className="border-white/70 bg-white px-3 py-3 font-semibold"
-                                  />
-                                </>
-                              ) : (
-                                <span className="text-xs text-neutral-400 sm:pb-3 sm:pl-1">Qty ×{row.quantity}</span>
-                              )}
-                            </div>
-                            <div className="flex items-center justify-end pb-1 sm:pb-3">
-                              <span className="rounded-full bg-neutral-100 px-2.5 py-1 text-xs font-black text-neutral-700">
-                                ×{row.quantity}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  }
-
-                  const fixedProduct = products.find(p => p.id === row.product_id);
-                  const fvState = dealConfigurator.selections[row.id] || {
-                    productId: String(row.product_id || ''),
-                    variant: '',
-                  };
+            <div className="mt-5 space-y-4">
+              {activeDealConfigRows.map((row) => {
+                if (!isDealConfigurableRow(row, products)) {
                   return (
                     <div key={row.id} className="space-y-2">
-                      {header}
-                      <div className="rounded-[18px] border border-white/60 bg-white/70 p-4">
-                        <div className="mb-3 flex items-center justify-between gap-3">
-                          <div>
-                            <p className="text-sm font-bold text-neutral-900">{row.product_title || 'Bundled item'}</p>
-                            <p className="text-xs font-medium text-neutral-500">Choose portion / variant</p>
-                          </div>
-                          <span className="rounded-full bg-neutral-100 px-3 py-1 text-xs font-black text-neutral-700">
-                            {row.quantity}x
-                          </span>
+                      <div className="flex items-center justify-between rounded-[18px] border border-white/60 bg-white/70 px-4 py-3">
+                        <div>
+                          <p className="text-sm font-bold text-neutral-900">{row.product_title || 'Menu item'}</p>
+                          <p className="text-xs font-medium text-neutral-500">Included automatically</p>
                         </div>
-                        {fixedProduct?.variants?.length ? (
-                          <div className="grid gap-2 sm:grid-cols-[1fr_auto] sm:items-end">
-                            <div className="min-w-0">
-                              <label className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-neutral-500">
-                                Variant
-                              </label>
-                              <SearchableSelect
-                                value={fvState.variant}
-                                onChange={(value) =>
-                                  setDealConfigurator(current =>
-                                    current
-                                      ? {
-                                          ...current,
-                                          selections: {
-                                            ...current.selections,
-                                            [row.id]: { productId: String(row.product_id || ''), variant: value },
-                                          },
-                                        }
-                                      : current
-                                  )
-                                }
-                                options={fixedProduct.variants.map(variant => ({
-                                  value: variant.name,
-                                  label: `${variant.name} (${formatCurrency(variant.salePrice)})`,
-                                }))}
-                                placeholder="Choose variant…"
-                                searchPlaceholder="Search variants…"
-                                className="border-white/70 bg-white px-3 py-3 font-semibold"
-                              />
-                            </div>
-                          </div>
-                        ) : null}
+                        <span className="rounded-full bg-neutral-100 px-3 py-1 text-xs font-black text-neutral-700">
+                          {row.quantity}x
+                        </span>
                       </div>
                     </div>
                   );
-                })}
-              </div>
-            ) : (
-              <div className="mt-5 space-y-3 rounded-[18px] border border-white/60 bg-white/70 p-4 text-sm">
-                <p className="text-xs font-black uppercase tracking-[0.14em] text-neutral-500">Summary</p>
-                <ul className="space-y-2 text-neutral-800">
-                  {activeDealConfigRows
-                    .filter(row => isDealConfigurableRow(row, products))
-                    .map(row => {
-                      const st = dealConfigurator.selections[row.id];
-                      if (isCategoryChoiceRow(row)) {
-                        const pid = parseInt(st?.productId || '', 10);
-                        const p = products.find(x => x.id === pid);
-                        const v = (st?.variant || '').trim();
-                        return (
-                          <li key={`s-${row.id}`} className="flex justify-between gap-2 border-b border-black/5 pb-2 last:border-0">
-                            <span className="font-semibold text-neutral-700">{row.category_name || 'Choice'}</span>
-                            <span className="text-right text-neutral-900">
-                              {p?.title || '—'}
-                              {v ? ` · ${v}` : ''} ×{row.quantity}
-                            </span>
-                          </li>
-                        );
-                      }
-                      const v = (st?.variant || '').trim();
-                      return (
-                        <li key={`s-${row.id}`} className="flex justify-between gap-2 border-b border-black/5 pb-2 last:border-0">
-                          <span className="font-semibold text-neutral-700">{row.product_title || 'Item'}</span>
-                          <span className="text-right text-neutral-900">
-                            {v || '—'} ×{row.quantity}
+                }
+
+                if (isCategoryChoiceRow(row)) {
+                  const selectedState = dealConfigurator.selections[row.id] || { productId: '', variant: '' };
+                  const categoryNames = getChoiceRowCategories(row);
+                  const selectedCategoryName =
+                    selectedState.categoryName && categoryNames.includes(selectedState.categoryName)
+                      ? selectedState.categoryName
+                      : categoryNames[0] || '';
+                  const categoryLabel = getChoiceRowLabel(row);
+                  const categoryProducts = selectedCategoryName ? menuProductsBySection.get(selectedCategoryName) || [] : [];
+                  const selectedProduct = categoryProducts.find(product => String(product.id) === selectedState.productId);
+                  return (
+                    <div key={row.id} className="space-y-2">
+                      <div className="rounded-[18px] border border-white/60 bg-white/70 p-4">
+                        <div className="mb-3 flex items-center justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-bold text-neutral-900">{categoryLabel}</p>
+                            <p className="text-xs font-medium text-neutral-500">
+                              {categoryNames.length > 1
+                                ? `Pick one category, then ${row.quantity}x item`
+                                : `Pick ${row.quantity}x from this category`}
+                            </p>
+                          </div>
+                          <span className="rounded-full bg-brand-50 px-3 py-1 text-xs font-black text-brand-700">
+                            Required
                           </span>
-                        </li>
-                      );
-                    })}
-                </ul>
-              </div>
-            )}
+                        </div>
+                        {categoryNames.length > 1 && (
+                          <div className="mb-3 flex flex-wrap gap-2">
+                            {categoryNames.map(categoryName => (
+                              <button
+                                key={categoryName}
+                                type="button"
+                                onClick={() =>
+                                  setDealConfigurator(current =>
+                                    current
+                                      ? {
+                                          ...current,
+                                          selections: {
+                                            ...current.selections,
+                                            [row.id]: { productId: '', variant: '', categoryName },
+                                          },
+                                        }
+                                      : current
+                                  )
+                                }
+                                className={`rounded-full px-3 py-1.5 text-xs font-black transition-colors ${
+                                  selectedCategoryName === categoryName
+                                    ? 'bg-brand-600 text-white'
+                                    : 'border border-neutral-200 bg-white text-neutral-700 hover:border-brand-300'
+                                }`}
+                              >
+                                {categoryName}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                        <div className="grid gap-2 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+                          <div className="min-w-0">
+                            <label className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-neutral-500">
+                              Item
+                            </label>
+                            <SearchableSelect
+                              value={selectedState.productId}
+                              onChange={(value) =>
+                                setDealConfigurator(current =>
+                                  current
+                                    ? {
+                                        ...current,
+                                        selections: {
+                                          ...current.selections,
+                                          [row.id]: {
+                                            productId: value,
+                                            categoryName: selectedCategoryName,
+                                            variant: getDefaultProductVariant(
+                                              categoryProducts.find(product => String(product.id) === value)
+                                            ),
+                                          },
+                                        },
+                                      }
+                                    : current
+                                )
+                              }
+                              options={categoryProducts.map(product => ({
+                                value: String(product.id),
+                                label: `${product.title} (${formatCurrency(product.base_price)})`,
+                                searchText: `${product.sku} ${product.title}`,
+                              }))}
+                              placeholder={`Choose from ${selectedCategoryName || 'category'}…`}
+                              searchPlaceholder={`Search ${(selectedCategoryName || 'category').toLowerCase()}…`}
+                              emptyMessage={`No menu items found in ${selectedCategoryName || 'this category'}.`}
+                              className="border-white/70 bg-white px-3 py-3 font-semibold"
+                            />
+                          </div>
+                          <div className="min-w-0">
+                            {selectedProduct?.variants?.length ? (
+                              <>
+                                <label className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-neutral-500">
+                                  Variant
+                                </label>
+                                <SearchableSelect
+                                  value={selectedState.variant}
+                                  onChange={(value) =>
+                                    setDealConfigurator(current =>
+                                      current
+                                        ? {
+                                            ...current,
+                                            selections: {
+                                              ...current.selections,
+                                              [row.id]: {
+                                                productId: selectedState.productId,
+                                                variant: value,
+                                                categoryName: selectedCategoryName,
+                                              },
+                                            },
+                                          }
+                                        : current
+                                    )
+                                  }
+                                  options={selectedProduct.variants.map(variant => ({
+                                    value: variant.name,
+                                    label: `${variant.name} (${formatCurrency(variant.salePrice)})`,
+                                  }))}
+                                  placeholder="Variant…"
+                                  searchPlaceholder="Search variants…"
+                                  className="border-white/70 bg-white px-3 py-3 font-semibold"
+                                />
+                              </>
+                            ) : (
+                              <span className="text-xs text-neutral-400 sm:pb-3 sm:pl-1">Qty ×{row.quantity}</span>
+                            )}
+                          </div>
+                          <div className="flex items-center justify-end pb-1 sm:pb-3">
+                            <span className="rounded-full bg-neutral-100 px-2.5 py-1 text-xs font-black text-neutral-700">
+                              ×{row.quantity}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                }
+
+                const fixedProduct = products.find(p => p.id === row.product_id);
+                const fvState = dealConfigurator.selections[row.id] || {
+                  productId: String(row.product_id || ''),
+                  variant: getDefaultProductVariant(fixedProduct),
+                };
+                return (
+                  <div key={row.id} className="space-y-2">
+                    <div className="rounded-[18px] border border-white/60 bg-white/70 p-4">
+                      <div className="mb-3 flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-bold text-neutral-900">{row.product_title || 'Bundled item'}</p>
+                          <p className="text-xs font-medium text-neutral-500">
+                            {fixedProduct?.variants?.length ? 'Choose portion / variant' : 'Included automatically'}
+                          </p>
+                        </div>
+                        <span className="rounded-full bg-neutral-100 px-3 py-1 text-xs font-black text-neutral-700">
+                          {row.quantity}x
+                        </span>
+                      </div>
+                      {fixedProduct?.variants?.length ? (
+                        <div className="grid gap-2 sm:grid-cols-[1fr_auto] sm:items-end">
+                          <div className="min-w-0">
+                            <label className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-neutral-500">
+                              Variant
+                            </label>
+                            <SearchableSelect
+                              value={fvState.variant}
+                              onChange={(value) =>
+                                setDealConfigurator(current =>
+                                  current
+                                    ? {
+                                        ...current,
+                                        selections: {
+                                          ...current.selections,
+                                          [row.id]: { productId: String(row.product_id || ''), variant: value },
+                                        },
+                                      }
+                                    : current
+                                )
+                              }
+                              options={fixedProduct.variants.map(variant => ({
+                                value: variant.name,
+                                label: `${variant.name} (${formatCurrency(variant.salePrice)})`,
+                              }))}
+                              placeholder="Choose variant…"
+                              searchPlaceholder="Search variants…"
+                              className="border-white/70 bg-white px-3 py-3 font-semibold"
+                            />
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
 
             <div className="mt-5 flex items-center justify-between gap-3 border-t border-black/5 pt-4">
               <div>
@@ -1771,32 +1767,13 @@ export default function Dashboard() {
                 >
                   Cancel
                 </button>
-                {dealConfigurator.step === 'review' ? (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => setDealConfigurator(current => (current ? { ...current, step: 'configure' } : current))}
-                      className="rounded-[11px] border border-neutral-200 bg-white px-4 py-2.5 text-sm font-bold text-neutral-700 transition-colors hover:bg-neutral-50"
-                    >
-                      Back
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleDealConfirmAddToCart}
-                      className="rounded-[11px] bg-brand-600 px-5 py-2.5 text-sm font-black text-white transition-colors hover:bg-brand-700"
-                    >
-                      Add deal
-                    </button>
-                  </>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={handleDealContinueToReview}
-                    className="rounded-[11px] bg-brand-600 px-5 py-2.5 text-sm font-black text-white transition-colors hover:bg-brand-700"
-                  >
-                    Review
-                  </button>
-                )}
+                <button
+                  type="button"
+                  onClick={handleDealConfirmAddToCart}
+                  className="rounded-[11px] bg-brand-600 px-5 py-2.5 text-sm font-black text-white transition-colors hover:bg-brand-700"
+                >
+                  Add deal
+                </button>
               </div>
             </div>
           </div>

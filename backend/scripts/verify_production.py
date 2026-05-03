@@ -71,7 +71,7 @@ LATEST_REQUIRED_COLUMNS: dict[str, set[str]] = {
         "assigned_rider_id",
         "fulfillment_status",
     },
-    "combo_items": {"variant_key", "selection_type", "category_name"},
+    "combo_items": {"variant_key", "selection_type", "category_name", "category_names"},
     "products": {"sale_price"},
     "purchase_order_items": {"quantity_received", "unit"},
 }

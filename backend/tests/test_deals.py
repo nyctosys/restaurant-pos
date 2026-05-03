@@ -531,6 +531,137 @@ def test_deal_category_choice_rejects_product_from_wrong_category(client, app):
     assert bad_checkout.status_code == 400
 
 
+def test_deal_with_multiple_category_choice_accepts_one_allowed_category(client, app):
+    h = _auth_headers(client, app)
+
+    bun_res = client.post(
+        "/api/menu-items/",
+        headers=h,
+        json={"sku": "BUN-MULTI", "title": "Zinger Bun", "base_price": 12.0, "section": "Buns"},
+    )
+    bun_id = bun_res.get_json()["id"]
+    wrap_res = client.post(
+        "/api/menu-items/",
+        headers=h,
+        json={"sku": "WRAP-MULTI", "title": "Chicken Wrap", "base_price": 11.0, "section": "Wraps"},
+    )
+    wrap_id = wrap_res.get_json()["id"]
+    fries_res = client.post(
+        "/api/menu-items/",
+        headers=h,
+        json={"sku": "FRIES-MULTI", "title": "Fries", "base_price": 5.0, "section": "Sides"},
+    )
+    fries_id = fries_res.get_json()["id"]
+
+    with app.app_context():
+        br = Branch.query.filter_by(name="DealsBranch").first()
+        for pid, ing_name in [
+            (bun_id, "multi_bun_roll"),
+            (wrap_id, "multi_wrap_bread"),
+            (fries_id, "multi_fries_potato"),
+        ]:
+            ing = Ingredient(name=ing_name, unit="piece", current_stock=0.0)
+            db.session.add(ing)
+            db.session.flush()
+            seed_branch_stocks_for_new_ingredient(ing.id, 0.0)
+            _set_branch_stock(ing.id, br.id, 100.0)
+            ing.current_stock = 100.0
+            db.session.add(RecipeItem(product_id=pid, ingredient_id=ing.id, quantity=1.0, unit="piece"))
+        db.session.commit()
+
+    create_res = client.post(
+        "/api/menu/deals/",
+        headers=h,
+        json={
+            "title": "Pick Bun or Wrap Combo",
+            "sku": "PICK-MULTI-1",
+            "base_price": 25.0,
+            "combo_items": [
+                {
+                    "selection_type": "multiple_category",
+                    "category_names": ["Buns", "Wraps"],
+                    "quantity": 1,
+                },
+                {"product_id": fries_id, "quantity": 1},
+            ],
+        },
+    )
+    assert create_res.status_code == 200
+    deal_id = create_res.get_json()["id"]
+
+    list_res = client.get("/api/menu/deals/", headers=h)
+    created_deal = next(d for d in list_res.get_json()["deals"] if d["id"] == deal_id)
+    choice_row = next(ci for ci in created_deal["combo_items"] if ci["selection_type"] == "multiple_category")
+    assert choice_row["category_names"] == ["Buns", "Wraps"]
+    assert choice_row["category_name"] == "Buns / Wraps"
+
+    with app.app_context():
+        br = Branch.query.filter_by(name="DealsBranch").first()
+
+    checkout_res = client.post(
+        "/api/orders/checkout",
+        headers=h,
+        json={
+            "branch_id": br.id,
+            "payment_method": "Cash",
+            "items": [
+                {
+                    "product_id": deal_id,
+                    "quantity": 1,
+                    "deal_selections": [{"combo_item_id": choice_row["id"], "product_id": wrap_id}],
+                }
+            ],
+        },
+    )
+    assert checkout_res.status_code == 201
+
+    bad_checkout = client.post(
+        "/api/orders/checkout",
+        headers=h,
+        json={
+            "branch_id": br.id,
+            "payment_method": "Cash",
+            "items": [
+                {
+                    "product_id": deal_id,
+                    "quantity": 1,
+                    "deal_selections": [{"combo_item_id": choice_row["id"], "product_id": fries_id}],
+                }
+            ],
+        },
+    )
+    assert bad_checkout.status_code == 400
+
+
+def test_deal_multiple_category_choice_accepts_legacy_payload_shape(client, app):
+    h = _auth_headers(client, app)
+
+    create_res = client.post(
+        "/api/menu/deals/",
+        headers=h,
+        json={
+            "title": "Legacy Multi Category",
+            "sku": "PICK-MULTI-LEGACY",
+            "base_price": 20.0,
+            "combo_items": [
+                {
+                    "selection_type": "product",
+                    "category_names": ["Buns", "Wraps"],
+                    "quantity": 1,
+                },
+            ],
+        },
+    )
+    assert create_res.status_code == 200
+    deal_id = create_res.get_json()["id"]
+
+    list_res = client.get("/api/menu/deals/", headers=h)
+    created_deal = next(d for d in list_res.get_json()["deals"] if d["id"] == deal_id)
+    row = created_deal["combo_items"][0]
+    assert row["selection_type"] == "multiple_category"
+    assert row["category_names"] == ["Buns", "Wraps"]
+
+
 @pytest.mark.parametrize("path", ["/api/menu/deals/", "/api/inventory-advanced/deals/"])
 def test_deal_create_requires_owner(client, app, path):
     owner_headers = _auth_headers(client, app)
