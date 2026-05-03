@@ -433,6 +433,108 @@ def main() -> None:
                 "ix_idempotency_records_user_path",
                 "CREATE INDEX IF NOT EXISTS ix_idempotency_records_user_path ON idempotency_records (user_id, method, path)",
             )
+            # Read-path indexes for larger branches (idempotent; safe if models already created them).
+            extra_indexes: list[tuple[str, str, str]] = [
+                ("users", "ix_users_branch_id", "CREATE INDEX IF NOT EXISTS ix_users_branch_id ON users (branch_id)"),
+                ("products", "ix_products_archived_at", "CREATE INDEX IF NOT EXISTS ix_products_archived_at ON products (archived_at)"),
+                ("modifiers", "ix_modifiers_ingredient_id", "CREATE INDEX IF NOT EXISTS ix_modifiers_ingredient_id ON modifiers (ingredient_id)"),
+                ("combo_items", "ix_combo_items_combo_id", "CREATE INDEX IF NOT EXISTS ix_combo_items_combo_id ON combo_items (combo_id)"),
+                (
+                    "inventory_transactions",
+                    "ix_inventory_transactions_branch_created",
+                    "CREATE INDEX IF NOT EXISTS ix_inventory_transactions_branch_created ON inventory_transactions (branch_id, created_at)",
+                ),
+                (
+                    "inventory_transactions",
+                    "ix_inventory_transactions_reference",
+                    "CREATE INDEX IF NOT EXISTS ix_inventory_transactions_reference ON inventory_transactions (reference_type, reference_id)",
+                ),
+                (
+                    "sales",
+                    "ix_sales_branch_archived_created",
+                    "CREATE INDEX IF NOT EXISTS ix_sales_branch_archived_created ON sales (branch_id, archived_at, created_at)",
+                ),
+                ("sale_items", "ix_sale_items_sale_id", "CREATE INDEX IF NOT EXISTS ix_sale_items_sale_id ON sale_items (sale_id)"),
+                ("sale_items", "ix_sale_items_product_id", "CREATE INDEX IF NOT EXISTS ix_sale_items_product_id ON sale_items (product_id)"),
+                (
+                    "recipe_items",
+                    "ix_recipe_items_product_variant",
+                    "CREATE INDEX IF NOT EXISTS ix_recipe_items_product_variant ON recipe_items (product_id, variant_key)",
+                ),
+                (
+                    "recipe_items",
+                    "ix_recipe_items_ingredient_id",
+                    "CREATE INDEX IF NOT EXISTS ix_recipe_items_ingredient_id ON recipe_items (ingredient_id)",
+                ),
+                (
+                    "recipe_prepared_items",
+                    "ix_recipe_prepared_items_product_variant",
+                    "CREATE INDEX IF NOT EXISTS ix_recipe_prepared_items_product_variant ON recipe_prepared_items (product_id, variant_key)",
+                ),
+                (
+                    "purchase_order_items",
+                    "ix_purchase_order_items_po_id",
+                    "CREATE INDEX IF NOT EXISTS ix_purchase_order_items_po_id ON purchase_order_items (purchase_order_id)",
+                ),
+                (
+                    "stock_movements",
+                    "ix_stock_movements_branch_created",
+                    "CREATE INDEX IF NOT EXISTS ix_stock_movements_branch_created ON stock_movements (branch_id, created_at)",
+                ),
+                (
+                    "stock_movements",
+                    "ix_stock_movements_ingredient_branch_created",
+                    "CREATE INDEX IF NOT EXISTS ix_stock_movements_ingredient_branch_created ON stock_movements (ingredient_id, branch_id, created_at)",
+                ),
+                (
+                    "stock_take_items",
+                    "ix_stock_take_items_take_id",
+                    "CREATE INDEX IF NOT EXISTS ix_stock_take_items_take_id ON stock_take_items (stock_take_id)",
+                ),
+                (
+                    "prepared_item_stock_movements",
+                    "ix_prepared_item_stock_mv_branch_created",
+                    "CREATE INDEX IF NOT EXISTS ix_prepared_item_stock_mv_branch_created ON prepared_item_stock_movements (branch_id, created_at)",
+                ),
+                (
+                    "prepared_item_stock_movements",
+                    "ix_prepared_item_stock_mv_item_created",
+                    "CREATE INDEX IF NOT EXISTS ix_prepared_item_stock_mv_item_created ON prepared_item_stock_movements (prepared_item_id, created_at)",
+                ),
+                (
+                    "sync_outbox",
+                    "ix_sync_outbox_branch_status",
+                    "CREATE INDEX IF NOT EXISTS ix_sync_outbox_branch_status ON sync_outbox (branch_id, sync_status)",
+                ),
+                (
+                    "sync_outbox",
+                    "ix_sync_outbox_occurred_at",
+                    "CREATE INDEX IF NOT EXISTS ix_sync_outbox_occurred_at ON sync_outbox (occurred_at)",
+                ),
+                (
+                    "ingredient_branch_stocks",
+                    "ix_ingredient_branch_stocks_branch_id",
+                    "CREATE INDEX IF NOT EXISTS ix_ingredient_branch_stocks_branch_id ON ingredient_branch_stocks (branch_id)",
+                ),
+                (
+                    "app_event_logs",
+                    "ix_app_event_logs_branch_created",
+                    "CREATE INDEX IF NOT EXISTS ix_app_event_logs_branch_created ON app_event_logs (branch_id, created_at)",
+                ),
+                (
+                    "purchase_orders",
+                    "ix_purchase_orders_branch_created",
+                    "CREATE INDEX IF NOT EXISTS ix_purchase_orders_branch_created ON purchase_orders (branch_id, created_at)",
+                ),
+                (
+                    "purchase_orders",
+                    "ix_purchase_orders_supplier_id",
+                    "CREATE INDEX IF NOT EXISTS ix_purchase_orders_supplier_id ON purchase_orders (supplier_id)",
+                ),
+            ]
+            for table, iname, ddl in extra_indexes:
+                if _table_exists(table):
+                    _ensure_index(table, iname, ddl)
             db.session.commit()
             print("migrate_latest_schema_changes: complete.")
         except Exception:

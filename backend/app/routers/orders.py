@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, time, timedelta, timezone
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from sqlalchemy import and_, func, inspect, or_
 from starlette.concurrency import run_in_threadpool
@@ -30,6 +30,7 @@ from app.services.ingredient_deduction import (
     ingredient_display_name,
     restore_inventory_allocations,
 )
+from app.services.printer_background import run_print_kot_and_stamp_job, run_print_receipt_job
 from app.services.printer_service import PrinterService
 from app.services.product_pricing import effective_sale_price_for_variant
 from app.services.recipe_variants import (
@@ -62,21 +63,25 @@ def _normalize_phone_for_lookup(value: Any) -> str:
 # GET /{sale_id} for path "kot" and returns 405 for POST (Method Not Allowed).
 @orders_router.post("/kot")
 def create_open_kot(
-    payload: dict[str, Any] | None = None,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
+    payload: dict[str, Any] | None = None,
 ):
     """Create an open KOT for dine-in, takeaway, or delivery (unpaid tab; kitchen + printer)."""
-    return _create_open_kot_response(payload or {}, current_user, order_type_fixed=None)
+    return _create_open_kot_response(
+        payload or {}, current_user, order_type_fixed=None, background_tasks=background_tasks
+    )
 
 
 @orders_router.post("/dine-in/kot")
 def dine_in_kot(
-    payload: dict[str, Any] | None = None,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
+    payload: dict[str, Any] | None = None,
 ):
     """Create an open dine-in sale, deduct stock, print KOT (kitchen ticket). No payment yet."""
     return _create_open_kot_response(
-        payload or {}, current_user, order_type_fixed="dine_in"
+        payload or {}, current_user, order_type_fixed="dine_in", background_tasks=background_tasks
     )
 
 
@@ -918,8 +923,9 @@ def _deduct_product_inventory_and_create_sale_items(
 
 @orders_router.post("/checkout")
 def checkout(
-    payload: dict[str, Any] | None = None,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
+    payload: dict[str, Any] | None = None,
 ):
     data = payload or {}
     if "items" not in data or "payment_method" not in data:
@@ -1032,13 +1038,14 @@ def checkout(
         )
         db.session.commit()
         _schedule_order_event(RealtimeEvents.ORDER_CREATED, new_sale, total=float(new_sale.total_amount))
-        printer_service = PrinterService()
         branch_name = "Main Branch"
         branch_obj = db.session.get(Branch, branch_id) if branch_id else None
         if branch_obj:
             branch_name = branch_obj.name
-        # Backend-driven KDS auto-print: print immediately when a paid order is created.
-        if getattr(new_sale, "order_type", None) in KITCHEN_OPEN_ORDER_TYPES and getattr(new_sale, "kds_ticket_printed_at", None) is None:
+        # Backend-driven KDS auto-print + receipt: defer LAN/USB I/O so the client gets a fast 201.
+        if getattr(new_sale, "order_type", None) in KITCHEN_OPEN_ORDER_TYPES and getattr(
+            new_sale, "kds_ticket_printed_at", None
+        ) is None:
             kot_rows = (
                 db.session.query(
                     SaleItem.id,
@@ -1071,20 +1078,16 @@ def checkout(
                 )
             kot_items = _nest_sale_item_dicts(kot_flat_items).get(new_sale.id, [])
             table_name = (order_snapshot_norm or {}).get("table_name", "") if isinstance(order_snapshot_norm, dict) else ""
-            kot_print_ok = printer_service.print_kot(
-                {
-                    "sale_id": new_sale.id,
-                    "branch_id": branch_id,
-                    "branch": branch_name,
-                    "operator": current_user.username,
-                    "table_name": table_name,
-                    "order_type": order_type_norm,
-                    "items": kot_items,
-                }
-            )
-            if kot_print_ok:
-                new_sale.kds_ticket_printed_at = datetime.now(timezone.utc)
-                db.session.commit()
+            kot_payload = {
+                "sale_id": new_sale.id,
+                "branch_id": branch_id,
+                "branch": branch_name,
+                "operator": current_user.username,
+                "table_name": table_name,
+                "order_type": order_type_norm,
+                "items": kot_items,
+            }
+            background_tasks.add_task(run_print_kot_and_stamp_job, new_sale.id, kot_payload)
         receipt_items = []
         for i in items:
             product = db.session.get(Product, i.get("product_id"))
@@ -1100,31 +1103,31 @@ def checkout(
             if isinstance(discount_snapshot, dict)
             else "Discount"
         )
-        print_success = printer_service.print_receipt(
-            {
-                "total": float(new_sale.total_amount),
-                "subtotal": float(total_amount),
-                "tax_amount": float(new_sale.tax_amount),
-                "tax_rate": float(tax_rate),
-                "discount_amount": float(discount_amount),
-                "delivery_charge": float(delivery_charge),
-                "service_charge": float(service_charge),
-                "discount_name": discount_name or "Discount",
-                "operator": current_user.username,
-                "branch": branch_name,
-                "branch_id": branch_id,
-                "items": receipt_items,
-                "order_type": order_type_norm,
-                "order_snapshot": order_snapshot_norm,
-            }
-        )
+        receipt_dict = {
+            "total": float(new_sale.total_amount),
+            "subtotal": float(total_amount),
+            "tax_amount": float(new_sale.tax_amount),
+            "tax_rate": float(tax_rate),
+            "discount_amount": float(discount_amount),
+            "delivery_charge": float(delivery_charge),
+            "service_charge": float(service_charge),
+            "discount_name": discount_name or "Discount",
+            "operator": current_user.username,
+            "branch": branch_name,
+            "branch_id": branch_id,
+            "items": receipt_items,
+            "order_type": order_type_norm,
+            "order_snapshot": order_snapshot_norm,
+        }
+        background_tasks.add_task(run_print_receipt_job, receipt_dict)
         return JSONResponse(
             status_code=201,
             content={
                 "message": "Checkout successful",
                 "sale_id": new_sale.id,
                 "total": float(new_sale.total_amount),
-                "print_success": print_success,
+                "print_success": True,
+                "print_deferred": True,
             },
         )
     except Exception as exc:
@@ -2248,6 +2251,7 @@ def _create_open_kot_response(
     data: dict[str, Any],
     current_user: User,
     *,
+    background_tasks: BackgroundTasks,
     order_type_fixed: str | None = None,
 ):
     """Create an open sale, deduct stock, print KOT. Used for dine-in, takeaway, and delivery tabs before payment."""
@@ -2334,21 +2338,17 @@ def _create_open_kot_response(
         )
         print_ok = None
         if should_print_now:
-            printer_service = PrinterService()
-            print_ok = printer_service.print_kot(
-                _build_kot_print_payload(new_sale.id, bid, current_user.username)
-            )
-            if print_ok:
-                new_sale.kds_ticket_printed_at = datetime.now(timezone.utc)
-                db.session.commit()
-        return JSONResponse(
-            status_code=201,
-            content={
-                "message": "Kitchen order created",
-                "sale_id": new_sale.id,
-                "print_success": print_ok,
-            },
-        )
+            kot_payload = _build_kot_print_payload(new_sale.id, bid, current_user.username)
+            background_tasks.add_task(run_print_kot_and_stamp_job, new_sale.id, kot_payload)
+            print_ok = True
+        kot_body: dict[str, Any] = {
+            "message": "Kitchen order created",
+            "sale_id": new_sale.id,
+            "print_success": print_ok,
+        }
+        if should_print_now:
+            kot_body["print_deferred"] = True
+        return JSONResponse(status_code=201, content=kot_body)
     except Exception as exc:
         db.session.rollback()
         return _json_error("Bad Request", f"KOT failed: {str(exc)}", 400)
@@ -2573,8 +2573,9 @@ def update_open_sale_items(
 @orders_router.post("/{sale_id}/finalize")
 def finalize_open_sale(
     sale_id: int,
-    payload: dict[str, Any] | None = None,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
+    payload: dict[str, Any] | None = None,
 ):
     """Take payment on an open dine-in sale; prints customer receipt."""
     sale = db.session.get(Sale, sale_id)
@@ -2667,32 +2668,31 @@ def finalize_open_sale(
             if isinstance(discount_snapshot, dict)
             else "Discount"
         )
-        printer_service = PrinterService()
-        print_success = printer_service.print_receipt(
-            {
-                "total": float(sale.total_amount),
-                "subtotal": float(items_sum),
-                "tax_amount": float(sale.tax_amount),
-                "tax_rate": float(tax_rate),
-                "discount_amount": float(discount_amount),
-                "delivery_charge": float(delivery_charge),
-                "service_charge": float(service_charge),
-                "discount_name": discount_name or "Discount",
-                "operator": current_user.username,
-                "branch": branch_name,
-                "branch_id": sale.branch_id,
-                "items": receipt_items,
-                "order_type": getattr(sale, "order_type", None),
-                "order_snapshot": getattr(sale, "order_snapshot", None),
-            }
-        )
+        receipt_dict = {
+            "total": float(sale.total_amount),
+            "subtotal": float(items_sum),
+            "tax_amount": float(sale.tax_amount),
+            "tax_rate": float(tax_rate),
+            "discount_amount": float(discount_amount),
+            "delivery_charge": float(delivery_charge),
+            "service_charge": float(service_charge),
+            "discount_name": discount_name or "Discount",
+            "operator": current_user.username,
+            "branch": branch_name,
+            "branch_id": sale.branch_id,
+            "items": receipt_items,
+            "order_type": getattr(sale, "order_type", None),
+            "order_snapshot": getattr(sale, "order_snapshot", None),
+        }
+        background_tasks.add_task(run_print_receipt_job, receipt_dict)
         return JSONResponse(
             status_code=200,
             content={
                 "message": "Payment completed",
                 "sale_id": sale.id,
                 "total": float(sale.total_amount),
-                "print_success": print_success,
+                "print_success": True,
+                "print_deferred": True,
             },
         )
     except Exception as exc:

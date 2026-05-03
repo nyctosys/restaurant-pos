@@ -30,6 +30,7 @@ class Branch(db.Model):
 
 class User(db.Model):
     __tablename__ = 'users'
+    __table_args__ = (Index('ix_users_branch_id', 'branch_id'),)
     id = db.Column(db.Integer, primary_key=True)
     branch_id = db.Column(db.String(BRANCH_ID_LENGTH), db.ForeignKey('branches.id'), nullable=True) # Null for Global Owner
     username = db.Column(db.String(100), unique=True, nullable=False)
@@ -52,6 +53,7 @@ class Product(db.Model):
     __table_args__ = (
         CheckConstraint('base_price >= 0', name='ck_product_base_price_non_neg'),
         CheckConstraint('sale_price >= 0', name='ck_product_sale_price_non_neg'),
+        Index('ix_products_archived_at', 'archived_at'),
     )
     id = db.Column(db.Integer, primary_key=True)
     sku = db.Column(db.String(100), unique=True, nullable=False)
@@ -75,6 +77,7 @@ class Modifier(db.Model):
     __tablename__ = 'modifiers'
     __table_args__ = (
         CheckConstraint('price >= 0', name='ck_modifier_price_non_neg'),
+        Index('ix_modifiers_ingredient_id', 'ingredient_id'),
     )
 
     id = db.Column(db.Integer, primary_key=True)
@@ -90,6 +93,7 @@ class Modifier(db.Model):
 
 class ComboItem(db.Model):
     __tablename__ = 'combo_items'
+    __table_args__ = (Index('ix_combo_items_combo_id', 'combo_id'),)
     id = db.Column(db.Integer, primary_key=True)
     combo_id = db.Column(db.Integer, db.ForeignKey('products.id'), nullable=False)
     product_id = db.Column(db.Integer, db.ForeignKey('products.id'), nullable=True)
@@ -130,6 +134,10 @@ class InventoryTransaction(db.Model):
     reference_type = db.Column(db.String(32), nullable=True)  # 'sale', 'sale_refund', or None
     reference_id = db.Column(db.Integer, nullable=True)  # e.g. sale_id
     created_at = db.Column(db.DateTime(timezone=True), default=utc_now)
+    __table_args__ = (
+        Index('ix_inventory_transactions_branch_created', 'branch_id', 'created_at'),
+        Index('ix_inventory_transactions_reference', 'reference_type', 'reference_id'),
+    )
 
 
 class IdempotencyRecord(db.Model):
@@ -162,6 +170,7 @@ class Sale(db.Model):
         Index('ix_sales_report_branch_created_status', 'branch_id', 'created_at', 'status'),
         Index('ix_sales_report_branch_created_payment', 'branch_id', 'created_at', 'payment_method'),
         Index('ix_sales_report_branch_created_order_type', 'branch_id', 'created_at', 'order_type'),
+        Index('ix_sales_branch_archived_created', 'branch_id', 'archived_at', 'created_at'),
     )
     id = db.Column(db.Integer, primary_key=True)
     branch_id = db.Column(db.String(BRANCH_ID_LENGTH), db.ForeignKey('branches.id'), nullable=False)
@@ -202,6 +211,8 @@ class SaleItem(db.Model):
         CheckConstraint('quantity > 0', name='ck_sale_item_quantity_positive'),
         CheckConstraint('unit_price >= 0', name='ck_sale_item_unit_price_non_neg'),
         CheckConstraint('subtotal >= 0', name='ck_sale_item_subtotal_non_neg'),
+        Index('ix_sale_items_sale_id', 'sale_id'),
+        Index('ix_sale_items_product_id', 'product_id'),
     )
     id = db.Column(db.Integer, primary_key=True)
     sale_id = db.Column(db.Integer, db.ForeignKey('sales.id', ondelete='CASCADE'), nullable=False)
@@ -321,6 +332,7 @@ class IngredientBranchStock(db.Model):
     __table_args__ = (
         db.UniqueConstraint("ingredient_id", "branch_id", name="uq_ingredient_branch_stock"),
         CheckConstraint("current_stock >= 0", name="ck_ingredient_branch_stock_nonneg"),
+        Index("ix_ingredient_branch_stocks_branch_id", "branch_id"),
     )
 
     id = db.Column(db.Integer, primary_key=True)
@@ -336,6 +348,10 @@ class IngredientBranchStock(db.Model):
 
 class RecipeItem(db.Model):
     __tablename__ = "recipe_items"
+    __table_args__ = (
+        Index("ix_recipe_items_product_variant", "product_id", "variant_key"),
+        Index("ix_recipe_items_ingredient_id", "ingredient_id"),
+    )
 
     id = db.Column(db.Integer, primary_key=True)
     product_id = db.Column(db.Integer, db.ForeignKey("products.id"), nullable=False)
@@ -437,6 +453,9 @@ class RecipePreparedItem(db.Model):
     """Prepared sauce/marination quantity used by one unit of a menu item."""
 
     __tablename__ = "recipe_prepared_items"
+    __table_args__ = (
+        Index("ix_recipe_prepared_items_product_variant", "product_id", "variant_key"),
+    )
 
     id = db.Column(db.Integer, primary_key=True)
     product_id = db.Column(db.Integer, db.ForeignKey("products.id"), nullable=False)
@@ -452,6 +471,10 @@ class RecipePreparedItem(db.Model):
 
 class PreparedItemStockMovement(db.Model):
     __tablename__ = "prepared_item_stock_movements"
+    __table_args__ = (
+        Index("ix_prepared_item_stock_mv_branch_created", "branch_id", "created_at"),
+        Index("ix_prepared_item_stock_mv_item_created", "prepared_item_id", "created_at"),
+    )
 
     id = db.Column(db.Integer, primary_key=True)
     prepared_item_id = db.Column(db.Integer, db.ForeignKey("prepared_items.id"), nullable=False)
@@ -473,6 +496,10 @@ class PreparedItemStockMovement(db.Model):
 
 class PurchaseOrder(db.Model):
     __tablename__ = "purchase_orders"
+    __table_args__ = (
+        Index("ix_purchase_orders_branch_created", "branch_id", "created_at"),
+        Index("ix_purchase_orders_supplier_id", "supplier_id"),
+    )
 
     id = db.Column(db.Integer, primary_key=True)
     po_number = db.Column(db.String(100), unique=True)
@@ -494,6 +521,7 @@ class PurchaseOrder(db.Model):
 
 class PurchaseOrderItem(db.Model):
     __tablename__ = "purchase_order_items"
+    __table_args__ = (Index("ix_purchase_order_items_po_id", "purchase_order_id"),)
 
     id = db.Column(db.Integer, primary_key=True)
     purchase_order_id = db.Column(db.Integer, db.ForeignKey("purchase_orders.id"), nullable=False)
@@ -512,6 +540,10 @@ class PurchaseOrderItem(db.Model):
 
 class StockMovement(db.Model):
     __tablename__ = "stock_movements"
+    __table_args__ = (
+        Index("ix_stock_movements_branch_created", "branch_id", "created_at"),
+        Index("ix_stock_movements_ingredient_branch_created", "ingredient_id", "branch_id", "created_at"),
+    )
 
     id = db.Column(db.Integer, primary_key=True)
     ingredient_id = db.Column(db.Integer, db.ForeignKey("ingredients.id"), nullable=False)
@@ -549,6 +581,7 @@ class StockTake(db.Model):
 
 class StockTakeItem(db.Model):
     __tablename__ = "stock_take_items"
+    __table_args__ = (Index("ix_stock_take_items_take_id", "stock_take_id"),)
 
     id = db.Column(db.Integer, primary_key=True)
     stock_take_id = db.Column(db.Integer, db.ForeignKey("stock_takes.id"), nullable=False)
@@ -566,6 +599,10 @@ class SyncOutbox(db.Model):
     """Durable outbox for branch-scoped mutations (future admin sync worker)."""
 
     __tablename__ = "sync_outbox"
+    __table_args__ = (
+        Index("ix_sync_outbox_branch_status", "branch_id", "sync_status"),
+        Index("ix_sync_outbox_occurred_at", "occurred_at"),
+    )
 
     id = db.Column(db.Integer, primary_key=True)
     branch_id = db.Column(db.String(BRANCH_ID_LENGTH), db.ForeignKey("branches.id"), nullable=False)
@@ -598,6 +635,7 @@ class AppEventLog(db.Model):
     """Persisted diagnostics for Settings → App Logs (server-side errors and events)."""
 
     __tablename__ = "app_event_logs"
+    __table_args__ = (Index("ix_app_event_logs_branch_created", "branch_id", "created_at"),)
 
     id = db.Column(db.Integer, primary_key=True)
     created_at = db.Column(db.DateTime(timezone=True), default=utc_now, index=True)

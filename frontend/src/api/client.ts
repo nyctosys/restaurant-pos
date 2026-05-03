@@ -41,7 +41,19 @@ const responseCache = new Map<string, CacheEntry>();
 const inflightRequests = new Map<string, Promise<unknown>>();
 const inflightMutations = new Map<string, Promise<unknown>>();
 
-const DEFAULT_CACHE_TTL_MS = 20_000;
+const DEFAULT_CACHE_TTL_MS = 30_000;
+
+/** Longer TTL for catalog/config that changes rarely; still invalidated after mutating requests. */
+const CACHE_TTL_BY_PREFIX_MS: { prefix: string; ttlMs: number }[] = [
+  { prefix: '/settings/', ttlMs: 60_000 },
+  { prefix: '/menu-items/', ttlMs: 60_000 },
+  { prefix: '/modifiers/', ttlMs: 60_000 },
+  { prefix: '/menu/deals', ttlMs: 60_000 },
+  { prefix: '/stock/', ttlMs: 45_000 },
+  { prefix: '/inventory-advanced/', ttlMs: 45_000 },
+  { prefix: '/branches/', ttlMs: 120_000 },
+];
+
 const CACHEABLE_GET_PREFIXES = [
   '/settings/',
   '/menu-items/',
@@ -146,7 +158,16 @@ function buildMutationKey(method: string, path: string, token: string | null, bo
 }
 
 function getDefaultCacheTtlMs(path: string): number {
-  return shouldCacheGet(path) ? DEFAULT_CACHE_TTL_MS : 0;
+  if (!shouldCacheGet(path)) {
+    return 0;
+  }
+  const normalized = normalizePath(path);
+  for (const rule of CACHE_TTL_BY_PREFIX_MS) {
+    if (normalized.startsWith(rule.prefix)) {
+      return rule.ttlMs;
+    }
+  }
+  return DEFAULT_CACHE_TTL_MS;
 }
 
 function buildCacheKey(method: string, path: string, token: string | null, cacheKeyOverride?: string): string {

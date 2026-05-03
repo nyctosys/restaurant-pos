@@ -8,6 +8,11 @@ from fastapi.responses import JSONResponse
 from app.models import Setting, User, db
 from app.services.branch_scope import resolve_terminal_branch_id
 from app.services.sync_outbox import enqueue_sync_event
+from app.services.ttl_cache import (
+    SETTINGS_CACHE_KEY_PREFIX,
+    SETTINGS_CACHE_TTL_S,
+    settings_response_cache,
+)
 from app.deps import get_current_user
 from app.routers.common import yes
 
@@ -31,19 +36,29 @@ def get_settings(
     if yes(global_only):
         if current_user.role != "owner":
             raise HTTPException(status_code=403, detail={"message": "Global settings require owner access"})
-        setting = Setting.query.filter_by(branch_id=None).first()
-        return {"config": setting.config if setting else {}}
+        cache_key = f"{SETTINGS_CACHE_KEY_PREFIX}global_only"
+
+        def _load_global() -> dict[str, Any]:
+            setting = Setting.query.filter_by(branch_id=None).first()
+            return {"config": setting.config if setting else {}}
+
+        return settings_response_cache.get_or_set(cache_key, SETTINGS_CACHE_TTL_S, _load_global)
     # Terminal branch only (ignore client branch_id switching)
     _ = branch_id  # unused
     resolved_branch_id = resolve_terminal_branch_id(current_user)
-    global_setting = Setting.query.filter_by(branch_id=None).first()
-    global_config = global_setting.config if global_setting else {}
-    branch_config: dict[str, Any] = {}
-    if resolved_branch_id:
-        bs = Setting.query.filter_by(branch_id=resolved_branch_id).first()
-        if bs:
-            branch_config = bs.config or {}
-    return {"config": _merge_configs(global_config, branch_config)}
+    cache_key = f"{SETTINGS_CACHE_KEY_PREFIX}b:{resolved_branch_id or 'none'}"
+
+    def _load_merged() -> dict[str, Any]:
+        global_setting = Setting.query.filter_by(branch_id=None).first()
+        global_config = global_setting.config if global_setting else {}
+        branch_config: dict[str, Any] = {}
+        if resolved_branch_id:
+            bs = Setting.query.filter_by(branch_id=resolved_branch_id).first()
+            if bs:
+                branch_config = bs.config or {}
+        return {"config": _merge_configs(global_config, branch_config)}
+
+    return settings_response_cache.get_or_set(cache_key, SETTINGS_CACHE_TTL_S, _load_merged)
 
 
 @settings_router.post("/")
@@ -85,6 +100,7 @@ def update_settings(payload: dict[str, Any] | None = None, current_user: User = 
             payload={"scope_branch_id": effective_branch_id, "keys": list((data.get("config") or {}).keys())},
         )
         db.session.commit()
+        settings_response_cache.delete_prefix(SETTINGS_CACHE_KEY_PREFIX)
         return {"message": "Settings updated", "config": setting.config}
     except Exception as exc:
         db.session.rollback()
