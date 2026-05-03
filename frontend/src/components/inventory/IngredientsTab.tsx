@@ -709,9 +709,12 @@ export default function IngredientsTab() {
       : <ArrowDown className="w-3.5 h-3.5 text-brand-700" aria-hidden="true" />;
   };
 
+  const thSticky =
+    'sticky top-0 z-20 !bg-white shadow-[0_1px_0_0_rgb(210_210_215)] dark:!bg-neutral-900 dark:shadow-[0_1px_0_0_rgb(58_58_60)]';
+
   return (
-    <div className="flex flex-col h-full min-h-0 bg-transparent py-4">
-      <div className="page-padding sticky top-0 z-20 flex justify-between items-center bg-white border-b border-soot-100/80 shrink-0 py-4">
+    <div className="mt-0 flex flex-col h-full min-h-0 overflow-hidden bg-transparent pt-2 pb-3">
+      <div className="page-padding flex justify-between items-center bg-white/90 backdrop-blur-sm border-b border-soot-100/80 shrink-0 py-2">
         <h3 className="text-xl font-bold text-soot-900 hidden sm:block">Raw Materials</h3>
         <div className="ml-auto flex items-center gap-2 flex-wrap justify-end">
           <button
@@ -740,13 +743,13 @@ export default function IngredientsTab() {
         </div>
       </div>
 
-      <div className="page-padding flex-1 overflow-auto">
+      <div className="page-padding flex min-h-0 min-w-0 flex-1 flex-col">
         {loading ? (
-          <div className="flex items-center justify-center py-20 text-soot-400 gap-2">
+          <div className="flex flex-1 items-center justify-center py-20 text-soot-400 gap-2">
             <Loader2 className="w-5 h-5 animate-spin" /> Loading materials...
           </div>
         ) : ingredients.length === 0 ? (
-           <div className="text-center py-20 text-soot-400">
+           <div className="flex flex-1 flex-col items-center justify-center py-20 text-soot-400">
              <div className="w-16 h-16 rounded-full bg-soot-100 flex items-center justify-center mx-auto mb-4">
                <Package className="w-8 h-8 text-soot-300" />
              </div>
@@ -754,37 +757,52 @@ export default function IngredientsTab() {
              <p className="text-sm">Click "Add material" to start tracking inventory.</p>
            </div>
         ) : (
-          <div className="app-table-shell">
-          <div className="app-table-scroll">
-          <table className="app-table">
+          <div className="app-table-shell app-table-shell--sticky-friendly flex min-h-0 min-w-0 flex-1 flex-col">
+          <div className="app-table-scroll min-h-0 flex-1 overflow-y-auto overflow-x-auto overscroll-contain">
+          <table className="app-table min-w-0">
             <thead>
               <tr>
-                <th aria-sort={sortKey === 'name' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}>
+                <th
+                  aria-sort={sortKey === 'name' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}
+                  className={thSticky}
+                >
                   <button type="button" onClick={() => handleSort('name')} className="flex items-center gap-2 text-left transition-colors hover:text-soot-700 focus:outline-none focus-visible:text-soot-900">
                     <span>Item</span>
                     {renderSortIcon('name')}
                   </button>
                 </th>
-                <th>Brand</th>
-                <th aria-sort={sortKey === 'current_stock' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'} className="text-right">
+                <th className={thSticky}>Brand</th>
+                <th
+                  aria-sort={sortKey === 'current_stock' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}
+                  className={`text-right ${thSticky}`}
+                >
                   <button type="button" onClick={() => handleSort('current_stock')} className="ml-auto flex items-center gap-2 text-right transition-colors hover:text-soot-700 focus:outline-none focus-visible:text-soot-900">
                     <span>Stock</span>
                     {renderSortIcon('current_stock')}
                   </button>
                 </th>
-                <th aria-sort={sortKey === 'average_cost' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'} className="text-right">
+                <th
+                  aria-sort={sortKey === 'average_cost' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}
+                  className={`text-right ${thSticky}`}
+                >
                   <button type="button" onClick={() => handleSort('average_cost')} className="ml-auto flex items-center gap-2 text-right transition-colors hover:text-soot-700 focus:outline-none focus-visible:text-soot-900">
                     <span>Purchase Unit Cost</span>
                     {renderSortIcon('average_cost')}
                   </button>
                 </th>
-                <th aria-sort={sortKey === 'supplier' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'} className="hidden md:table-cell">
+                <th
+                  aria-sort={sortKey === 'supplier' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}
+                  className={`hidden md:table-cell ${thSticky}`}
+                >
                   <button type="button" onClick={() => handleSort('supplier')} className="flex items-center gap-2 text-left transition-colors hover:text-soot-700 focus:outline-none focus-visible:text-soot-900">
                     <span>Supplier</span>
                     {renderSortIcon('supplier')}
                   </button>
                 </th>
-                <th aria-sort={sortKey === 'id' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'} className="text-right">
+                <th
+                  aria-sort={sortKey === 'id' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}
+                  className={`text-right ${thSticky}`}
+                >
                   <button type="button" onClick={() => handleSort('id')} className="ml-auto flex items-center gap-2 text-right transition-colors hover:text-soot-700 focus:outline-none focus-visible:text-soot-900">
                     <span>Actions</span>
                     {renderSortIcon('id')}

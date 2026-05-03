@@ -32,15 +32,6 @@ export default function Settings() {
   const [generalFeedback, setGeneralFeedback] = useState('');
   const [dashboardMenuLayout, setDashboardMenuLayout] = useState<'grid' | 'list'>('list');
 
-  // ── Variants state ──
-  const [variants, setVariants] = useState<string[]>([]);
-  const [newVariant, setNewVariant] = useState('');
-  const [variantsLoading, setVariantsLoading] = useState(false);
-  const [variantsSaving, setVariantsSaving] = useState(false);
-  const [variantsFeedback, setVariantsFeedback] = useState('');
-  const [editingVariantIndex, setEditingVariantIndex] = useState<number | null>(null);
-  const [editingVariantValue, setEditingVariantValue] = useState('');
-  
   // ── Tax settings state ──
   const [taxEnabled, setTaxEnabled] = useState<boolean>(true);
   const [taxPercentage, setTaxPercentage] = useState<number>(0);
@@ -103,7 +94,7 @@ export default function Settings() {
   const isOwner = user?.role === 'owner';
   const activeBranchId = getTerminalBranchIdString(user);
 
-  const tabs = ['General', 'Receipt', 'Hardware', 'Categories', 'Variants', 'Tables', 'Riders', 'Modifiers', 'Tax & Rates', 'Discounts'];
+  const tabs = ['General', 'Receipt', 'Hardware', 'Categories', 'Tables', 'Riders', 'Modifiers', 'Tax & Rates', 'Discounts'];
   if (isOwner) {
     tabs.push('Users');
   }
@@ -118,8 +109,6 @@ export default function Settings() {
       void fetchGeneralSettings();
     } else if (activeTab === 'categories') {
       fetchSections();
-    } else if (activeTab === 'variants') {
-      fetchVariants();
     } else if (activeTab === 'taxrates') {
       fetchTaxSettings();
     } else if (activeTab === 'hardware') {
@@ -218,75 +207,6 @@ export default function Settings() {
   const handleRemoveSection = (section: string) => {
     const updated = sections.filter(s => s !== section);
     saveSections(updated);
-  };
-
-  const fetchVariants = async () => {
-    setVariantsLoading(true);
-    try {
-      const query = activeBranchId ? `?branch_id=${activeBranchId}` : '';
-      const data = await get<SettingsResponse>(`/settings/${query}`);
-      const list = data.config?.variants;
-      setVariants(Array.isArray(list) ? list : []);
-      setEditingVariantIndex(null);
-    } catch {
-      setVariants([]);
-    } finally {
-      setVariantsLoading(false);
-    }
-  };
-
-  const saveVariants = async (updated: string[]) => {
-    setVariantsSaving(true);
-    setVariantsFeedback('');
-    try {
-      const query = activeBranchId ? `?branch_id=${activeBranchId}` : '';
-      const existing = await get<SettingsResponse>(`/settings/${query}`);
-      const currentConfig = (existing?.config ?? {}) as Record<string, unknown>;
-      const payload: { config: Record<string, unknown>; branch_id?: string } = {
-        config: { ...currentConfig, variants: updated },
-      };
-      if (activeBranchId) {
-        payload.branch_id = activeBranchId;
-      }
-      await put('/settings/', payload);
-      setVariants(updated);
-      setVariantsFeedback('Variants saved!');
-      setTimeout(() => setVariantsFeedback(''), 2000);
-      setEditingVariantIndex(null);
-    } catch (e) {
-      setVariantsFeedback('error:' + getUserMessage(e));
-    } finally {
-      setVariantsSaving(false);
-    }
-  };
-
-  const handleAddVariant = () => {
-    const trimmed = newVariant.trim();
-    if (!trimmed || variants.includes(trimmed)) return;
-    saveVariants([...variants, trimmed]);
-    setNewVariant('');
-  };
-
-  const handleRemoveVariant = (variant: string) => {
-    saveVariants(variants.filter(v => v !== variant));
-  };
-
-  const handleStartEditVariant = (index: number) => {
-    setEditingVariantIndex(index);
-    setEditingVariantValue(variants[index] ?? '');
-  };
-
-  const handleUpdateVariant = () => {
-    const trimmed = editingVariantValue.trim();
-    if (editingVariantIndex === null || !trimmed) return;
-    if (variants.some((v, i) => i !== editingVariantIndex && v === trimmed)) {
-      setVariantsFeedback('error: A variant with this name already exists.');
-      return;
-    }
-    const updated = [...variants];
-    updated[editingVariantIndex] = trimmed;
-    saveVariants(updated);
-    setEditingVariantIndex(null);
   };
 
   const fetchDiscounts = async () => {
@@ -937,116 +857,6 @@ export default function Settings() {
           </div>
         )}
 
-        {/* ───────── Variants Management ───────── */}
-        {activeTab === 'variants' && (
-          <div className="max-w-2xl xl:max-w-3xl">
-            <h3 className="text-2xl font-bold text-soot-900 mb-2">Product Variants (Options)</h3>
-            <p className="text-sm text-soot-500 mb-6">Manage variant names (e.g. Small, Medium, Large) used when adding or editing menu items. These options appear in Inventory when assigning variants to products.</p>
-
-            <div className="flex gap-2 mb-6">
-              <input
-                type="text"
-                inputMode="text"
-                value={newVariant}
-                onChange={e => setNewVariant(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && handleAddVariant()}
-                placeholder="e.g. Small, Medium, Large…"
-                className="flex-1 px-4 py-3 border border-soot-200 rounded-[8px] focus:ring-2 focus:ring-brand-500 focus:outline-none text-sm"
-              />
-              <button
-                onClick={handleAddVariant}
-                disabled={!newVariant.trim() || variantsSaving || variants.includes(newVariant.trim())}
-                className="flex items-center gap-2 bg-brand-700 text-white px-5 py-3 rounded-[8px] font-medium hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm"
-              >
-                <Plus className="w-4 h-4" />
-                Add
-              </button>
-            </div>
-
-            {variantsFeedback && (
-              <div className={`mb-4 text-sm font-medium rounded-[8px] px-4 py-2 ${
-                variantsFeedback.startsWith('error:')
-                  ? 'text-red-700 bg-red-50 border border-red-200'
-                  : 'text-brand-700 bg-brand-50 border border-brand-200'
-              }`}>
-                {variantsFeedback.replace('error:', '')}
-              </div>
-            )}
-
-            {variantsLoading ? (
-              <div className="flex items-center gap-2 text-soot-400 py-6">
-                <Loader2 className="w-5 h-5 animate-spin" />
-                Loading variants…
-              </div>
-            ) : variants.length === 0 ? (
-              <div className="text-soot-400 py-8 text-center border border-dashed border-soot-200 rounded-[11px]">
-                No variants yet. Add variant names above; they will be available when creating or editing menu items.
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {variants.map((v, index) => (
-                  <div
-                    key={`${v}-${index}`}
-                    className="flex items-center justify-between px-4 py-3 glass-card group hover:border-soot-200 transition-colors"
-                  >
-                    {editingVariantIndex === index ? (
-                      <div className="flex items-center gap-2 flex-1">
-                        <input
-                          type="text"
-                          inputMode="text"
-                          value={editingVariantValue}
-                          onChange={e => setEditingVariantValue(e.target.value)}
-                          onKeyDown={e => {
-                            if (e.key === 'Enter') handleUpdateVariant();
-                            if (e.key === 'Escape') setEditingVariantIndex(null);
-                          }}
-                          className="flex-1 px-3 py-2 border border-soot-200 rounded-[8px] text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none"
-                          autoFocus
-                        />
-                        <button
-                          onClick={handleUpdateVariant}
-                          disabled={variantsSaving || !editingVariantValue.trim()}
-                          className="text-sm font-medium text-brand-600 hover:text-brand-700 disabled:opacity-50"
-                        >
-                          Done
-                        </button>
-                        <button
-                          onClick={() => setEditingVariantIndex(null)}
-                          className="text-sm text-soot-500 hover:text-soot-700"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    ) : (
-                      <>
-                        <span className="font-medium text-soot-800">{v}</span>
-                        <div className="flex items-center gap-1">
-                          <button
-                            onClick={() => handleStartEditVariant(index)}
-                            disabled={variantsSaving}
-                            className="text-soot-400 hover:text-brand-600 p-1 rounded-md hover:bg-brand-50 text-sm"
-                            title="Rename"
-                          >
-                            Edit
-                          </button>
-                          <button
-                            onClick={() => handleRemoveVariant(v)}
-                            disabled={variantsSaving}
-                            className="text-soot-300 hover:text-red-500 transition-colors p-1 rounded-md hover:bg-red-50"
-                            title={`Remove ${v}`}
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
         {/* ───────── Tax & Rates Management ───────── */}
         {activeTab === 'taxrates' && (
           <div className="max-w-2xl xl:max-w-3xl">
@@ -1297,7 +1107,7 @@ export default function Settings() {
         {activeTab === 'applogs' && <AppLogsPanel />}
 
         {/* Fallback for other tabs */}
-        {!['general', 'hardware', 'categories', 'variants', 'tables', 'modifiers', 'taxrates', 'receipt', 'users', 'branches', 'applogs', 'discounts'].includes(activeTab) && (
+        {!['general', 'hardware', 'categories', 'tables', 'riders', 'modifiers', 'taxrates', 'receipt', 'users', 'branches', 'applogs', 'discounts'].includes(activeTab) && (
            <div className="text-soot-500">Settings panel for {activeTab} coming soon.</div>
         )}
 

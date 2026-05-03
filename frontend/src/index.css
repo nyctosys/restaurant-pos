@@ -453,6 +453,12 @@ table td {
   border: 1px solid rgb(255 255 255 / 0.7);
 }
 
+/* Allow thead position:sticky to use the outer scrollport (ancestor overflow-y auto).
+   Default overflow:hidden on .app-table-shell would break sticky headers. */
+.app-table-shell.app-table-shell--sticky-friendly {
+  overflow: visible;
+}
+
 .app-table-scroll {
   overflow-x: auto;
 }
@@ -468,7 +474,8 @@ table td {
 .app-table thead {
   position: sticky;
   top: 0;
-  z-index: 2;
+  z-index: 4;
+  box-shadow: 0 1px 0 rgb(210 210 215 / 0.9);
 }
 
 .app-table th {
@@ -580,6 +587,10 @@ table td {
 .dark .app-table-shell {
   background: rgb(29 29 31 / 0.96);
   border-color: rgb(255 255 255 / 0.14);
+}
+
+.dark .app-table thead {
+  box-shadow: 0 1px 0 rgb(255 255 255 / 0.12);
 }
 
 .dark .app-table {

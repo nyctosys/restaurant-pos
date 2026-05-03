@@ -5,6 +5,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
+from sqlalchemy import func
 
 from app.models import Branch, Ingredient, IngredientBranchStock, Inventory, Sale, Setting, User, db
 from app.deps import get_current_user, require_owner, require_owner_or_manager
@@ -53,7 +54,7 @@ def create_branch(payload: dict[str, Any] | None = None, _: User = Depends(requi
     data = payload or {}
     if not data.get("name", "").strip():
         return JSONResponse(status_code=400, content={"message": "Branch name is required"})
-    existing = Branch.query.filter(db.func.lower(Branch.name) == data["name"].strip().lower()).first()
+    existing = Branch.query.filter(func.lower(Branch.name) == data["name"].strip().lower()).first()
     if existing:
         return JSONResponse(status_code=409, content={"message": "A branch with that name already exists"})
     try:
@@ -94,7 +95,7 @@ def update_branch(branch_id: str, payload: dict[str, Any] | None = None, current
     name = data.get("name", "").strip()
     if not name:
         return JSONResponse(status_code=400, content={"message": "Branch name is required"})
-    existing = Branch.query.filter(db.func.lower(Branch.name) == name.lower(), Branch.id != branch_id).first()
+    existing = Branch.query.filter(func.lower(Branch.name) == name.lower(), Branch.id != branch_id).first()
     if existing:
         return JSONResponse(status_code=409, content={"message": "A branch with that name already exists"})
     try:

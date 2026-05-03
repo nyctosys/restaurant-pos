@@ -33,3 +33,20 @@ def test_branches_get_404(client, app):
     assert r.status_code == 404
     data = r.get_json()
     assert "not found" in (data.get("message") or "").lower()
+
+
+def test_branch_update_succeeds(client, app):
+    """Regression: update must not 500 (e.g. invalid db.func reference on duplicate-name check)."""
+    h = _owner_headers(client, app)
+    with app.app_context():
+        bid = Branch.query.first().id
+    r = client.put(
+        f"/api/branches/{bid}",
+        headers=h,
+        json={"name": "Renamed Branch", "address": "123 Street", "phone": "0300"},
+    )
+    assert r.status_code == 200, r.get_data(as_text=True)
+    data = r.get_json()
+    assert data.get("name") == "Renamed Branch"
+    assert data.get("address") == "123 Street"
+    assert data.get("phone") == "0300"
