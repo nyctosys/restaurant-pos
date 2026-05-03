@@ -23,6 +23,9 @@ interface ComboItem {
   quantity: number;
   selection_type?: 'product' | 'category';
   category_name?: string;
+  group_label?: string;
+  choice_group_key?: string;
+  distinct_picks_in_group?: boolean;
 }
 
 interface Deal {
@@ -104,12 +107,25 @@ export default function DealsTab() {
       title: formData.title,
       sku: formData.sku,
       sale_price: Number(formData.sale_price),
-      combo_items: formData.combo_items.map(({ product_id, quantity, selection_type, category_name }) => ({
-        selection_type: selection_type || 'product',
-        product_id: (selection_type || 'product') === 'product' ? Number(product_id) : null,
-        category_name: (selection_type || 'product') === 'category' ? (category_name || '').trim() : '',
-        quantity: Number(quantity),
-      }))
+      combo_items: formData.combo_items.map(
+        ({
+          product_id,
+          quantity,
+          selection_type,
+          category_name,
+          group_label,
+          choice_group_key,
+          distinct_picks_in_group,
+        }) => ({
+          selection_type: selection_type || 'product',
+          product_id: (selection_type || 'product') === 'product' ? Number(product_id) : null,
+          category_name: (selection_type || 'product') === 'category' ? (category_name || '').trim() : '',
+          quantity: Number(quantity),
+          group_label: (group_label || '').trim(),
+          choice_group_key: (choice_group_key || '').trim(),
+          distinct_picks_in_group: Boolean(distinct_picks_in_group),
+        })
+      )
     };
   };
 
@@ -170,6 +186,9 @@ export default function DealsTab() {
         quantity: item.quantity,
         selection_type: item.selection_type || 'product',
         category_name: item.category_name || '',
+        group_label: item.group_label || '',
+        choice_group_key: item.choice_group_key || '',
+        distinct_picks_in_group: Boolean(item.distinct_picks_in_group),
       })),
     });
     setShowForm(true);
@@ -232,7 +251,15 @@ export default function DealsTab() {
       ...prev,
       combo_items: [
         ...prev.combo_items,
-        { product_id: undefined, quantity: 1, selection_type: 'product', category_name: '' },
+        {
+          product_id: undefined,
+          quantity: 1,
+          selection_type: 'product',
+          category_name: '',
+          group_label: '',
+          choice_group_key: '',
+          distinct_picks_in_group: false,
+        },
       ]
     }));
   };
@@ -457,9 +484,41 @@ export default function DealsTab() {
                       <Trash2 className="w-5 h-5" />
                     </button>
                     </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div>
+                        <label className="block text-xs font-semibold text-soot-600 mb-1">Group label (POS)</label>
+                        <input
+                          type="text"
+                          value={item.group_label || ''}
+                          onChange={e => updateComboItem(index, 'group_label', e.target.value)}
+                          placeholder="e.g. Burgers"
+                          className="w-full bg-white border border-soot-200 rounded-[8px] px-3 py-2 text-sm font-medium focus:ring-2 focus:ring-brand-400 outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-soot-600 mb-1">Choice group key</label>
+                        <input
+                          type="text"
+                          value={item.choice_group_key || ''}
+                          onChange={e => updateComboItem(index, 'choice_group_key', e.target.value)}
+                          placeholder="e.g. protein-a"
+                          className="w-full bg-white border border-soot-200 rounded-[8px] px-3 py-2 text-sm font-medium focus:ring-2 focus:ring-brand-400 outline-none"
+                        />
+                      </div>
+                      <label className="flex items-center gap-2 cursor-pointer select-none text-sm font-semibold text-soot-700 pt-6 sm:pt-0 sm:items-end sm:pb-2">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(item.distinct_picks_in_group)}
+                          onChange={e => updateComboItem(index, 'distinct_picks_in_group', e.target.checked)}
+                          className="rounded border-soot-300 text-brand-600 focus:ring-brand-500"
+                        />
+                        Distinct picks in group
+                      </label>
+                    </div>
                     {(item.selection_type || 'product') === 'category' && (
                       <p className="text-xs text-soot-500">
                         Cashier will choose any menu item from this category on the dashboard before adding the deal.
+                        Use the same choice group key + distinct picks so two slots cannot select the same menu item.
                       </p>
                     )}
                   </div>

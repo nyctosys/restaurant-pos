@@ -18,12 +18,28 @@ def run_print_receipt_job(receipt_data: dict[str, Any]) -> None:
         logger.exception("Deferred receipt print failed")
 
 
-def run_print_kot_and_stamp_job(sale_id: int, kot_payload: dict[str, Any]) -> None:
-    """Print KOT then persist kds_ticket_printed_at in a fresh app context (request session is closed)."""
+def run_print_kot_and_stamp_job(
+    sale_id: int,
+    kot_payload: dict[str, Any] | None,
+    branch_id: str | None = None,
+    operator_name: str | None = None,
+) -> None:
+    """Print KOT then persist kds_ticket_printed_at in a fresh app context (request session is closed).
+
+    Pass ``kot_payload=None`` to build the payload inside this job (faster checkout/KOT HTTP responses).
+    """
     try:
         from app.services.printer_service import PrinterService
 
-        ok = PrinterService().print_kot(kot_payload)
+        payload = kot_payload
+        if payload is None:
+            from app import database_shell
+            from app.routers.orders import _build_kot_print_payload
+
+            with database_shell.app_context():
+                payload = _build_kot_print_payload(sale_id, branch_id, operator_name)
+
+        ok = PrinterService().print_kot(payload)
         if not ok:
             return
         from app import database_shell

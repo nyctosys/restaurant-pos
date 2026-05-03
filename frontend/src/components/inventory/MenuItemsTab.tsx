@@ -61,6 +61,17 @@ function formatUnit(unit?: string): string {
   return unit.replace('UnitOfMeasure.', '').toLowerCase();
 }
 
+/** Catalog serving column: never show "0g" / "0ml" — quantity only when > 0; otherwise unit label only. */
+function formatCatalogServingDisplay(totalQuantity: number | undefined | null, unitRaw?: string | null): string | null {
+  const raw = (unitRaw || '').trim();
+  if (!raw || raw === 'Mixed Units') return null;
+  const unit = formatUnit(raw);
+  if (!unit) return null;
+  const n = totalQuantity == null ? NaN : Number(totalQuantity);
+  if (Number.isFinite(n) && n > 0) return `${n} ${unit}`.trim();
+  return unit;
+}
+
 /** Menu catalog only — stock is tracked per ingredient (Recipes / Ingredients tabs). */
 export default function MenuItemsTab() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -568,15 +579,19 @@ export default function MenuItemsTab() {
                       {formatCurrency(p.variants?.[0]?.salePrice ?? p.sale_price ?? p.base_price)}
                     </td>
                     <td className="px-4 py-3.5 align-middle">
-                      {p.totalQuantity !== undefined && p.totalQuantity !== null && p.unitOfMeasure && p.unitOfMeasure !== 'Mixed Units' ? (
-                        <span className="inline-flex items-center rounded-full border border-neutral-200 bg-neutral-100 px-2.5 py-1 text-xs font-semibold text-neutral-600 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-300">
-                          {p.totalQuantity} {formatUnit(p.unitOfMeasure)}
-                        </span>
-                      ) : p.unitOfMeasure === 'Mixed Units' ? (
+                      {p.unitOfMeasure === 'Mixed Units' ? (
                         <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400">Mixed Units</span>
-                      ) : (
-                        <span className="text-xs text-neutral-300 dark:text-neutral-600">—</span>
-                      )}
+                      ) : (() => {
+                        const line = formatCatalogServingDisplay(p.totalQuantity, p.unitOfMeasure);
+                        if (line) {
+                          return (
+                            <span className="inline-flex items-center rounded-full border border-neutral-200 bg-neutral-100 px-2.5 py-1 text-xs font-semibold text-neutral-600 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-300">
+                              {line}
+                            </span>
+                          );
+                        }
+                        return <span className="text-xs text-neutral-300 dark:text-neutral-600">—</span>;
+                      })()}
                     </td>
                     <td className="px-4 py-3.5 align-middle text-right">
                       <div className="flex items-center justify-end gap-1.5">
@@ -659,9 +674,9 @@ export default function MenuItemsTab() {
                       <td className="px-4 py-2.5 font-semibold text-neutral-600 dark:text-neutral-400">{formatCurrency(variant.basePrice)}</td>
                       <td className="px-4 py-2.5 font-semibold text-neutral-800 dark:text-neutral-200">{formatCurrency(variant.salePrice)}</td>
                       <td className="px-4 py-2.5 text-neutral-500 dark:text-neutral-400">
-                        {variant.totalQuantity !== undefined && variant.totalQuantity !== null && variant.unit && variant.unit !== 'Mixed Units'
-                          ? `${variant.totalQuantity} ${formatUnit(variant.unit)}`
-                          : (variant.unit || '—')}
+                        {variant.unit === 'Mixed Units'
+                          ? 'Mixed Units'
+                          : formatCatalogServingDisplay(variant.totalQuantity, variant.unit) || '—'}
                       </td>
                       <td className="px-4 py-2.5" />
                     </tr>

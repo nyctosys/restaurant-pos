@@ -21,6 +21,9 @@ class ComboItemCreate(BaseModel):
     variant_key: str = ""
     selection_type: str = "product"
     category_name: str = ""
+    group_label: str = ""
+    choice_group_key: str = ""
+    distinct_picks_in_group: bool = False
 
 
 class DealCreate(BaseModel):
@@ -43,7 +46,10 @@ def _deal_to_dict(deal: Product) -> dict:
                 "quantity": ci.quantity,
                 "selection_type": normalize_combo_selection_type(getattr(ci, "selection_type", None)),
                 "category_name": normalize_combo_category_name(getattr(ci, "category_name", None)),
-                "variant_key": "",
+                "variant_key": (getattr(ci, "variant_key", None) or "").strip(),
+                "group_label": (getattr(ci, "group_label", None) or "").strip(),
+                "choice_group_key": (getattr(ci, "choice_group_key", None) or "").strip(),
+                "distinct_picks_in_group": bool(getattr(ci, "distinct_picks_in_group", False)),
             }
         )
     return {
@@ -94,6 +100,10 @@ def _validate_deal_payload(payload: DealCreate, deal_id: int | None = None) -> t
             )
         category_name = normalize_combo_category_name(ci.category_name)
         product_id = int(ci.product_id) if ci.product_id is not None else None
+        variant_key_line = (ci.variant_key or "").strip()[:100]
+        group_label = (ci.group_label or "").strip()[:120] or None
+        choice_group_key = (ci.choice_group_key or "").strip()[:80] or None
+        distinct_picks = bool(ci.distinct_picks_in_group)
 
         if selection_type == "category":
             if not category_name:
@@ -107,7 +117,10 @@ def _validate_deal_payload(payload: DealCreate, deal_id: int | None = None) -> t
                     "category_name": category_name,
                     "product_id": None,
                     "quantity": quantity,
-                    "variant_key": "",
+                    "variant_key": variant_key_line,
+                    "group_label": group_label,
+                    "choice_group_key": choice_group_key,
+                    "distinct_picks_in_group": distinct_picks,
                 }
             )
             continue
@@ -134,7 +147,10 @@ def _validate_deal_payload(payload: DealCreate, deal_id: int | None = None) -> t
                 "category_name": "",
                 "product_id": product_id,
                 "quantity": quantity,
-                "variant_key": "",
+                "variant_key": variant_key_line,
+                "group_label": group_label,
+                "choice_group_key": choice_group_key,
+                "distinct_picks_in_group": distinct_picks,
             }
         )
 
@@ -160,7 +176,10 @@ def _replace_combo_items(deal: Product, combo_items: list[dict[str, object]]) ->
                 quantity=ci_data["quantity"],
                 selection_type=ci_data["selection_type"],
                 category_name=ci_data["category_name"] or None,
-                variant_key="",
+                variant_key=str(ci_data.get("variant_key") or "").strip()[:100],
+                group_label=ci_data.get("group_label"),
+                choice_group_key=ci_data.get("choice_group_key"),
+                distinct_picks_in_group=bool(ci_data.get("distinct_picks_in_group")),
             )
         )
 

@@ -319,7 +319,10 @@ def test_deal_edit_archive_restore_and_permanent_delete(client, app):
     assert len(edited["combo_items"]) == 2
     assert any(ci["product_id"] == fries_id and ci["quantity"] == 2 for ci in edited["combo_items"])
     assert any(ci["selection_type"] == "category" and ci["category_name"] == "Drinks" for ci in edited["combo_items"])
-    assert all((ci.get("variant_key") or "") == "" for ci in edited["combo_items"])
+    fries_row = next(ci for ci in edited["combo_items"] if ci.get("product_id") == fries_id)
+    drinks_row = next(ci for ci in edited["combo_items"] if ci.get("selection_type") == "category")
+    assert (fries_row.get("variant_key") or "") == "Regular"
+    assert (drinks_row.get("variant_key") or "") == "Large"
 
     archive_res = client.patch(f"/api/menu/deals/{deal_id}/archive", headers=h)
     assert archive_res.status_code == 200

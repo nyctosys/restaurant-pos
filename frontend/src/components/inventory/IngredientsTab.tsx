@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Plus, X, Loader2, Pencil, Package, Layers, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+import { Plus, X, Loader2, Pencil, Package, Layers, ArrowUpDown, ArrowUp, ArrowDown, Scale } from 'lucide-react';
 import { get, post, put, getUserMessage } from '../../api';
 import { getTerminalBranchIdString, parseUserFromStorage } from '../../utils/branchContext';
 import SearchableSelect from '../SearchableSelect';
@@ -212,6 +212,14 @@ export default function IngredientsTab() {
   const [bulkAddError, setBulkAddError] = useState('');
   const [bulkAddSubmitting, setBulkAddSubmitting] = useState(false);
 
+  const [stockAdjustIngredient, setStockAdjustIngredient] = useState<Ingredient | null>(null);
+  const [stockAdjustDirection, setStockAdjustDirection] = useState<'add' | 'remove'>('add');
+  const [stockAdjustQty, setStockAdjustQty] = useState('');
+  const [stockAdjustUnit, setStockAdjustUnit] = useState('');
+  const [stockAdjustReason, setStockAdjustReason] = useState('');
+  const [stockAdjustError, setStockAdjustError] = useState('');
+  const [stockAdjustSubmitting, setStockAdjustSubmitting] = useState(false);
+
   const createRestockRow = (): RestockRow => ({
     key: Math.random().toString(36).substring(7),
     ingredientId: '',
@@ -314,6 +322,56 @@ export default function IngredientsTab() {
     setShowBulkAddModal(false);
     setBulkAddRows([]);
     setBulkAddError('');
+  };
+
+  const handleOpenStockAdjust = (ing: Ingredient) => {
+    const opts = getSelectableInputUnits(ing);
+    const defaultUnit = opts.length ? (opts.includes(ing.unit) ? ing.unit : opts[0]) : ing.unit;
+    setStockAdjustIngredient(ing);
+    setStockAdjustDirection('add');
+    setStockAdjustQty('');
+    setStockAdjustUnit(defaultUnit);
+    setStockAdjustReason('');
+    setStockAdjustError('');
+  };
+
+  const handleCloseStockAdjust = () => {
+    setStockAdjustIngredient(null);
+    setStockAdjustError('');
+    setStockAdjustQty('');
+    setStockAdjustReason('');
+  };
+
+  const handleSubmitStockAdjust = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const ing = stockAdjustIngredient;
+    if (!ing) return;
+    const qty = parseFloat(stockAdjustQty.trim());
+    if (!Number.isFinite(qty) || qty <= 0) {
+      setStockAdjustError('Enter a positive quantity.');
+      return;
+    }
+
+    const signed = stockAdjustDirection === 'add' ? qty : -qty;
+    const payload: Record<string, unknown> = {
+      ingredient_id: ing.id,
+      stock_delta: signed,
+      input_unit: stockAdjustUnit || ing.unit,
+      reason: stockAdjustReason.trim() || undefined,
+    };
+
+    setStockAdjustSubmitting(true);
+    setStockAdjustError('');
+    try {
+      await post('/stock/update', payload);
+      showToast('Stock updated', 'success');
+      handleCloseStockAdjust();
+      await fetchData(true);
+    } catch (error) {
+      setStockAdjustError(getUserMessage(error));
+    } finally {
+      setStockAdjustSubmitting(false);
+    }
   };
 
   const updateBulkAddRow = (key: string, patch: Partial<BulkAddRow>) => {
@@ -702,15 +760,33 @@ export default function IngredientsTab() {
       .map(entry => entry.ingredient);
   }, [ingredients, sortDirection, sortKey, suppliers]);
 
+  const stockAdjustPreview = useMemo(() => {
+    if (!stockAdjustIngredient) return null;
+    const ing = stockAdjustIngredient;
+    const q = parseFloat(stockAdjustQty.trim());
+    if (!Number.isFinite(q) || q <= 0) return null;
+    try {
+      const u = stockAdjustUnit || ing.unit;
+      const deltaBase =
+        stockAdjustDirection === 'add' ? toBaseUnit(q, u, ing) : -toBaseUnit(q, u, ing);
+      const after = ing.current_stock + deltaBase;
+      return { after, delta: deltaBase };
+    } catch {
+      return null;
+    }
+  }, [stockAdjustIngredient, stockAdjustDirection, stockAdjustQty, stockAdjustUnit]);
+
   const renderSortIcon = (key: SortKey) => {
-    if (sortKey !== key) return <ArrowUpDown className="w-3.5 h-3.5 text-soot-400" aria-hidden="true" />;
+    if (sortKey !== key) return <ArrowUpDown className="w-3.5 h-3.5 text-neutral-400" aria-hidden="true" />;
     return sortDirection === 'asc'
-      ? <ArrowUp className="w-3.5 h-3.5 text-brand-700" aria-hidden="true" />
-      : <ArrowDown className="w-3.5 h-3.5 text-brand-700" aria-hidden="true" />;
+      ? <ArrowUp className="w-3.5 h-3.5 text-brand-600" aria-hidden="true" />
+      : <ArrowDown className="w-3.5 h-3.5 text-brand-600" aria-hidden="true" />;
   };
 
-  const thSticky =
-    'sticky top-0 z-20 !bg-white shadow-[0_1px_0_0_rgb(210_210_215)] dark:!bg-neutral-900 dark:shadow-[0_1px_0_0_rgb(58_58_60)]';
+  const sortHeaderBtnLeft =
+    'flex w-full items-center gap-2 text-left transition-colors hover:text-neutral-800 focus:outline-none focus-visible:text-neutral-950 dark:hover:text-neutral-100 dark:focus-visible:text-white';
+  const sortHeaderBtnRight =
+    'flex w-full items-center justify-end gap-2 text-right transition-colors hover:text-neutral-800 focus:outline-none focus-visible:text-neutral-950 dark:hover:text-neutral-100 dark:focus-visible:text-white';
 
   return (
     <div className="mt-0 flex flex-col h-full min-h-0 overflow-hidden bg-transparent pt-2 pb-3">
@@ -743,7 +819,7 @@ export default function IngredientsTab() {
         </div>
       </div>
 
-      <div className="page-padding flex min-h-0 min-w-0 flex-1 flex-col">
+      <div className="page-padding flex min-h-0 min-w-0 flex-1 flex-col overflow-auto pt-4 lg:pt-5">
         {loading ? (
           <div className="flex flex-1 items-center justify-center py-20 text-soot-400 gap-2">
             <Loader2 className="w-5 h-5 animate-spin" /> Loading materials...
@@ -757,104 +833,132 @@ export default function IngredientsTab() {
              <p className="text-sm">Click "Add material" to start tracking inventory.</p>
            </div>
         ) : (
-          <div className="app-table-shell app-table-shell--sticky-friendly flex min-h-0 min-w-0 flex-1 flex-col">
-          <div className="app-table-scroll min-h-0 flex-1 overflow-y-auto overflow-x-auto overscroll-contain">
-          <table className="app-table min-w-0">
-            <thead>
-              <tr>
-                <th
-                  aria-sort={sortKey === 'name' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}
-                  className={thSticky}
-                >
-                  <button type="button" onClick={() => handleSort('name')} className="flex items-center gap-2 text-left transition-colors hover:text-soot-700 focus:outline-none focus-visible:text-soot-900">
-                    <span>Item</span>
-                    {renderSortIcon('name')}
-                  </button>
-                </th>
-                <th className={thSticky}>Brand</th>
-                <th
-                  aria-sort={sortKey === 'current_stock' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}
-                  className={`text-right ${thSticky}`}
-                >
-                  <button type="button" onClick={() => handleSort('current_stock')} className="ml-auto flex items-center gap-2 text-right transition-colors hover:text-soot-700 focus:outline-none focus-visible:text-soot-900">
-                    <span>Stock</span>
-                    {renderSortIcon('current_stock')}
-                  </button>
-                </th>
-                <th
-                  aria-sort={sortKey === 'average_cost' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}
-                  className={`text-right ${thSticky}`}
-                >
-                  <button type="button" onClick={() => handleSort('average_cost')} className="ml-auto flex items-center gap-2 text-right transition-colors hover:text-soot-700 focus:outline-none focus-visible:text-soot-900">
-                    <span>Purchase Unit Cost</span>
-                    {renderSortIcon('average_cost')}
-                  </button>
-                </th>
-                <th
-                  aria-sort={sortKey === 'supplier' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}
-                  className={`hidden md:table-cell ${thSticky}`}
-                >
-                  <button type="button" onClick={() => handleSort('supplier')} className="flex items-center gap-2 text-left transition-colors hover:text-soot-700 focus:outline-none focus-visible:text-soot-900">
-                    <span>Supplier</span>
-                    {renderSortIcon('supplier')}
-                  </button>
-                </th>
-                <th
-                  aria-sort={sortKey === 'id' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}
-                  className={`text-right ${thSticky}`}
-                >
-                  <button type="button" onClick={() => handleSort('id')} className="ml-auto flex items-center gap-2 text-right transition-colors hover:text-soot-700 focus:outline-none focus-visible:text-soot-900">
-                    <span>Actions</span>
-                    {renderSortIcon('id')}
-                  </button>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {sortedIngredients.map(ing => {
-                const supplier = suppliers.find(s => s.id === ing.preferred_supplier_id);
-                const isLowStock = ing.current_stock <= ing.minimum_stock;
-                const purchaseUnitCost = getPurchasedUnitCost(ing);
-                
-                return (
-                  <tr key={ing.id} className="transition-colors">
-                    <td className="py-4 px-3">
-                      <div className="font-bold text-soot-900">{ing.name}</div>
-                      <div className="text-xs text-soot-500 font-mono mt-0.5">{ing.sku || '-'}</div>
-                    </td>
-                    <td className="py-4 px-3 text-sm text-soot-700">{ing.brand_name || '—'}</td>
-                    <td className="py-2 px-3 text-right align-top">
-                      <div className="font-semibold tabular-nums text-sm md:text-base inline-flex items-center gap-2 text-soot-900">
-                        {isLowStock && <span className="w-2 h-2 rounded-full bg-red-500 shrink-0" title="Low Stock"></span>}
-                        <span
-                          className="leading-snug"
-                          title={formatBaseQuantityGlobal(ing.current_stock, ing.unit, { ingredient: ing })}
-                        >
-                          {formatBaseQuantityGlobal(ing.current_stock, ing.unit, { ingredient: ing })}
-                        </span>
-                      </div>
-                    </td>
-                    <td className="py-4 px-3 text-right">
-                      <div className="font-medium text-soot-700">{formatAverageUnitCost(purchaseUnitCost.amount)}</div>
-                      <div className="text-xs text-soot-400">/ {unitLabel(purchaseUnitCost.unit)}</div>
-                    </td>
-                    <td className="py-4 px-3 hidden md:table-cell text-sm text-soot-600">
-                      {supplier ? supplier.name : <span className="text-soot-300">—</span>}
-                    </td>
-                    <td className="py-4 px-3 text-right">
-                      <button 
-                        onClick={() => handleOpenEdit(ing)}
-                        className="p-2 text-neutral-400 hover:text-brand-600 hover:bg-brand-50 rounded-[8px] transition-colors inline-block"
-                      >
-                        <Pencil className="w-4 h-4" />
+          <div className="app-table-shell">
+            <div className="app-table-scroll max-h-[calc(100vh-18rem)] min-h-[22rem] overscroll-contain lg:max-h-[calc(100vh-16rem)]">
+              <table className="app-table menu-items-table min-w-[760px]">
+                <thead>
+                  <tr>
+                    <th
+                      aria-sort={sortKey === 'name' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}
+                      className="sticky top-0 z-10"
+                    >
+                      <button type="button" onClick={() => handleSort('name')} className={sortHeaderBtnLeft}>
+                        <span>Item</span>
+                        {renderSortIcon('name')}
                       </button>
-                    </td>
+                    </th>
+                    <th className="sticky top-0 z-10 text-left">Brand</th>
+                    <th
+                      aria-sort={sortKey === 'current_stock' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}
+                      className="sticky top-0 z-10 text-right"
+                    >
+                      <button type="button" onClick={() => handleSort('current_stock')} className={sortHeaderBtnRight}>
+                        <span>Stock</span>
+                        {renderSortIcon('current_stock')}
+                      </button>
+                    </th>
+                    <th
+                      aria-sort={sortKey === 'average_cost' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}
+                      className="sticky top-0 z-10 text-right"
+                    >
+                      <button type="button" onClick={() => handleSort('average_cost')} className={sortHeaderBtnRight}>
+                        <span>Purchase Unit Cost</span>
+                        {renderSortIcon('average_cost')}
+                      </button>
+                    </th>
+                    <th
+                      aria-sort={sortKey === 'supplier' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}
+                      className="sticky top-0 z-10 hidden text-left md:table-cell"
+                    >
+                      <button type="button" onClick={() => handleSort('supplier')} className={sortHeaderBtnLeft}>
+                        <span>Supplier</span>
+                        {renderSortIcon('supplier')}
+                      </button>
+                    </th>
+                    <th
+                      aria-sort={sortKey === 'id' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}
+                      className="sticky top-0 z-10 text-right"
+                    >
+                      <button type="button" onClick={() => handleSort('id')} className={sortHeaderBtnRight}>
+                        <span>Actions</span>
+                        {renderSortIcon('id')}
+                      </button>
+                    </th>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
-          </div>
+                </thead>
+                <tbody>
+                  {sortedIngredients.map((ing) => {
+                    const supplier = suppliers.find((s) => s.id === ing.preferred_supplier_id);
+                    const isLowStock = ing.current_stock <= ing.minimum_stock;
+                    const purchaseUnitCost = getPurchasedUnitCost(ing);
+
+                    return (
+                      <tr key={ing.id} className="group transition-colors">
+                        <td className="px-4 py-3.5 align-middle">
+                          <div className="flex min-w-0 flex-col">
+                            <span className="truncate text-[15px] font-semibold leading-5 text-neutral-950 dark:text-neutral-100">
+                              {ing.name}
+                            </span>
+                            <span className="mt-0.5 font-mono text-[13px] font-medium text-neutral-500 dark:text-neutral-400">
+                              {ing.sku || '—'}
+                            </span>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3.5 align-middle text-sm text-neutral-700 dark:text-neutral-300">
+                          {ing.brand_name || <span className="text-neutral-300 dark:text-neutral-600">—</span>}
+                        </td>
+                        <td className="px-4 py-3.5 align-middle text-right">
+                          <div className="inline-flex items-center justify-end gap-2 text-[14px] font-semibold tabular-nums text-neutral-950 dark:text-neutral-100">
+                            {isLowStock && (
+                              <span className="h-2 w-2 shrink-0 rounded-full bg-red-500" title="Low stock" aria-hidden="true" />
+                            )}
+                            <span
+                              className="leading-snug"
+                              title={formatBaseQuantityGlobal(ing.current_stock, ing.unit, { ingredient: ing })}
+                            >
+                              {formatBaseQuantityGlobal(ing.current_stock, ing.unit, { ingredient: ing })}
+                            </span>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3.5 align-middle text-right">
+                          <div className="text-[13px] font-semibold text-neutral-700 dark:text-neutral-300">
+                            {formatAverageUnitCost(purchaseUnitCost.amount)}
+                          </div>
+                          <div className="text-xs text-neutral-400 dark:text-neutral-500">
+                            / {unitLabel(purchaseUnitCost.unit)}
+                          </div>
+                        </td>
+                        <td className="hidden px-4 py-3.5 align-middle text-sm text-neutral-600 dark:text-neutral-400 md:table-cell">
+                          {supplier ? supplier.name : <span className="text-neutral-300 dark:text-neutral-600">—</span>}
+                        </td>
+                        <td className="px-4 py-3.5 align-middle text-right">
+                          <div className="flex items-center justify-end gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => handleOpenStockAdjust(ing)}
+                              className="flex h-9 w-9 items-center justify-center rounded-full text-neutral-400 transition-colors hover:bg-brand-50 hover:text-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 dark:hover:bg-brand-950/50 dark:hover:text-brand-300"
+                              title="Adjust stock"
+                              aria-label={`Adjust stock for ${ing.name}`}
+                            >
+                              <Scale className="w-4 h-4" aria-hidden="true" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleOpenEdit(ing)}
+                              className="flex h-9 w-9 items-center justify-center rounded-full text-neutral-400 transition-colors hover:bg-brand-50 hover:text-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 dark:hover:bg-brand-950/50 dark:hover:text-brand-300"
+                              title="Edit material"
+                              aria-label={`Edit ${ing.name}`}
+                            >
+                              <Pencil className="w-4 h-4" aria-hidden="true" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
       </div>
@@ -1025,6 +1129,162 @@ export default function IngredientsTab() {
              </form>
            </div>
          </div>
+      )}
+
+      {stockAdjustIngredient && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 glass-overlay overflow-y-auto">
+          <div className="glass-floating w-full max-w-md my-auto flex flex-col max-h-[90vh] overflow-hidden">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-neutral-200/60 bg-white/25 shrink-0">
+              <h3 className="text-lg font-bold text-neutral-900">Adjust stock</h3>
+              <button
+                type="button"
+                onClick={handleCloseStockAdjust}
+                className="p-1.5 rounded-[8px] hover:bg-neutral-200 transition-colors"
+                aria-label="Close"
+              >
+                <X className="w-5 h-5 text-neutral-500" />
+              </button>
+            </div>
+            <form onSubmit={handleSubmitStockAdjust} className="p-6 space-y-4 overflow-y-auto min-h-0 flex-1">
+              {stockAdjustError && (
+                <div className="bg-red-50 border border-red-200 text-red-700 rounded-[8px] px-4 py-2 text-sm font-medium">
+                  {stockAdjustError}
+                </div>
+              )}
+              <div>
+                <p className="text-sm font-semibold text-neutral-900">{stockAdjustIngredient.name}</p>
+                <p className="text-xs text-neutral-500 mt-1">
+                  Current:{' '}
+                  <span className="font-medium text-neutral-800 tabular-nums">
+                    {formatBaseQuantityGlobal(stockAdjustIngredient.current_stock, stockAdjustIngredient.unit, {
+                      ingredient: stockAdjustIngredient,
+                    })}
+                  </span>{' '}
+                  at this branch. Movements appear in stock reports.
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setStockAdjustDirection('add')}
+                  className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium border transition-colors touch-target ${
+                    stockAdjustDirection === 'add'
+                      ? 'border-brand-500 bg-brand-50 text-brand-900'
+                      : 'border-neutral-200 text-neutral-600 hover:bg-white/60'
+                  }`}
+                >
+                  Add
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStockAdjustDirection('remove')}
+                  className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium border transition-colors touch-target ${
+                    stockAdjustDirection === 'remove'
+                      ? 'border-brand-500 bg-brand-50 text-brand-900'
+                      : 'border-neutral-200 text-neutral-600 hover:bg-white/60'
+                  }`}
+                >
+                  Remove
+                </button>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-neutral-700 mb-1" htmlFor="stock-adj-qty">
+                    Quantity
+                  </label>
+                  <input
+                    id="stock-adj-qty"
+                    type="number"
+                    step="any"
+                    min="0"
+                    value={stockAdjustQty}
+                    onChange={(e) => setStockAdjustQty(e.target.value)}
+                    className="w-full px-3 py-2.5 glass-card text-sm tabular-nums focus:ring-2 focus:ring-brand-500 focus:outline-none"
+                    placeholder="e.g. 2.5"
+                    autoComplete="off"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-neutral-700 mb-1" htmlFor="stock-adj-unit">
+                    Unit
+                  </label>
+                  <select
+                    id="stock-adj-unit"
+                    value={stockAdjustUnit}
+                    onChange={(e) => setStockAdjustUnit(e.target.value)}
+                    className="w-full px-3 py-2.5 glass-card text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none"
+                  >
+                    {getSelectableInputUnits(stockAdjustIngredient).map((u) => (
+                      <option key={u} value={u}>
+                        {ORDER_UNIT_LABELS[u] || u}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-neutral-700 mb-1" htmlFor="stock-adj-reason">
+                  Note (optional)
+                </label>
+                <input
+                  id="stock-adj-reason"
+                  type="text"
+                  value={stockAdjustReason}
+                  onChange={(e) => setStockAdjustReason(e.target.value)}
+                  className="w-full px-3 py-2.5 glass-card text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none"
+                  placeholder="e.g. Stock take correction, spoilage"
+                  autoComplete="off"
+                />
+              </div>
+              {stockAdjustPreview && stockAdjustPreview.after < -1e-9 && (
+                <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200/80 rounded-lg px-3 py-2">
+                  Resulting stock would be negative. Reduce the amount removed or switch to Add.
+                </p>
+              )}
+              {stockAdjustPreview && stockAdjustPreview.after >= -1e-9 && (
+                <p className="text-xs text-neutral-600 bg-white/30 border border-neutral-200/60 rounded-lg px-3 py-2">
+                  After save:{' '}
+                  <span className="font-semibold text-neutral-900 tabular-nums">
+                    {formatBaseQuantityGlobal(Math.max(0, stockAdjustPreview.after), stockAdjustIngredient.unit, {
+                      ingredient: stockAdjustIngredient,
+                    })}
+                  </span>
+                  {Math.abs(stockAdjustPreview.delta) > 1e-9 && (
+                    <span className="text-neutral-500">
+                      {' '}
+                      (
+                      {stockAdjustPreview.delta > 0 ? '+' : ''}
+                      {formatBaseQuantityGlobal(stockAdjustPreview.delta, stockAdjustIngredient.unit, {
+                        ingredient: stockAdjustIngredient,
+                      })}
+                      )
+                    </span>
+                  )}
+                </p>
+              )}
+              <p className="text-xs text-neutral-500">
+                Purchases with updated cost should use <span className="font-medium text-neutral-700">Restock</span> instead.
+              </p>
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={handleCloseStockAdjust}
+                  className="flex-1 px-4 py-2.5 border border-neutral-200 rounded-[8px] text-sm font-medium text-neutral-600 hover:bg-neutral-50 transition-colors touch-target"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={stockAdjustSubmitting || (stockAdjustPreview !== null && stockAdjustPreview.after < -1e-9)}
+                  className="flex-1 px-4 py-2.5 bg-brand-700 text-white rounded-[8px] text-sm font-medium hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 touch-target"
+                >
+                  {stockAdjustSubmitting && <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />}
+                  Update stock
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
 
       {showRestockModal && (

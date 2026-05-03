@@ -420,6 +420,12 @@ def _normalize_product_variant_labels(raw: Any) -> list[str]:
     return out
 
 
+def _default_variant_for_recipe_resolution(product: Product) -> str:
+    """When a combo line does not carry a variant label, resolve BOM using the first priced variant (stable default)."""
+    labels = _normalize_product_variant_labels(getattr(product, "variants", None))
+    return labels[0] if labels else ""
+
+
 def _validate_selected_product_variant(
     product: Product,
     raw_variant: Any,
@@ -467,22 +473,29 @@ def _validate_deal_selections(
             400,
         )
 
-    choice_rows = [
-        row
-        for row in expanded
-        if normalize_combo_selection_type(getattr(row, "selection_type", None)) == "category"
-    ]
-    if not choice_rows:
+    def _combo_row_requires_pos_selection(row: Any) -> bool:
+        st = normalize_combo_selection_type(getattr(row, "selection_type", None))
+        if st == "category":
+            return True
+        if st != "product":
+            return False
+        child = getattr(row, "child_product", None)
+        if child is None:
+            return False
+        return len(_normalize_product_variant_labels(getattr(child, "variants", None))) > 1
+
+    selection_rows = [row for row in expanded if _combo_row_requires_pos_selection(row)]
+    if not selection_rows:
         return [], None
 
     if not isinstance(raw_selections, list):
         return None, _json_error(
             "Bad Request",
-            f'Item at index {item_index}: deal "{product.title}" needs selections for its category slots',
+            f'Item at index {item_index}: deal "{product.title}" needs selections for its configurable slots',
             400,
         )
 
-    choice_rows_by_id = {int(row.id): row for row in choice_rows if getattr(row, "id", None) is not None}
+    choice_rows_by_id = {int(row.id): row for row in selection_rows if getattr(row, "id", None) is not None}
     selections_by_row: dict[int, dict[str, Any]] = {}
     normalized_selections: list[dict[str, Any]] = []
     for selection_index, raw_selection in enumerate(raw_selections):
@@ -534,18 +547,28 @@ def _validate_deal_selections(
         if getattr(selected_product, "is_deal", False):
             return None, _json_error(
                 "Bad Request",
-                f'Item at index {item_index}: "{selected_product.title}" is a deal and cannot fill a category slot',
+                f'Item at index {item_index}: "{selected_product.title}" is a deal and cannot fill a deal slot',
                 400,
             )
 
-        expected_category = normalize_combo_category_name(getattr(combo_row, "category_name", None))
-        selected_category = normalize_combo_category_name(getattr(selected_product, "section", None))
-        if not expected_category or selected_category.casefold() != expected_category.casefold():
-            return None, _json_error(
-                "Bad Request",
-                f'Item at index {item_index}: "{selected_product.title}" is not in category "{expected_category}"',
-                400,
-            )
+        row_st = normalize_combo_selection_type(getattr(combo_row, "selection_type", None))
+        if row_st == "category":
+            expected_category = normalize_combo_category_name(getattr(combo_row, "category_name", None))
+            selected_category = normalize_combo_category_name(getattr(selected_product, "section", None))
+            if not expected_category or selected_category.casefold() != expected_category.casefold():
+                return None, _json_error(
+                    "Bad Request",
+                    f'Item at index {item_index}: "{selected_product.title}" is not in category "{expected_category}"',
+                    400,
+                )
+        else:
+            fixed_pid = int(getattr(combo_row, "product_id", 0) or 0)
+            if fixed_pid != int(selected_product.id):
+                return None, _json_error(
+                    "Bad Request",
+                    f'Item at index {item_index}: wrong menu item for a fixed deal line (expected bundled item id {fixed_pid})',
+                    400,
+                )
 
         raw_child_variant = raw_selection.get("variant_sku_suffix")
         if raw_child_variant is None:
@@ -569,15 +592,41 @@ def _validate_deal_selections(
 
     missing_rows = [row for row_id, row in choice_rows_by_id.items() if row_id not in selections_by_row]
     if missing_rows:
-        names = ", ".join(
-            normalize_combo_category_name(getattr(row, "category_name", None)) or f"row {row.id}"
-            for row in missing_rows
-        )
+        labels: list[str] = []
+        for row in missing_rows:
+            st = normalize_combo_selection_type(getattr(row, "selection_type", None))
+            if st == "category":
+                labels.append(
+                    normalize_combo_category_name(getattr(row, "category_name", None)) or f"row {row.id}"
+                )
+            else:
+                ch = getattr(row, "child_product", None)
+                labels.append(str(getattr(ch, "title", None) or f"row {row.id}"))
+        names = ", ".join(labels)
         return None, _json_error(
             "Bad Request",
-            f'Item at index {item_index}: choose menu items for {names}',
+            f'Item at index {item_index}: complete deal choices for: {names}',
             400,
         )
+
+    # Optional: rows sharing choice_group_key with distinct_picks_in_group must not repeat the same menu item.
+    group_buckets: dict[str, list[int]] = {}
+    for row in selection_rows:
+        gk = (getattr(row, "choice_group_key", None) or "").strip()
+        if not gk or not bool(getattr(row, "distinct_picks_in_group", False)):
+            continue
+        sel = selections_by_row.get(int(row.id))
+        if not sel:
+            continue
+        group_buckets.setdefault(gk, []).append(int(sel["product_id"]))
+
+    for gk, pids in group_buckets.items():
+        if len(pids) != len(set(pids)):
+            return None, _json_error(
+                "Bad Request",
+                f'Item at index {item_index}: deal selections in group "{gk}" must use different menu items.',
+                400,
+            )
 
     return normalized_selections, None
 
@@ -589,6 +638,8 @@ def _deduct_recipe_for_product(
     current_user_id: int,
     sale_id: int,
     variant_key: str | None = None,
+    *,
+    recipe_error_context: str = "",
 ) -> tuple[bool, str, list[dict[str, Any]]]:
     from app.services.prepared_item_stock import (
         InsufficientPreparedItemStock,
@@ -600,14 +651,20 @@ def _deduct_recipe_for_product(
     prepared_items = prepared_recipe_rows_for_variant(product, variant_key)
     if not recipe_items and not prepared_items:
         vk = normalize_variant_key(variant_key)
+        deal_hint = (
+            " (bundled deal items use each menu item's BOM in Inventory → Recipes, not the deal product itself)"
+            if recipe_error_context == "deal_component"
+            else ""
+        )
         if vk:
             return (
                 False,
                 f'Add a recipe (BOM) for "{product.title}" (variant "{vk}") in Inventory → Recipes, '
-                "or add a base recipe that applies to all variants.",
+                "or add a base recipe that applies to all variants."
+                + deal_hint,
                 [],
             )
-        return False, f"Add a recipe (BOM) for menu item: {product.title}", []
+        return False, f"Add a recipe (BOM) for menu item: {product.title}" + deal_hint, []
 
     allocations: list[dict[str, Any]] = []
     for recipe_item in recipe_items:
@@ -862,7 +919,13 @@ def _deduct_product_inventory_and_create_sale_items(
 
     if not product.is_deal:
         ok_r, err_r, recipe_allocations = _deduct_recipe_for_product(
-            product, qty, branch_id, current_user_id, sale_id, variant_key=line_variant or None
+            product,
+            qty,
+            branch_id,
+            current_user_id,
+            sale_id,
+            variant_key=line_variant or None,
+            recipe_error_context="deal_component" if is_deal_child else "",
         )
         if not ok_r:
             return False, err_r, 0.0
@@ -898,6 +961,13 @@ def _deduct_product_inventory_and_create_sale_items(
                     )
                 child = db.session.get(Product, int(selection["product_id"]))
                 child_variant = normalize_variant_key(selection.get("variant_sku_suffix"))
+            elif child:
+                sel_fixed = selection_lookup.get(int(combo_item.id))
+                labels = _normalize_product_variant_labels(getattr(child, "variants", None))
+                if len(labels) > 1 and sel_fixed:
+                    child_variant = normalize_variant_key(sel_fixed.get("variant_sku_suffix"))
+                else:
+                    child_variant = _default_variant_for_recipe_resolution(child)
             if child:
                 child_dict = {
                     "product_id": child.id,
@@ -1046,51 +1116,18 @@ def checkout(
         if getattr(new_sale, "order_type", None) in KITCHEN_OPEN_ORDER_TYPES and getattr(
             new_sale, "kds_ticket_printed_at", None
         ) is None:
-            kot_rows = (
-                db.session.query(
-                    SaleItem.id,
-                    SaleItem.sale_id,
-                    SaleItem.variant_sku_suffix,
-                    SaleItem.quantity,
-                    SaleItem.modifiers,
-                    SaleItem.parent_sale_item_id,
-                    Product.title,
-                    Product.is_deal,
-                )
-                .outerjoin(Product, SaleItem.product_id == Product.id)
-                .filter(SaleItem.sale_id == new_sale.id)
-                .all()
+            background_tasks.add_task(
+                run_print_kot_and_stamp_job,
+                new_sale.id,
+                None,
+                branch_id,
+                current_user.username,
             )
-            kot_flat_items: list[dict[str, Any]] = []
-            for row in kot_rows:
-                kot_flat_items.append(
-                    {
-                        "id": row.id,
-                        "sale_id": row.sale_id,
-                        "product_title": row.title if row.title else "Unknown",
-                        "variant_sku_suffix": row.variant_sku_suffix or "",
-                        "quantity": row.quantity,
-                        "modifiers": _modifiers_for_display(row.modifiers or []),
-                        "parent_sale_item_id": row.parent_sale_item_id,
-                        "is_deal": row.is_deal,
-                        "children": [],
-                    }
-                )
-            kot_items = _nest_sale_item_dicts(kot_flat_items).get(new_sale.id, [])
-            table_name = (order_snapshot_norm or {}).get("table_name", "") if isinstance(order_snapshot_norm, dict) else ""
-            kot_payload = {
-                "sale_id": new_sale.id,
-                "branch_id": branch_id,
-                "branch": branch_name,
-                "operator": current_user.username,
-                "table_name": table_name,
-                "order_type": order_type_norm,
-                "items": kot_items,
-            }
-            background_tasks.add_task(run_print_kot_and_stamp_job, new_sale.id, kot_payload)
+        product_ids = [int(i["product_id"]) for i in items]
+        products_by_id = {p.id: p for p in Product.query.filter(Product.id.in_(product_ids)).all()}
         receipt_items = []
         for i in items:
-            product = db.session.get(Product, i.get("product_id"))
+            product = products_by_id.get(int(i["product_id"]))
             receipt_items.append(
                 {
                     "title": str(product.title if product else "Item"),
@@ -2338,8 +2375,13 @@ def _create_open_kot_response(
         )
         print_ok = None
         if should_print_now:
-            kot_payload = _build_kot_print_payload(new_sale.id, bid, current_user.username)
-            background_tasks.add_task(run_print_kot_and_stamp_job, new_sale.id, kot_payload)
+            background_tasks.add_task(
+                run_print_kot_and_stamp_job,
+                new_sale.id,
+                None,
+                bid,
+                current_user.username,
+            )
             print_ok = True
         kot_body: dict[str, Any] = {
             "message": "Kitchen order created",

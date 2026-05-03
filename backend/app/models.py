@@ -103,6 +103,10 @@ class ComboItem(db.Model):
     category_name = db.Column(db.String(100), nullable=True)
     # When set, this line applies only to deal lines sold with this variant label (empty = base / all).
     variant_key = db.Column(db.String(100), nullable=False, default='')
+    # Optional POS/admin grouping (e.g. "Burgers", "Sides") and pick rules for category rows.
+    group_label = db.Column(db.String(120), nullable=True)
+    choice_group_key = db.Column(db.String(80), nullable=True)
+    distinct_picks_in_group = db.Column(db.Boolean, nullable=False, default=False)
 
     combo = db.relationship('Product', foreign_keys=[combo_id], back_populates='combo_items')
     child_product = db.relationship('Product', foreign_keys=[product_id])
