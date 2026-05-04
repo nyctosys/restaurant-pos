@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Beaker, Loader2, Plus, Save, X } from 'lucide-react';
+import { AlertTriangle, Beaker, Loader2, Plus, Save, X } from 'lucide-react';
 import { get, getUserMessage, post, put } from '../../api';
 import SearchableSelect from '../SearchableSelect';
 import { showToast } from '../Toast';
@@ -32,6 +32,7 @@ type PreparedItem = {
   kind: 'sauce' | 'marination';
   unit: string;
   current_stock: number;
+  minimum_stock: number;
   average_cost: number;
   notes?: string;
   components: PreparedComponent[];
@@ -68,6 +69,7 @@ export default function PreparedItemsTab() {
   const [sku, setSku] = useState('');
   const [kind, setKind] = useState<'sauce' | 'marination'>('sauce');
   const [unit, setUnit] = useState('kg');
+  const [minimumStock, setMinimumStock] = useState('0');
   const [notes, setNotes] = useState('');
   const [components, setComponents] = useState<ComponentRow[]>([emptyComponentRow()]);
   const [batchItemId, setBatchItemId] = useState('');
@@ -100,6 +102,7 @@ export default function PreparedItemsTab() {
     setSku('');
     setKind('sauce');
     setUnit('kg');
+    setMinimumStock('0');
     setNotes('');
     setComponents([emptyComponentRow()]);
   };
@@ -115,6 +118,7 @@ export default function PreparedItemsTab() {
     setSku(item.sku || '');
     setKind(item.kind);
     setUnit(item.unit);
+    setMinimumStock(String(item.minimum_stock || 0));
     setNotes(item.notes || '');
     setComponents(
       item.components.length
@@ -156,6 +160,11 @@ export default function PreparedItemsTab() {
     return sum + ingredient.average_cost * qty;
   }, 0);
 
+  const lowStockItems = useMemo(
+    () => items.filter((item) => item.current_stock <= (item.minimum_stock || 0)),
+    [items]
+  );
+
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     const trimmedName = name.trim();
@@ -192,6 +201,7 @@ export default function PreparedItemsTab() {
         kind,
         unit,
         notes: notes.trim() || undefined,
+        minimum_stock: Number.parseFloat(minimumStock) || 0,
         components: payloadComponents,
       };
       if (editingItem) {
@@ -259,6 +269,18 @@ export default function PreparedItemsTab() {
         </div>
 
         <div className="app-table-scroll">
+          {lowStockItems.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2 border-b border-red-200/70 bg-red-50/85 px-4 py-3 text-sm text-red-800">
+              <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden="true" />
+              <span className="font-semibold">
+                {lowStockItems.length} sauce/marination{lowStockItems.length === 1 ? '' : 's'} running low
+              </span>
+              <span className="text-red-700">
+                {lowStockItems.slice(0, 3).map((item) => item.name).join(', ')}
+                {lowStockItems.length > 3 ? ` +${lowStockItems.length - 3} more` : ''}
+              </span>
+            </div>
+          )}
           <table className="app-table text-sm">
             <thead>
               <tr>
@@ -270,7 +292,10 @@ export default function PreparedItemsTab() {
               </tr>
             </thead>
             <tbody>
-              {items.map((item) => (
+              {items.map((item) => {
+                const isLowStock = item.current_stock <= (item.minimum_stock || 0);
+
+                return (
                 <tr key={item.id} className="cursor-pointer" onClick={() => openEdit(item)}>
                   <td className="px-4 py-3">
                     <div className="font-semibold text-soot-900">{item.name}</div>
@@ -278,7 +303,12 @@ export default function PreparedItemsTab() {
                   </td>
                   <td className="px-4 py-3 capitalize text-soot-700">{item.kind}</td>
                   <td className="px-4 py-3 text-right font-semibold text-soot-900 whitespace-nowrap">
-                    {formatBaseQuantityGlobal(item.current_stock, item.unit)}
+                    <div className="inline-flex items-center justify-end gap-2">
+                      {isLowStock && (
+                        <AlertTriangle className="h-4 w-4 shrink-0 text-red-500" aria-label="Low stock" />
+                      )}
+                      <span>{formatBaseQuantityGlobal(item.current_stock, item.unit)}</span>
+                    </div>
                   </td>
                   <td className="px-4 py-3 text-right text-soot-700">
                     {formatCostPerYield(item.average_cost, item.unit)}
@@ -287,7 +317,8 @@ export default function PreparedItemsTab() {
                     {item.components.length} ingredient{item.components.length === 1 ? '' : 's'}
                   </td>
                 </tr>
-              ))}
+              );
+              })}
               {items.length === 0 && (
                 <tr>
                   <td colSpan={5} className="px-4 py-10 text-center text-soot-500">
@@ -377,6 +408,15 @@ export default function PreparedItemsTab() {
                   <option key={option} value={option}>{option}</option>
                 ))}
               </select>
+              <input
+                type="number"
+                min="0"
+                step="any"
+                value={minimumStock}
+                onChange={(event) => setMinimumStock(event.target.value)}
+                className="w-full px-3 py-2 glass-card text-sm focus:ring-2 focus:ring-brand-500"
+                placeholder="Low stock alert"
+              />
             </div>
 
             <div className="space-y-3">

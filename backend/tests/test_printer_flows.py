@@ -107,6 +107,51 @@ def test_finalize_open_order_always_triggers_receipt_print(client, app, monkeypa
     assert receipt_calls[0].get("order_type") == order_type
 
 
+@pytest.mark.parametrize("order_type", ["dine_in", "takeaway", "delivery"])
+@pytest.mark.parametrize("payment_method", ["Cash", "Card", "Online Transfer"])
+def test_paid_checkout_queues_receipt_before_kot_for_every_order_type_and_payment_method(
+    client, app, monkeypatch, order_type, payment_method
+):
+    _branch_id, product_id = _setup_owner_and_menu_item(app)
+    token = _login_token(client)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    print_order: list[str] = []
+
+    def _fake_print_kot(self, kot_data):
+        print_order.append(f"kot:{kot_data.get('order_type')}")
+        return True
+
+    def _fake_print_receipt(self, receipt_data):
+        print_order.append(f"receipt:{receipt_data.get('order_type')}")
+        return True
+
+    monkeypatch.setattr("app.services.printer_service.PrinterService.print_kot", _fake_print_kot)
+    monkeypatch.setattr("app.services.printer_service.PrinterService.print_receipt", _fake_print_receipt)
+
+    payload = {
+        "order_type": order_type,
+        "payment_method": payment_method,
+        "items": [{"product_id": product_id, "quantity": 1}],
+    }
+    if order_type == "dine_in":
+        payload["order_snapshot"] = {"table_name": "T1"}
+        payload["service_charge"] = 0
+    elif order_type == "delivery":
+        payload["order_snapshot"] = {
+            "customer_name": "Ali",
+            "phone": "03001234567",
+            "address": "Street 1",
+            "rider_name": "Hamza",
+        }
+        payload["delivery_charge"] = 300
+
+    paid = client.post("/api/orders/checkout", headers=headers, json=payload)
+    assert paid.status_code == 201
+    assert paid.get_json().get("print_success") is True
+    assert print_order[:2] == [f"receipt:{order_type}", f"kot:{order_type}"]
+
+
 def test_printer_status_probe_releases_connection(client, app, monkeypatch):
     branch_id, _ = _setup_owner_and_menu_item(app)
     _ = branch_id

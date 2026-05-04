@@ -50,8 +50,8 @@ def combo_items_for_variant(product: "Product", variant_key: str | None) -> list
     """
     - Rows with empty variant_key are the **base** combo (default for all deal variants).
     - Rows with variant_key set apply only when the sold deal line matches that label.
-    - If the sold variant has at least one matching combo row, use **only** those rows.
-    - Otherwise fall back to base rows (same recipe pattern as BOM).
+    - If the sold variant has matching combo rows, include base rows plus those variant rows.
+    - Otherwise fall back to base rows.
     """
     from app.models import ComboItem  # local import avoids circular model graph at import time
 
@@ -61,12 +61,32 @@ def combo_items_for_variant(product: "Product", variant_key: str | None) -> list
     def row_vk(ci: ComboItem) -> str:
         return normalize_variant_key(getattr(ci, "variant_key", None))
 
+    def has_deal_variants() -> bool:
+        variants = getattr(product, "variants", None)
+        if not isinstance(variants, list):
+            return False
+        labels: list[str] = []
+        for entry in variants:
+            if isinstance(entry, str):
+                label = entry.strip()
+            elif isinstance(entry, dict):
+                label = str(entry.get("name") or entry.get("label") or "").strip()
+            else:
+                label = ""
+            if label:
+                labels.append(label)
+        if len(labels) > 1:
+            return True
+        return bool(labels and labels[0].casefold() != "default")
+
     base = [r for r in rows if row_vk(r) == ""]
     if not vk:
+        if not has_deal_variants():
+            return rows
         return base
 
     specific = [r for r in rows if row_vk(r) == vk]
-    return specific if specific else base
+    return [*base, *specific] if specific else base
 
 
 def recipe_rows_for_variant(product: "Product", variant_key: str | None) -> list["RecipeItem"]:

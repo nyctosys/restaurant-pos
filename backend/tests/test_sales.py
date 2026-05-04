@@ -715,8 +715,196 @@ def test_kitchen_shows_selected_deal_choices_under_deal_line(client, app):
     assert child_titles == ["Zinger Bun", "Chicken Wrap", "Fries"]
 
 
-def test_kitchen_drops_ready_after_one_day(client, app):
-    """READY tickets disappear from KDS 24h after being marked ready."""
+def test_kot_accepts_base_and_variant_specific_deal_choices(client, app):
+    client.post(
+        "/api/auth/setup",
+        json={"username": "owner1", "password": "pass", "branch_name": "Main"},
+    )
+    token = _get_token(client)
+    with app.app_context():
+        branch = Branch.query.filter_by(name="Main").first()
+        bid = branch.id
+
+        burger_ing = Ingredient(name="variant-burger-ing", unit="piece", current_stock=0.0)
+        cola_ing = Ingredient(name="variant-cola-ing", unit="piece", current_stock=0.0)
+        fries_ing = Ingredient(name="variant-fries-ing", unit="piece", current_stock=0.0)
+        burger = Product(sku="BVRG-1", title="Signature Burger", base_price=12, section="Mains")
+        cola = Product(sku="COLA-1", title="Craft Cola", base_price=3, section="Beverages")
+        fries = Product(sku="FRIES-VAR-1", title="Fries", base_price=4, section="Sides")
+        deal = Product(
+            sku="DEAL-VAR-CHOICE",
+            title="2 Person Deal",
+            base_price=1600,
+            sale_price=1600,
+            is_deal=True,
+            variants=[
+                {"name": "Small", "basePrice": 1200, "salePrice": 1200},
+                {"name": "Large", "basePrice": 1600, "salePrice": 1600},
+            ],
+        )
+        db.session.add_all([burger_ing, cola_ing, fries_ing, burger, cola, fries, deal])
+        db.session.flush()
+
+        for ing in (burger_ing, cola_ing, fries_ing):
+            seed_branch_stocks_for_new_ingredient(ing.id, 0.0)
+            _set_branch_ingredient_stock(ing.id, bid, 50.0)
+            ing.current_stock = 50.0
+
+        db.session.add(RecipeItem(product_id=burger.id, ingredient_id=burger_ing.id, quantity=1.0, unit="piece"))
+        db.session.add(RecipeItem(product_id=cola.id, ingredient_id=cola_ing.id, quantity=1.0, unit="piece"))
+        db.session.add(RecipeItem(product_id=fries.id, ingredient_id=fries_ing.id, quantity=1.0, unit="piece"))
+
+        base_drink_choice = ComboItem(
+            combo_id=deal.id,
+            product_id=None,
+            quantity=1,
+            selection_type="multiple_category",
+            category_names=["Beverages", "Mains"],
+            variant_key="",
+        )
+        large_side_choice = ComboItem(
+            combo_id=deal.id,
+            product_id=None,
+            quantity=1,
+            selection_type="multiple_category",
+            category_names=["Sides", "Mains"],
+            variant_key="Large",
+        )
+        db.session.add_all([base_drink_choice, large_side_choice])
+        db.session.commit()
+
+        deal_id = deal.id
+        cola_id = cola.id
+        fries_id = fries.id
+        base_drink_choice_id = base_drink_choice.id
+        large_side_choice_id = large_side_choice.id
+
+    create_res = client.post(
+        "/api/orders/kot",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "order_type": "dine_in",
+            "skip_kot_print": True,
+            "order_snapshot": {"table_name": "T1"},
+            "items": [
+                {
+                    "product_id": deal_id,
+                    "quantity": 1,
+                    "variant_sku_suffix": "Large",
+                    "deal_selections": [
+                        {"combo_item_id": base_drink_choice_id, "product_id": cola_id},
+                        {"combo_item_id": large_side_choice_id, "product_id": fries_id},
+                    ],
+                }
+            ],
+        },
+    )
+    assert create_res.status_code == 201, create_res.get_json()
+
+    kds = client.get("/api/orders/kitchen", headers={"Authorization": f"Bearer {token}"})
+    assert kds.status_code == 200
+    order = kds.get_json()["orders"][0]
+    child_titles = [child["product_title"] for child in order["items"][0]["children"]]
+    assert child_titles == ["Craft Cola", "Fries"]
+
+
+def test_kot_accepts_fixed_child_variant_line_when_deal_has_no_variants(client, app):
+    client.post(
+        "/api/auth/setup",
+        json={"username": "owner1", "password": "pass", "branch_name": "Main"},
+    )
+    token = _get_token(client)
+    with app.app_context():
+        branch = Branch.query.filter_by(name="Main").first()
+        bid = branch.id
+
+        burger_ing = Ingredient(name="fixed-child-burger-ing", unit="piece", current_stock=0.0)
+        cola_ing = Ingredient(name="fixed-child-cola-ing", unit="piece", current_stock=0.0)
+        burger = Product(
+            sku="FIXED-BURGER-1",
+            title="Signature Burger",
+            base_price=12,
+            section="Mains",
+            variants=["Beef", "Chicken"],
+        )
+        cola = Product(sku="FIXED-COLA-1", title="Craft Cola", base_price=3, section="Beverages")
+        deal = Product(
+            sku="DEAL-NO-VARIANT-FIXED-CHILD",
+            title="2 Person Deal",
+            base_price=1600,
+            sale_price=1600,
+            is_deal=True,
+            variants=[],
+        )
+        db.session.add_all([burger_ing, cola_ing, burger, cola, deal])
+        db.session.flush()
+
+        for ing in (burger_ing, cola_ing):
+            seed_branch_stocks_for_new_ingredient(ing.id, 0.0)
+            _set_branch_ingredient_stock(ing.id, bid, 50.0)
+            ing.current_stock = 50.0
+
+        db.session.add(RecipeItem(product_id=burger.id, ingredient_id=burger_ing.id, quantity=1.0, unit="piece", variant_key="Beef"))
+        db.session.add(RecipeItem(product_id=cola.id, ingredient_id=cola_ing.id, quantity=1.0, unit="piece"))
+
+        drink_choice = ComboItem(
+            combo_id=deal.id,
+            product_id=None,
+            quantity=1,
+            selection_type="multiple_category",
+            category_names=["Beverages", "Mains"],
+            variant_key="",
+        )
+        fixed_beef_burger = ComboItem(
+            combo_id=deal.id,
+            product_id=burger.id,
+            quantity=1,
+            selection_type="product",
+            variant_key="Beef",
+        )
+        db.session.add_all([drink_choice, fixed_beef_burger])
+        db.session.commit()
+
+        deal_id = deal.id
+        burger_id = burger.id
+        cola_id = cola.id
+        drink_choice_id = drink_choice.id
+        fixed_beef_burger_id = fixed_beef_burger.id
+
+    create_res = client.post(
+        "/api/orders/kot",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "order_type": "dine_in",
+            "skip_kot_print": True,
+            "order_snapshot": {"table_name": "T2"},
+            "items": [
+                {
+                    "product_id": deal_id,
+                    "quantity": 1,
+                    "deal_selections": [
+                        {"combo_item_id": drink_choice_id, "product_id": cola_id},
+                        {
+                            "combo_item_id": fixed_beef_burger_id,
+                            "product_id": burger_id,
+                            "variant_sku_suffix": "Beef",
+                        },
+                    ],
+                }
+            ],
+        },
+    )
+    assert create_res.status_code == 201, create_res.get_json()
+
+    kds = client.get("/api/orders/kitchen", headers={"Authorization": f"Bearer {token}"})
+    assert kds.status_code == 200
+    order = kds.get_json()["orders"][0]
+    child_lines = [(child["product_title"], child["variant_sku_suffix"]) for child in order["items"][0]["children"]]
+    assert child_lines == [("Craft Cola", ""), ("Signature Burger", "Beef")]
+
+
+def test_kitchen_resets_tickets_after_twelve_hours(client, app):
+    """KDS stops showing kitchen tickets after the 12h operating window."""
     client.post(
         "/api/auth/setup",
         json={"username": "owner1", "password": "pass", "branch_name": "Main"},
@@ -767,13 +955,49 @@ def test_kitchen_drops_ready_after_one_day(client, app):
     with app.app_context():
         sale = db.session.get(Sale, sale_id)
         assert sale is not None
-        assert sale.kitchen_ready_at is not None
-        sale.kitchen_ready_at = datetime.now(timezone.utc) - timedelta(days=2)
+        assert sale.kitchen_status == "ready"
+        sale.created_at = datetime.now(timezone.utc) - timedelta(hours=13)
+        sale.kitchen_ready_at = datetime.now(timezone.utc) - timedelta(hours=13)
         db.session.commit()
 
     kds = client.get("/api/orders/kitchen", headers={"Authorization": f"Bearer {token}"})
     assert kds.status_code == 200
     assert len(kds.get_json()["orders"]) == 0
+
+
+def test_kitchen_resets_placed_tickets_after_twelve_hours(client, app):
+    """A stale non-ready ticket must not keep the KDS board dirty after 12h."""
+    client.post(
+        "/api/auth/setup",
+        json={"username": "owner1", "password": "pass", "branch_name": "Main"},
+    )
+    token = _get_token(client)
+    with app.app_context():
+        branch = Branch.query.filter_by(name="Main").first()
+        bid = branch.id
+        pid, _ = _create_menu_item_with_recipe(app, bid, title="KdsResetBurger", stock=50.0)
+
+    create_res = client.post(
+        "/api/orders/dine-in/kot",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "order_snapshot": {"table_name": "T1"},
+            "items": [{"product_id": pid, "quantity": 1, "modifier_ids": []}],
+        },
+    )
+    assert create_res.status_code == 201
+    sale_id = create_res.get_json()["sale_id"]
+
+    with app.app_context():
+        sale = db.session.get(Sale, sale_id)
+        assert sale is not None
+        assert sale.kitchen_status == "placed"
+        sale.created_at = datetime.now(timezone.utc) - timedelta(hours=13)
+        db.session.commit()
+
+    kds = client.get("/api/orders/kitchen", headers={"Authorization": f"Bearer {token}"})
+    assert kds.status_code == 200
+    assert kds.get_json()["orders"] == []
 
 
 def test_checkout_variant_uses_variant_specific_bom(client, app):

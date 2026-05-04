@@ -411,6 +411,7 @@ def _prepared_item_payload(item: PreparedItem, branch_id: str) -> dict[str, Any]
         "kind": item.kind,
         "unit": item.unit.value if hasattr(item.unit, "value") else item.unit,
         "current_stock": get_prepared_branch_stock(item.id, branch_id),
+        "minimum_stock": float(item.minimum_stock or 0.0),
         "average_cost": item.average_cost,
         "notes": item.notes,
         "components": [_component_payload(c) for c in item.components],

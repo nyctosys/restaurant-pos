@@ -551,6 +551,41 @@ def test_prepared_item_batch_deducts_ingredients(client, app):
     assert garlic["current_stock"] == 4
 
 
+def test_prepared_item_exposes_low_stock_threshold(client, app):
+    h = _auth_headers(client, app)
+    r_ing = client.post("/api/inventory-advanced/ingredients", headers=h, json={
+        "name": "Chilli Paste Low Stock Base",
+        "sku": "ING-CHILLI-LOW",
+        "unit": "kg",
+        "current_stock": 10,
+        "average_cost": 400,
+    })
+    ing_id = r_ing.get_json()["id"]
+
+    r_prepared = client.post("/api/inventory-advanced/prepared-items", headers=h, json={
+        "name": "Low Stock Hot Sauce",
+        "sku": "SAUCE-LOW-STOCK",
+        "kind": "sauce",
+        "unit": "kg",
+        "minimum_stock": 5,
+        "components": [{"ingredient_id": ing_id, "quantity": 0.25, "unit": "kg"}],
+    })
+    assert r_prepared.status_code == 200
+    prepared_id = r_prepared.get_json()["id"]
+
+    r_batch = client.post(
+        f"/api/inventory-advanced/prepared-items/{prepared_id}/batches",
+        headers=h,
+        json={"quantity": 4},
+    )
+    assert r_batch.status_code == 200
+
+    prepared_items = client.get("/api/inventory-advanced/prepared-items", headers=h).get_json()["prepared_items"]
+    hot_sauce = next(i for i in prepared_items if i["id"] == prepared_id)
+    assert hot_sauce["current_stock"] == 4
+    assert hot_sauce["minimum_stock"] == 5
+
+
 def test_recipe_can_deduct_prepared_sauce_on_sale(client, app):
     h = _auth_headers(client, app)
     r_ing = client.post("/api/inventory-advanced/ingredients", headers=h, json={

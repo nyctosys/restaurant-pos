@@ -228,6 +228,7 @@ class PreparedItemCreate(BaseModel):
     sku: str | None = None
     kind: Literal["sauce", "marination"] = "sauce"
     unit: str
+    minimum_stock: float = 0.0
     notes: str | None = None
     components: list[PreparedItemComponentBase] = Field(default_factory=list)
 
@@ -243,6 +244,7 @@ class PreparedItemUpdate(BaseModel):
     sku: str | None = None
     kind: Literal["sauce", "marination"] | None = None
     unit: str | None = None
+    minimum_stock: float | None = None
     notes: str | None = None
     is_active: bool | None = None
     components: list[PreparedItemComponentBase] | None = None

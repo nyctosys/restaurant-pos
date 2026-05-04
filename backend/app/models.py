@@ -400,6 +400,7 @@ class PreparedItem(db.Model):
     kind = db.Column(db.String(50), nullable=False, default="sauce")
     unit = db.Column(db.Enum(UnitOfMeasure), nullable=False, default=UnitOfMeasure.KG)
     current_stock = db.Column(db.Float, nullable=False, default=0.0)
+    minimum_stock = db.Column(db.Float, nullable=False, default=0.0)
     average_cost = db.Column(db.Float, nullable=False, default=0.0)
     notes = db.Column(db.Text)
     is_active = db.Column(db.Boolean, default=True)

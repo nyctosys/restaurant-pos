@@ -757,6 +757,12 @@ export default function Dashboard() {
   );
 
   // Categories: settings sections, plus "DEALS" when any deal product exists (section may be missing from settings JSON).
+
+  const shouldConfigureDealOnAdd = useCallback(
+    (product: Product) => Boolean(product.is_deal && (dealNeedsConfigurator(product) || hasRealVariants(product))),
+    [dealNeedsConfigurator]
+  );
+
   const categories = useMemo(() => {
     const fromSettings = Array.isArray(sections) ? sections : [];
     const hasDeals = products.some(
@@ -787,7 +793,7 @@ export default function Dashboard() {
   const handleProductClick = (product: Product) => {
     // Only treat as a real variant if the product has meaningful variant choices.
     const defaultVariant = hasRealVariants(product) ? (product.variants?.[0]?.name ?? undefined) : undefined;
-    if (product.is_deal && dealNeedsConfigurator(product)) {
+    if (shouldConfigureDealOnAdd(product)) {
       const deal = dealsById.get(product.id);
       const cfgRows = getDealComboItemsForVariant(deal, defaultVariant || undefined);
       const initialSelections: Record<number, { productId: string; variant: string }> = {};
@@ -1842,7 +1848,9 @@ export default function Dashboard() {
 
             <div className="mt-5 flex items-center justify-between gap-3 border-t border-black/5 pt-4">
               <div>
-                <p className="text-sm font-bold text-neutral-900">{formatCurrency(dealConfigurator.product.base_price)}</p>
+                <p className="text-sm font-bold text-neutral-900">
+                  {formatCurrency(getVariantSalePrice(dealConfigurator.product, dealConfigurator.variant || undefined))}
+                </p>
                 <p className="text-xs font-medium text-neutral-500">Deal price</p>
               </div>
               <div className="flex flex-wrap justify-end gap-2">

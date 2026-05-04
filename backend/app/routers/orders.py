@@ -1120,17 +1120,6 @@ def checkout(
         branch_obj = db.session.get(Branch, branch_id) if branch_id else None
         if branch_obj:
             branch_name = branch_obj.name
-        # Backend-driven KDS auto-print + receipt: defer LAN/USB I/O so the client gets a fast 201.
-        if getattr(new_sale, "order_type", None) in KITCHEN_OPEN_ORDER_TYPES and getattr(
-            new_sale, "kds_ticket_printed_at", None
-        ) is None:
-            background_tasks.add_task(
-                run_print_kot_and_stamp_job,
-                new_sale.id,
-                None,
-                branch_id,
-                current_user.username,
-            )
         receipt_items = _build_receipt_items(new_sale.id)
         discount_name = (
             discount_snapshot.get("name")
@@ -1154,6 +1143,19 @@ def checkout(
             "order_snapshot": order_snapshot_norm,
         }
         background_tasks.add_task(run_print_receipt_job, receipt_dict)
+        # Paid checkout must start the customer receipt before any kitchen printer I/O.
+        # Kitchen printing can block on a separate LAN/USB device; it should never delay
+        # the receipt for dine-in, takeaway, delivery, or any payment method.
+        if getattr(new_sale, "order_type", None) in KITCHEN_OPEN_ORDER_TYPES and getattr(
+            new_sale, "kds_ticket_printed_at", None
+        ) is None:
+            background_tasks.add_task(
+                run_print_kot_and_stamp_job,
+                new_sale.id,
+                None,
+                branch_id,
+                current_user.username,
+            )
         return JSONResponse(
             status_code=201,
             content={
@@ -2032,16 +2034,11 @@ def _kitchen_status_value(sale: Sale) -> str:
     return "placed"
 
 
-KDS_READY_RETENTION = timedelta(days=1)
+KDS_BOARD_RETENTION = timedelta(hours=12)
 
 
-def _kitchen_ready_reference_utc(sale: Sale) -> datetime | None:
-    """Timestamp used to expire READY tickets from KDS (prefer first marked ready, else order created_at)."""
-    kr = getattr(sale, "kitchen_ready_at", None)
-    if kr is not None:
-        if kr.tzinfo is None:
-            return kr.replace(tzinfo=timezone.utc)
-        return kr
+def _kds_ticket_reference_utc(sale: Sale) -> datetime | None:
+    """Timestamp used to reset stale tickets from the kitchen board."""
     ca = sale.created_at
     if ca is None:
         return None
@@ -2051,13 +2048,11 @@ def _kitchen_ready_reference_utc(sale: Sale) -> datetime | None:
 
 
 def _sale_visible_on_kds(sale: Sale) -> bool:
-    """Hide READY tickets from KDS after 24h from ready time (or created_at if legacy)."""
-    if _kitchen_status_value(sale) != "ready":
-        return True
-    ref = _kitchen_ready_reference_utc(sale)
+    """Hide stale KDS tickets after the 12h operating window."""
+    ref = _kds_ticket_reference_utc(sale)
     if ref is None:
         return True
-    return ref >= datetime.now(timezone.utc) - KDS_READY_RETENTION
+    return ref >= datetime.now(timezone.utc) - KDS_BOARD_RETENTION
 
 
 @orders_router.get("/kitchen")

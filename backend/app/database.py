@@ -212,6 +212,14 @@ def _init_database_core() -> None:
                 except (OperationalError, ProgrammingError):
                     db.session.rollback()
                 try:
+                    db.session.execute(
+                        text("ALTER TABLE prepared_items ADD COLUMN minimum_stock FLOAT NOT NULL DEFAULT 0")
+                    )
+                    db.session.commit()
+                    print("Added 'minimum_stock' column to 'prepared_items' table.")
+                except (OperationalError, ProgrammingError):
+                    db.session.rollback()
+                try:
                     db.session.execute(text("ALTER TABLE sale_items ADD COLUMN inventory_allocations JSON"))
                     db.session.commit()
                     print("Added 'inventory_allocations' column to 'sale_items' table.")

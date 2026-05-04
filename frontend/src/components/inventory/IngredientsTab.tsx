@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Plus, X, Loader2, Pencil, Package, Layers, ArrowUpDown, ArrowUp, ArrowDown, Scale } from 'lucide-react';
+import { AlertTriangle, Plus, X, Loader2, Pencil, Package, Layers, ArrowUpDown, ArrowUp, ArrowDown, Scale } from 'lucide-react';
 import { get, post, put, getUserMessage } from '../../api';
 import { getTerminalBranchIdString, parseUserFromStorage } from '../../utils/branchContext';
 import SearchableSelect from '../SearchableSelect';
@@ -760,6 +760,11 @@ export default function IngredientsTab() {
       .map(entry => entry.ingredient);
   }, [ingredients, sortDirection, sortKey, suppliers]);
 
+  const lowStockIngredients = useMemo(
+    () => ingredients.filter((ingredient) => ingredient.current_stock <= ingredient.minimum_stock),
+    [ingredients]
+  );
+
   const stockAdjustPreview = useMemo(() => {
     if (!stockAdjustIngredient) return null;
     const ing = stockAdjustIngredient;
@@ -834,6 +839,18 @@ export default function IngredientsTab() {
            </div>
         ) : (
           <div className="app-table-shell">
+            {lowStockIngredients.length > 0 && (
+              <div className="flex flex-wrap items-center gap-2 border-b border-red-200/70 bg-red-50/85 px-4 py-3 text-sm text-red-800">
+                <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden="true" />
+                <span className="font-semibold">
+                  {lowStockIngredients.length} material{lowStockIngredients.length === 1 ? '' : 's'} running low
+                </span>
+                <span className="text-red-700">
+                  {lowStockIngredients.slice(0, 3).map((ingredient) => ingredient.name).join(', ')}
+                  {lowStockIngredients.length > 3 ? ` +${lowStockIngredients.length - 3} more` : ''}
+                </span>
+              </div>
+            )}
             <div className="app-table-scroll max-h-[calc(100vh-18rem)] min-h-[22rem] overscroll-contain lg:max-h-[calc(100vh-16rem)]">
               <table className="app-table menu-items-table min-w-[760px]">
                 <thead>
@@ -910,7 +927,7 @@ export default function IngredientsTab() {
                         <td className="px-4 py-3.5 align-middle text-right">
                           <div className="inline-flex items-center justify-end gap-2 text-[14px] font-semibold tabular-nums text-neutral-950 dark:text-neutral-100">
                             {isLowStock && (
-                              <span className="h-2 w-2 shrink-0 rounded-full bg-red-500" title="Low stock" aria-hidden="true" />
+                              <AlertTriangle className="h-4 w-4 shrink-0 text-red-500" aria-label="Low stock" />
                             )}
                             <span
                               className="leading-snug"
