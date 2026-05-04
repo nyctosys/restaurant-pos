@@ -398,6 +398,15 @@ def _process_modifier_depletions(
     return True, "", allocations
 
 
+def _display_variant_suffix(raw: Any) -> str:
+    """Return the variant label for display/API responses.
+    Strips the implicit 'Default' sentinel that is used internally for single-price items
+    with no real variant choice — callers should never show 'Default' to users.
+    """
+    v = str(raw or "").strip()
+    return "" if v.lower() == "default" else v
+
+
 def _normalize_product_variant_labels(raw: Any) -> list[str]:
     try:
         normalized = _normalize_variants_list(raw)
@@ -1876,7 +1885,7 @@ def list_active_dine_in_orders(
                         "id": item.id,
                         "sale_id": item.sale_id,
                         "product_title": item.title if item.title else "Unknown",
-                        "variant_sku_suffix": item.variant_sku_suffix or "",
+                        "variant_sku_suffix": _display_variant_suffix(item.variant_sku_suffix),
                         "quantity": item.quantity,
                         "modifiers": _modifiers_for_display(item.modifiers or []),
                         "parent_sale_item_id": item.parent_sale_item_id,
@@ -1908,7 +1917,7 @@ def _line_dict_from_nested_node(
                 mod_strs.append(str(m["name"]))
     return {
         "product_title": n.get("product_title") or "Unknown",
-        "variant_sku_suffix": (n.get("variant_sku_suffix") or "") or "",
+        "variant_sku_suffix": _display_variant_suffix(n.get("variant_sku_suffix")),
         "quantity": int(n.get("quantity") or 0),
         "modifiers": mod_strs,
         "children": children or [],
@@ -2127,7 +2136,7 @@ def list_kitchen_orders(
                     "id": item.id,
                     "sale_id": item.sale_id,
                     "product_title": item.title if item.title else "Unknown",
-                    "variant_sku_suffix": item.variant_sku_suffix or "",
+                    "variant_sku_suffix": _display_variant_suffix(item.variant_sku_suffix),
                     "quantity": item.quantity,
                     "modifiers": _modifiers_for_display(item.modifiers or []),
                     "parent_sale_item_id": item.parent_sale_item_id,
@@ -2433,7 +2442,7 @@ def _build_kot_print_payload(
                 "id": item.id,
                 "sale_id": item.sale_id,
                 "product_title": item.title if item.title else "Unknown",
-                "variant_sku_suffix": item.variant_sku_suffix or "",
+                "variant_sku_suffix": _display_variant_suffix(item.variant_sku_suffix),
                 "quantity": item.quantity,
                 "modifiers": _modifiers_for_display(item.modifiers or []),
                 "parent_sale_item_id": item.parent_sale_item_id,
@@ -2496,7 +2505,7 @@ def update_open_sale_items(
                     "id": item.id,
                     "sale_id": item.sale_id,
                     "product_title": item.product.title if item.product else "Unknown",
-                    "variant_sku_suffix": item.variant_sku_suffix or "",
+                    "variant_sku_suffix": _display_variant_suffix(item.variant_sku_suffix),
                     "quantity": item.quantity,
                     "modifiers": _modifiers_for_display(item.modifiers or []),
                     "parent_sale_item_id": item.parent_sale_item_id,
@@ -2569,7 +2578,7 @@ def update_open_sale_items(
                     "id": row.id,
                     "sale_id": row.sale_id,
                     "product_title": row.title if row.title else "Unknown",
-                    "variant_sku_suffix": row.variant_sku_suffix or "",
+                    "variant_sku_suffix": _display_variant_suffix(row.variant_sku_suffix),
                     "quantity": row.quantity,
                     "modifiers": _modifiers_for_display(row.modifiers or []),
                     "parent_sale_item_id": row.parent_sale_item_id,
@@ -2826,7 +2835,7 @@ def get_sale_details(sale_id: int, current_user: User = Depends(get_current_user
                 "sale_id": sale.id,
                 "product_id": i.product_id,
                 "product_title": i.product.title if i.product else "Unknown",
-                "variant_sku_suffix": i.variant_sku_suffix,
+                "variant_sku_suffix": _display_variant_suffix(i.variant_sku_suffix),
                 "quantity": i.quantity,
                 "unit_price": float(i.unit_price),
                 "subtotal": float(i.subtotal),

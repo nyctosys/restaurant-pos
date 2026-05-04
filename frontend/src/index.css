@@ -410,6 +410,20 @@
   .animation-delay-4000 {
     animation: none;
   }
+
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: var(--apple-hairline);
+    border-radius: 10px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: var(--apple-muted);
+  }
 }
 
 /* Compatibility styling for the existing Tailwind-heavy component tree. */

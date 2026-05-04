@@ -64,7 +64,7 @@ export default function DealsTab() {
         new Set(
           products
             .map(product => (product.section || '').trim())
-            .filter(section => section && section !== 'Deals')
+            .filter(section => section && section.toUpperCase() !== 'DEALS')
         )
       )
         .sort((left, right) => left.localeCompare(right, undefined, { sensitivity: 'base' }))
@@ -356,8 +356,8 @@ export default function DealsTab() {
             Deals & Combos
           </h2>
           <p className="text-soot-600 font-medium">
-            Bundle menu items into promotions. Deals use the <span className="font-semibold text-soot-800">Deals</span>{' '}
-            section and appear on the order screen (category filter &quot;Deals&quot; when needed). Ingredient depletion
+            Bundle menu items into promotions. Deals use the <span className="font-semibold text-soot-800">DEALS</span>{' '}
+            section and appear on the order screen (category filter &quot;DEALS&quot; when needed). Ingredient depletion
             follows each bundled item&apos;s recipe (BOM), same as regular menu items. Deals themselves do not carry a
             separate BOM.
           </p>
@@ -639,8 +639,8 @@ export default function DealsTab() {
                   <span className="text-xs bg-brand-100 text-brand-800 font-bold px-2 py-0.5 rounded-md border border-brand-200 inline-block mt-1">
                     {deal.sku}
                   </span>
-                  <span className="text-xs bg-soot-100 text-soot-700 font-semibold px-2 py-0.5 rounded-md border border-soot-200 inline-block mt-1 ml-1">
-                    {deal.section || 'Deals'}
+                  <span className="inline-flex items-center rounded-full bg-brand-50 px-2.5 py-0.5 text-xs font-semibold text-brand-700 ml-1">
+                    {deal.section || 'DEALS'}
                   </span>
                   {deal.archived_at && (
                     <span className="text-xs bg-amber-100 text-amber-800 font-semibold px-2 py-0.5 rounded-md border border-amber-200 inline-block mt-1 ml-1">

@@ -167,11 +167,18 @@ function shouldShowCurrentOrderVariant(value?: string | null): boolean {
 function getDealComboItemsForVariant(deal: Deal | undefined, variant?: string): DealComboItem[] {
   if (!deal) return [];
   const rows = deal.combo_items || [];
+  if (!rows.length) return [];
+
   const normalizedVariant = normalizeDealVariantKey(variant);
+
+  // No variant selected → show every combo row regardless of variant_key
+  if (!normalizedVariant) return rows;
+
+  // Variant selected → merge base (shared) rows with variant-specific rows
   const baseRows = rows.filter(row => normalizeDealVariantKey(row.variant_key) === '');
-  if (!normalizedVariant) return baseRows;
   const specificRows = rows.filter(row => normalizeDealVariantKey(row.variant_key) === normalizedVariant);
-  return specificRows.length > 0 ? specificRows : baseRows;
+
+  return specificRows.length > 0 ? [...baseRows, ...specificRows] : baseRows.length > 0 ? baseRows : rows;
 }
 
 function isCategoryChoiceRow(row: DealComboItem): boolean {
@@ -199,13 +206,25 @@ function getChoiceRowLabel(row: DealComboItem): string {
   return categories.length ? categories.join(' / ') : row.category_name || 'Category';
 }
 
+/** Returns true when the product has meaningful user-selectable variants (i.e. more than the single
+ * implicit "Default" placeholder that means no real variant choice exists). */
+function hasRealVariants(product: Product | undefined): boolean {
+  const variants = product?.variants;
+  if (!variants || variants.length === 0) return false;
+  if (variants.length > 1) return true;
+  // Single-variant products: only expose the variant if its name is not the implicit "Default" sentinel.
+  return variants[0].name.trim().toLowerCase() !== 'default';
+}
+
 function rowNeedsFixedItemVariant(row: DealComboItem, catalog: Product[]): boolean {
   if (isCategoryChoiceRow(row) || !row.product_id) return false;
   const p = catalog.find(x => x.id === row.product_id);
-  return Boolean(p?.variants && p.variants.length > 1);
+  return Boolean(hasRealVariants(p));
 }
 
+/** Returns the first variant name for a product that has real variants; empty string otherwise. */
 function getDefaultProductVariant(product: Product | undefined): string {
+  if (!hasRealVariants(product)) return '';
   return product?.variants?.[0]?.name?.trim() || '';
 }
 
@@ -276,6 +295,7 @@ export default function Dashboard() {
     product: Product;
     variant: string;
     selections: Record<number, { productId: string; variant: string; categoryName?: string }>;
+    cartItemUniqueId?: string;
   } | null>(null);
   const [checkoutSlowNotice, setCheckoutSlowNotice] = useState(false);
   /** Set when resuming an open dine-in sale from Active Dine-in → Modify */
@@ -736,15 +756,15 @@ export default function Dashboard() {
     [dealsById]
   );
 
-  // Categories: settings sections, plus "Deals" when any deal product exists (section may be missing from settings JSON).
+  // Categories: settings sections, plus "DEALS" when any deal product exists (section may be missing from settings JSON).
   const categories = useMemo(() => {
     const fromSettings = Array.isArray(sections) ? sections : [];
     const hasDeals = products.some(
-      p => p.is_deal === true || (p.section || '').trim() === 'Deals'
+      p => p.is_deal === true || (p.section || '').trim().toUpperCase() === 'DEALS'
     );
     const merged =
-      hasDeals && !fromSettings.some(s => (s || '').trim() === 'Deals')
-        ? [...fromSettings, 'Deals']
+      hasDeals && !fromSettings.some(s => (s || '').trim().toUpperCase() === 'DEALS')
+        ? [...fromSettings, 'DEALS']
         : fromSettings;
     return ['All Items', ...merged];
   }, [sections, products]);
@@ -765,16 +785,18 @@ export default function Dashboard() {
   }, [lastScannedBarcode]);
 
   const handleProductClick = (product: Product) => {
-    const defaultVariant = product.variants?.length ? product.variants[0]?.name : undefined;
+    // Only treat as a real variant if the product has meaningful variant choices.
+    const defaultVariant = hasRealVariants(product) ? (product.variants?.[0]?.name ?? undefined) : undefined;
     if (product.is_deal && dealNeedsConfigurator(product)) {
       const deal = dealsById.get(product.id);
       const cfgRows = getDealComboItemsForVariant(deal, defaultVariant || undefined);
       const initialSelections: Record<number, { productId: string; variant: string }> = {};
       for (const r of cfgRows) {
-        if (rowNeedsFixedItemVariant(r, products)) {
+        if (!isCategoryChoiceRow(r) && r.product_id) {
+          // Pre-populate ALL fixed product rows (not just multi-variant ones)
           const fixedProduct = products.find(p => p.id === r.product_id);
           initialSelections[r.id] = {
-            productId: String(r.product_id || ''),
+            productId: String(r.product_id),
             variant: getDefaultProductVariant(fixedProduct),
           };
         }
@@ -828,6 +850,41 @@ export default function Dashboard() {
           return { ...i, variant: newVariant, uniqueId: newUniqueId, price: nextPrice };
         });
       }
+    });
+  };
+
+  const handleEditDeal = (item: CartItem) => {
+    const product = products.find(p => p.id === item.id);
+    if (!product) return;
+    const selections: Record<number, { productId: string; variant: string; categoryName?: string }> = {};
+    if (item.dealSelections) {
+      for (const sel of item.dealSelections) {
+        selections[sel.combo_item_id] = {
+          productId: String(sel.product_id),
+          variant: sel.variant || '',
+          categoryName: sel.category_name,
+        };
+      }
+    } else {
+      const deal = dealsById.get(product.id);
+      if (deal) {
+        const cfgRows = getDealComboItemsForVariant(deal, item.variant);
+        for (const r of cfgRows) {
+          if (r.product_id) {
+            const fixedProduct = products.find(p => p.id === r.product_id);
+            selections[r.id] = {
+              productId: String(r.product_id),
+              variant: getDefaultProductVariant(fixedProduct),
+            };
+          }
+        }
+      }
+    }
+    setDealConfigurator({
+      product,
+      variant: item.variant || '',
+      selections,
+      cartItemUniqueId: item.uniqueId,
     });
   };
 
@@ -893,14 +950,41 @@ export default function Dashboard() {
       }
     }
 
-    handleAddToCart({
-      id: dealConfigurator.product.id,
-      title: dealConfigurator.product.title,
-      price: getVariantSalePrice(dealConfigurator.product, dealConfigurator.variant || undefined),
-      image: getProductImageUrl(dealConfigurator.product),
-      variant: dealConfigurator.variant || undefined,
-      dealSelections: nextSelections,
-    });
+    const variant = dealConfigurator.variant?.trim() || undefined;
+    const uniqueId = buildCartItemUniqueId(dealConfigurator.product.id, variant, nextSelections);
+
+    if (dealConfigurator.cartItemUniqueId) {
+      setCart(prev => {
+        const oldItem = prev.find(i => i.uniqueId === dealConfigurator.cartItemUniqueId);
+        if (!oldItem) return prev;
+        
+        const existingNewItem = prev.find(i => i.uniqueId === uniqueId && i.uniqueId !== dealConfigurator.cartItemUniqueId);
+        
+        if (existingNewItem) {
+          return prev
+            .map(i => i.uniqueId === uniqueId ? { ...i, quantity: i.quantity + oldItem.quantity } : i)
+            .filter(i => i.uniqueId !== dealConfigurator.cartItemUniqueId);
+        } else {
+          return prev.map(i => i.uniqueId === dealConfigurator.cartItemUniqueId ? {
+            ...i,
+            uniqueId,
+            variant,
+            dealSelections: nextSelections,
+            price: getVariantSalePrice(dealConfigurator.product, variant)
+          } : i);
+        }
+      });
+    } else {
+      handleAddToCart({
+        id: dealConfigurator.product.id,
+        title: dealConfigurator.product.title,
+        price: getVariantSalePrice(dealConfigurator.product, dealConfigurator.variant || undefined),
+        image: getProductImageUrl(dealConfigurator.product),
+        variant: dealConfigurator.variant || undefined,
+        dealSelections: nextSelections,
+      });
+    }
+
     setDealConfigurator(null);
     setCheckoutSlowNotice(false);
   };
@@ -1397,11 +1481,11 @@ export default function Dashboard() {
 
   const filteredProducts = products.filter(p => {
     const sec = (p.section || '').trim();
-    const isDealProduct = p.is_deal === true || sec === 'Deals';
+    const isDealProduct = p.is_deal === true || sec.toUpperCase() === 'DEALS';
     const matchesCategory =
       activeCategory === 'All Items' ||
       sec === activeCategory ||
-      (activeCategory === 'Deals' && isDealProduct);
+      (activeCategory === 'DEALS' && isDealProduct);
     const matchesSearch = p.title.toLowerCase().includes(searchQuery.toLowerCase());
     return matchesCategory && matchesSearch;
   });
@@ -1487,7 +1571,7 @@ export default function Dashboard() {
           <div className="w-full max-w-2xl rounded-[18px] border border-white/30 bg-white/90 p-5">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <p className="text-xs font-black uppercase tracking-[0.18em] text-brand-700">Configure Deal</p>
+                <p className="text-xs font-black uppercase tracking-[0.18em] text-brand-700">{dealConfigurator.cartItemUniqueId ? 'Edit Deal' : 'Configure Deal'}</p>
                 <h2 className="mt-1 text-2xl font-black text-neutral-900">{dealConfigurator.product.title}</h2>
                 <p className="mt-1 text-sm font-medium text-neutral-600">
                   Configure each bundled item and add the deal to the order.
@@ -1537,24 +1621,8 @@ export default function Dashboard() {
               </div>
             )}
 
-            <div className="mt-5 space-y-4">
+            <div className="mt-5 space-y-4 max-h-[60vh] overflow-y-auto pr-2 custom-scrollbar">
               {activeDealConfigRows.map((row) => {
-                if (!isDealConfigurableRow(row, products)) {
-                  return (
-                    <div key={row.id} className="space-y-2">
-                      <div className="flex items-center justify-between rounded-[18px] border border-white/60 bg-white/70 px-4 py-3">
-                        <div>
-                          <p className="text-sm font-bold text-neutral-900">{row.product_title || 'Menu item'}</p>
-                          <p className="text-xs font-medium text-neutral-500">Included automatically</p>
-                        </div>
-                        <span className="rounded-full bg-neutral-100 px-3 py-1 text-xs font-black text-neutral-700">
-                          {row.quantity}x
-                        </span>
-                      </div>
-                    </div>
-                  );
-                }
-
                 if (isCategoryChoiceRow(row)) {
                   const selectedState = dealConfigurator.selections[row.id] || { productId: '', variant: '' };
                   const categoryNames = getChoiceRowCategories(row);
@@ -1707,47 +1775,65 @@ export default function Dashboard() {
                     <div className="rounded-[18px] border border-white/60 bg-white/70 p-4">
                       <div className="mb-3 flex items-center justify-between gap-3">
                         <div>
-                          <p className="text-sm font-bold text-neutral-900">{row.product_title || 'Bundled item'}</p>
+                          <p className="text-sm font-bold text-neutral-900">{row.product_title || fixedProduct?.title || 'Bundled item'}</p>
                           <p className="text-xs font-medium text-neutral-500">
-                            {fixedProduct?.variants?.length ? 'Choose portion / variant' : 'Included automatically'}
+                            Included automatically
                           </p>
                         </div>
-                        <span className="rounded-full bg-neutral-100 px-3 py-1 text-xs font-black text-neutral-700">
-                          {row.quantity}x
+                        <span className="rounded-full bg-brand-50 px-3 py-1 text-xs font-black text-brand-700">
+                          Required
                         </span>
                       </div>
-                      {fixedProduct?.variants?.length ? (
-                        <div className="grid gap-2 sm:grid-cols-[1fr_auto] sm:items-end">
-                          <div className="min-w-0">
-                            <label className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-neutral-500">
-                              Variant
-                            </label>
-                            <SearchableSelect
-                              value={fvState.variant}
-                              onChange={(value) =>
-                                setDealConfigurator(current =>
-                                  current
-                                    ? {
-                                        ...current,
-                                        selections: {
-                                          ...current.selections,
-                                          [row.id]: { productId: String(row.product_id || ''), variant: value },
-                                        },
-                                      }
-                                    : current
-                                )
-                              }
-                              options={fixedProduct.variants.map(variant => ({
-                                value: variant.name,
-                                label: `${variant.name} (${formatCurrency(variant.salePrice)})`,
-                              }))}
-                              placeholder="Choose variant…"
-                              searchPlaceholder="Search variants…"
-                              className="border-white/70 bg-white px-3 py-3 font-semibold"
-                            />
+                      
+                      <div className="grid gap-2 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+                        <div className="min-w-0">
+                          <label className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-neutral-500">
+                            Item
+                          </label>
+                          <div className="border border-white/70 bg-neutral-50/50 text-neutral-500 px-3 py-3 font-semibold rounded-md text-sm truncate select-none flex items-center h-[46px]">
+                            {fixedProduct?.title || row.product_title || 'Menu item'}
                           </div>
                         </div>
-                      ) : null}
+                        <div className="min-w-0">
+                          {fixedProduct?.variants?.length ? (
+                            <>
+                              <label className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-neutral-500">
+                                Variant
+                              </label>
+                              <SearchableSelect
+                                value={fvState.variant}
+                                onChange={(value) =>
+                                  setDealConfigurator(current =>
+                                    current
+                                      ? {
+                                          ...current,
+                                          selections: {
+                                            ...current.selections,
+                                            [row.id]: { productId: String(row.product_id || ''), variant: value },
+                                          },
+                                        }
+                                      : current
+                                  )
+                                }
+                                options={fixedProduct.variants.map(variant => ({
+                                  value: variant.name,
+                                  label: `${variant.name} (${formatCurrency(variant.salePrice)})`,
+                                }))}
+                                placeholder="Choose variant…"
+                                searchPlaceholder="Search variants…"
+                                className="border-white/70 bg-white px-3 py-3 font-semibold"
+                              />
+                            </>
+                          ) : (
+                            <span className="text-xs text-neutral-400 sm:pb-3 sm:pl-1">Qty ×{row.quantity}</span>
+                          )}
+                        </div>
+                        <div className="flex items-center justify-end pb-1 sm:pb-3">
+                          <span className="rounded-full bg-neutral-100 px-2.5 py-1 text-xs font-black text-neutral-700">
+                            ×{row.quantity}
+                          </span>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 );
@@ -1772,7 +1858,7 @@ export default function Dashboard() {
                   onClick={handleDealConfirmAddToCart}
                   className="rounded-[11px] bg-brand-600 px-5 py-2.5 text-sm font-black text-white transition-colors hover:bg-brand-700"
                 >
-                  Add deal
+                  {dealConfigurator.cartItemUniqueId ? 'Update deal' : 'Add deal'}
                 </button>
               </div>
             </div>
@@ -1808,9 +1894,10 @@ export default function Dashboard() {
           ) : (
             cart.map((item, index) => {
               const baseProd = products.find(p => p.id === item.id);
-              const hasVariants = baseProd && baseProd.variants && baseProd.variants.length > 0;
               const hasDealSelections = (item.dealSelections || []).length > 0;
-              const showVariantSelector = Boolean(hasVariants && !hasDealSelections);
+              const isDeal = dealsById.has(item.id);
+              // Only show the variant selector when the product has real selectable variants (not just the implicit single "Default").
+              const showVariantSelector = Boolean(hasRealVariants(baseProd) && !hasDealSelections && !isDeal);
               return (
               <div key={item.uniqueId + "-" + index} className="flex flex-col gap-2 p-3 glass-card relative group transition-shadow bg-white/60 hover:bg-white/80 border border-white/50">
                 
@@ -1863,7 +1950,7 @@ export default function Dashboard() {
                       </div>
                     )}
 
-                    {/* Price & Add Modifier Button */}
+                    {/* Price & Action Buttons */}
                     <div className="flex items-center gap-2 mt-1.5">
                       <p className="text-sm font-black text-gold-600">{formatCurrency(item.price)}</p>
                       <span className="text-neutral-300 select-none">&bull;</span>
@@ -1874,6 +1961,18 @@ export default function Dashboard() {
                       >
                         {activeModifierRowId === item.uniqueId ? 'Close Modifiers' : '+ Add Modifier'}
                       </button>
+                      {isDeal && (
+                        <>
+                          <span className="text-neutral-300 select-none">&bull;</span>
+                          <button 
+                            type="button" 
+                            onClick={(e) => { e.stopPropagation(); handleEditDeal(item); }} 
+                            className="text-[11px] font-bold text-brand-600 hover:text-brand-700 hover:underline transition-colors"
+                          >
+                            Edit Deal
+                          </button>
+                        </>
+                      )}
                     </div>
 
                   </div>

@@ -530,6 +530,9 @@ class PrinterService:
                 except (TypeError, ValueError):
                     qty = 1
                 variant = (raw_item.get("variant") or raw_item.get("variant_sku_suffix") or "").strip()
+                # Don't display the implicit "Default" placeholder — only show real variant names.
+                if variant.lower() == "default":
+                    variant = ""
                 is_deal = bool(raw_item.get("is_deal"))
 
                 line = f"{indent}{qty}x {title}"
