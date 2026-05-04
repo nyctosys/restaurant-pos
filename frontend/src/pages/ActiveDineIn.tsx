@@ -78,26 +78,26 @@ const kitchenStatusConfig: Record<
   placed: {
     label: 'Sent',
     Icon: Bell,
-    cardClass: 'bg-sky-50/70 border-sky-200/80 dark:!bg-sky-950/35 dark:!border-sky-500/45',
-    badgeClass: 'bg-sky-100 text-sky-800 border-sky-300 dark:!bg-sky-500/18 dark:text-sky-100 dark:border-sky-400/50',
-    itemPanelClass: 'bg-sky-50/55 border-sky-100/80 dark:!bg-sky-950/45 dark:border-sky-500/30',
-    quantityClass: 'bg-sky-100 text-sky-900 dark:!bg-sky-500/22 dark:text-sky-50',
+    cardClass: 'bg-white border-[#e0e0e0] dark:!bg-[#1c1c1e] dark:border-white/10',
+    badgeClass: 'bg-[#f5f5f7] text-[#1d1d1f] border-transparent dark:!bg-black/30 dark:text-white',
+    itemPanelClass: 'bg-[#f5f5f7] border-transparent dark:!bg-black/30 dark:border-transparent',
+    quantityClass: 'bg-white text-[#1d1d1f] border border-[#e0e0e0] dark:!bg-black/30 dark:text-white dark:border-white/10',
   },
   preparing: {
     label: 'Preparing',
     Icon: ChefHat,
-    cardClass: 'bg-amber-50/75 border-amber-300/80 dark:!bg-amber-950/35 dark:!border-amber-400/50',
-    badgeClass: 'bg-amber-100 text-amber-800 border-amber-300 dark:!bg-amber-500/18 dark:text-amber-100 dark:border-amber-400/55',
-    itemPanelClass: 'bg-amber-50/60 border-amber-100/90 dark:!bg-amber-950/45 dark:border-amber-500/35',
-    quantityClass: 'bg-amber-100 text-amber-900 dark:!bg-amber-500/22 dark:text-amber-50',
+    cardClass: 'bg-white border-[#e0e0e0] dark:!bg-[#1c1c1e] dark:border-white/10',
+    badgeClass: 'bg-amber-100 text-amber-800 border-transparent dark:!bg-amber-500/18 dark:text-white',
+    itemPanelClass: 'bg-amber-50 border-amber-100 dark:!bg-amber-950/20 dark:border-amber-500/20',
+    quantityClass: 'bg-white text-amber-800 border border-amber-200 dark:!bg-amber-500/20 dark:text-white dark:border-amber-400/30',
   },
   ready: {
     label: 'Ready',
     Icon: CheckCircle2,
-    cardClass: 'bg-emerald-50/80 border-emerald-300/85 dark:!bg-emerald-950/35 dark:!border-emerald-400/50',
-    badgeClass: 'bg-emerald-100 text-emerald-800 border-emerald-300 dark:!bg-emerald-500/18 dark:text-emerald-100 dark:border-emerald-400/55',
-    itemPanelClass: 'bg-emerald-50/60 border-emerald-100/90 dark:!bg-emerald-950/45 dark:border-emerald-500/35',
-    quantityClass: 'bg-emerald-100 text-emerald-900 dark:!bg-emerald-500/22 dark:text-emerald-50',
+    cardClass: 'bg-white border-[#e0e0e0] dark:!bg-[#1c1c1e] dark:border-white/10',
+    badgeClass: 'bg-emerald-100 text-emerald-800 border-transparent dark:!bg-emerald-500/18 dark:text-white',
+    itemPanelClass: 'bg-emerald-50 border-emerald-100 dark:!bg-emerald-950/20 dark:border-emerald-500/20',
+    quantityClass: 'bg-white text-emerald-800 border border-emerald-200 dark:!bg-emerald-500/20 dark:text-white dark:border-emerald-400/30',
   },
 };
 
@@ -114,7 +114,7 @@ function ModifierPills({ modifiers }: { modifiers?: string[] }) {
       {modifiers.map((mod, idx) => (
         <span
           key={`${mod}-${idx}`}
-          className="text-[10px] px-1.5 py-0.5 rounded-sm bg-brand-50 text-brand-800 border border-brand-100 dark:!bg-brand-500/18 dark:text-brand-100 dark:border-brand-400/40"
+          className="text-[10px] px-1.5 py-0.5 rounded-sm bg-brand-50 text-brand-800 border border-brand-100 dark:!bg-brand-500/18 dark:text-white dark:border-brand-400/40"
         >
           + {mod}
         </span>
@@ -150,32 +150,32 @@ function OpenOrderCard({
   const KitchenStatusIcon = kitchenStatus.Icon;
 
   return (
-    <li className={`glass-card rounded-[11px] p-3 flex flex-col gap-2 border min-h-[210px] transition-colors duration-300 ${kitchenStatus.cardClass}`}>
+    <li className={`rounded-[18px] p-4 flex flex-col gap-2 border min-h-[210px] transition-colors duration-300 ${kitchenStatus.cardClass}`}>
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <p className="text-[10px] font-semibold text-neutral-500 uppercase tracking-wide dark:text-neutral-400">{orderKindLabel(sale)}</p>
-          <p className="text-base font-bold text-neutral-900 truncate dark:text-neutral-50">{orderLabel(sale)}</p>
+          <p className="text-[10px] font-semibold text-neutral-500 uppercase tracking-wide dark:text-white">{orderKindLabel(sale)}</p>
+          <p className="text-base font-bold text-neutral-900 truncate dark:text-white">{orderLabel(sale)}</p>
         </div>
         <div className="flex flex-col items-end gap-1 shrink-0">
-          <span className="text-xs font-mono text-neutral-400 dark:text-neutral-500">#{sale.id}</span>
+          <span className="text-xs font-mono text-neutral-400 dark:text-white">#{sale.id}</span>
           <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full border ${kitchenStatus.badgeClass}`}>
             <KitchenStatusIcon className="w-3 h-3" /> {kitchenStatus.label}
           </span>
         </div>
       </div>
-      <div className="text-xs text-neutral-600 dark:text-neutral-300">
+      <div className="text-xs text-neutral-600 dark:text-white">
         {riderLabel && (
-          <p className="mb-1 text-xs font-semibold text-brand-700 dark:text-brand-200">Rider: {riderLabel}</p>
+          <p className="mb-1 text-xs font-semibold text-brand-700 dark:text-white">Rider: {riderLabel}</p>
         )}
-        <span className="text-neutral-500 dark:text-neutral-400">Subtotal </span>
-        <span className="font-semibold text-neutral-900 dark:text-neutral-50">{formatCurrency(sale.total_amount)}</span>
+        <span className="text-neutral-500 dark:text-white">Subtotal </span>
+        <span className="font-semibold text-neutral-900 dark:text-white">{formatCurrency(sale.total_amount)}</span>
       </div>
-      <p className="text-[11px] text-neutral-400 dark:text-neutral-500">
+      <p className="text-[11px] text-neutral-400 dark:text-white">
         {new Date(sale.created_at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}
       </p>
       {sale.items && sale.items.length > 0 && (
         <div className={`rounded-[8px] border px-2.5 py-2 space-y-1.5 transition-colors duration-300 ${kitchenStatus.itemPanelClass}`}>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-neutral-500 dark:text-neutral-400">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-neutral-500 dark:text-white">
             Items to prepare
           </p>
           <div className="space-y-1.5 max-h-[min(26vh,180px)] overflow-y-auto pr-0.5">
@@ -189,14 +189,14 @@ function OpenOrderCard({
                     {line.quantity}x
                   </span>
                   <div className="min-w-0 flex-1">
-                    <p className="text-xs font-semibold text-neutral-900 leading-tight dark:text-neutral-50">
+                    <p className="text-xs font-semibold text-neutral-900 leading-tight dark:text-white">
                       {line.product_title}{' '}
                       {line.is_deal && (
-                        <span className="text-[10px] font-bold text-amber-700 dark:text-amber-200">(DEAL)</span>
+                        <span className="text-[10px] font-bold text-amber-700 dark:text-white">(DEAL)</span>
                       )}
                     </p>
                     {line.variant_sku_suffix && (
-                      <p className="text-[11px] text-neutral-500 mt-0.5 dark:text-neutral-400">{line.variant_sku_suffix}</p>
+                      <p className="text-[11px] text-neutral-500 mt-0.5 dark:text-white">{line.variant_sku_suffix}</p>
                     )}
                     <ModifierPills modifiers={line.modifiers} />
                   </div>
@@ -207,13 +207,13 @@ function OpenOrderCard({
                     {line.children.map((child, childIdx) => (
                       <div key={`${line.id}-${child.id}-${childIdx}`} className="space-y-1">
                         <div className="flex gap-2 items-start">
-                          <span className="shrink-0 text-[10px] font-bold text-neutral-500 dark:text-neutral-400">
+                          <span className="shrink-0 text-[10px] font-bold text-neutral-500 dark:text-white">
                             {child.quantity}x
                           </span>
                           <div className="min-w-0">
-                            <p className="text-xs font-medium text-neutral-700 dark:text-neutral-200">{child.product_title}</p>
+                            <p className="text-xs font-medium text-neutral-700 dark:text-white">{child.product_title}</p>
                             {child.variant_sku_suffix && (
-                              <p className="text-[10px] text-neutral-500 dark:text-neutral-400">{child.variant_sku_suffix}</p>
+                              <p className="text-[10px] text-neutral-500 dark:text-white">{child.variant_sku_suffix}</p>
                             )}
                           </div>
                         </div>
@@ -229,12 +229,12 @@ function OpenOrderCard({
           </div>
         </div>
       )}
-      <div className="flex flex-wrap gap-1.5 pt-2 mt-auto border-t border-white/25 shrink-0 dark:border-white/12">
+      <div className="flex flex-wrap gap-1.5 pt-2 mt-auto border-t border-[#e0e0e0] shrink-0 dark:border-white/10">
         <button
           type="button"
           onClick={() => onPay(sale)}
           disabled={sale.status !== 'open'}
-          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-[8px] bg-brand-700 text-white text-xs font-semibold hover:bg-brand-600"
+          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full bg-[#0066cc] text-white text-xs font-semibold hover:bg-[#0071e3] transition-transform active:scale-95"
         >
           <CreditCard className="w-3.5 h-3.5" />
           {sale.status === 'open' ? 'Pay' : 'Paid'}
@@ -244,7 +244,7 @@ function OpenOrderCard({
           onClick={() => onModify(sale)}
           disabled={modifyDisabled}
           title={modifyDisabled ? 'Cannot modify — kitchen is already working on this order' : 'Modify order'}
-          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-[8px] glass-card text-xs font-semibold text-brand-900 dark:text-brand-100 disabled:opacity-40 disabled:cursor-not-allowed disabled:pointer-events-none"
+          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full bg-[#f5f5f7] text-[#1d1d1f] text-xs font-semibold hover:bg-[#e8e8ed] dark:!bg-[#2a2a2c] dark:text-white dark:hover:!bg-[#323235] transition-transform active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed disabled:pointer-events-none"
         >
           <Pencil className="w-3.5 h-3.5" />
           Modify
@@ -252,7 +252,7 @@ function OpenOrderCard({
         <button
           type="button"
           onClick={() => onVoid(sale)}
-          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-[8px] border border-red-200 text-red-700 text-xs font-semibold hover:bg-red-50 dark:border-red-400/45 dark:text-red-200 dark:hover:!bg-red-500/14"
+          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full border border-red-200 text-red-700 text-xs font-semibold hover:bg-red-50 dark:border-red-400/45 dark:text-white dark:hover:!bg-red-500/14 transition-transform active:scale-95"
         >
           <Ban className="w-3.5 h-3.5" />
           Void
@@ -262,7 +262,7 @@ function OpenOrderCard({
             type="button"
             onClick={() => onDelivered(sale)}
             disabled={deliveringSaleId === sale.id}
-            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-[8px] border border-emerald-200 text-emerald-700 text-xs font-semibold hover:bg-emerald-50 disabled:opacity-60 dark:border-emerald-400/45 dark:text-emerald-200 dark:hover:!bg-emerald-500/14"
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full border border-emerald-200 text-emerald-700 text-xs font-semibold hover:bg-emerald-50 disabled:opacity-60 dark:border-emerald-400/45 dark:text-white dark:hover:!bg-emerald-500/14 transition-transform active:scale-95"
           >
             <CheckCircle2 className="w-3.5 h-3.5" />
             {deliveringSaleId === sale.id ? 'Updating…' : 'Delivered'}
@@ -272,7 +272,7 @@ function OpenOrderCard({
           <button
             type="button"
             onClick={() => onAssignRider(sale)}
-            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-[8px] border border-amber-200 text-amber-800 text-xs font-semibold hover:bg-amber-50 dark:border-amber-400/50 dark:text-amber-100 dark:hover:!bg-amber-500/14"
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full border border-amber-200 text-amber-800 text-xs font-semibold hover:bg-amber-50 dark:border-amber-400/50 dark:text-white dark:hover:!bg-amber-500/14 transition-transform active:scale-95"
           >
             <UserPlus className="w-3.5 h-3.5" />
             Assign rider
@@ -283,7 +283,7 @@ function OpenOrderCard({
             type="button"
             onClick={() => onServed(sale)}
             disabled={servingSaleId === sale.id}
-            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-[8px] border border-emerald-200 text-emerald-700 text-xs font-semibold hover:bg-emerald-50 disabled:opacity-60 dark:border-emerald-400/45 dark:text-emerald-200 dark:hover:!bg-emerald-500/14"
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full border border-emerald-200 text-emerald-700 text-xs font-semibold hover:bg-emerald-50 disabled:opacity-60 dark:border-emerald-400/45 dark:text-white dark:hover:!bg-emerald-500/14 transition-transform active:scale-95"
           >
             <CheckCircle2 className="w-3.5 h-3.5" />
             {servingSaleId === sale.id ? 'Updating…' : 'Served'}
@@ -520,21 +520,21 @@ export default function ActiveDineIn() {
   };
 
   return (
-    <div className="flex flex-col h-full min-h-0 page-padding">
+    <div className="flex flex-col h-full min-h-0 page-padding dark:!bg-black dark:text-white">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6 shrink-0">
         <div className="flex items-center gap-3 min-w-0">
           <div className="w-12 h-12 rounded-[18px] bg-brand-100/80 border border-brand-200 flex items-center justify-center shrink-0 dark:!bg-brand-500/18 dark:border-brand-400/35">
-            <UtensilsCrossed className="w-6 h-6 text-brand-800 dark:text-brand-100" />
+            <UtensilsCrossed className="w-6 h-6 text-brand-800 dark:text-white" />
           </div>
           <div className="min-w-0">
-            <h1 className="text-2xl font-bold text-neutral-900 truncate dark:text-neutral-50">Open orders</h1>
-            <p className="text-sm text-neutral-500 dark:text-neutral-400">Unpaid KOT tabs (dine-in, takeaway, delivery) — pay or edit on Order.</p>
+            <h1 className="text-2xl font-bold text-neutral-900 truncate dark:text-white">Open orders</h1>
+            <p className="text-sm text-neutral-500 dark:text-white">Unpaid KOT tabs (dine-in, takeaway, delivery) — pay or edit on Order.</p>
           </div>
         </div>
         <button
           type="button"
           onClick={() => void load()}
-          className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-[11px] glass-card text-sm font-semibold text-brand-800 hover:bg-white/50 dark:text-brand-100 dark:hover:!bg-brand-500/14"
+          className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-[11px] glass-card text-sm font-semibold text-brand-800 hover:bg-white/50 dark:text-white dark:hover:!bg-brand-500/14"
         >
           <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
           Refresh
@@ -578,39 +578,39 @@ export default function ActiveDineIn() {
       )}
 
       {loading && sales.length === 0 ? (
-        <div className="flex-1 flex items-center justify-center text-neutral-400 gap-2">
+        <div className="flex-1 flex items-center justify-center text-neutral-400 gap-2 dark:text-white">
           <Loader2 className="w-5 h-5 animate-spin" /> Loading…
         </div>
       ) : sales.length === 0 ? (
         <div className="flex-1 flex flex-col items-center justify-center text-neutral-400 gap-2 py-16">
           <UtensilsCrossed className="w-14 h-14 opacity-40" />
-          <p className="text-lg font-medium text-neutral-500 dark:text-neutral-300">No open orders</p>
-          <p className="text-sm text-neutral-400">Send a KOT from Order (any order type) to open a tab.</p>
+          <p className="text-lg font-medium text-neutral-500 dark:text-white">No open orders</p>
+          <p className="text-sm text-neutral-400 dark:text-white">Send a KOT from Order (any order type) to open a tab.</p>
         </div>
       ) : (
         <div className="flex-1 min-h-0 overflow-auto pb-2">
           <div className="grid gap-4 lg:grid-cols-3 items-start min-w-0">
             {orderColumns.map(({ key, title, empty, Icon }) => (
-              <section key={key} className="min-w-0 rounded-[18px] border border-white/45 bg-white/25 p-2.5 dark:!bg-white/6 dark:border-white/12">
+              <section key={key} className="min-w-0 rounded-[18px] border border-[#e0e0e0] bg-[#f5f5f7] p-2.5 dark:!bg-[#1c1c1e] dark:border-white/10">
                 <div className="flex items-start justify-between gap-3 mb-2.5">
                   <div className="flex items-center gap-2 min-w-0">
-                    <span className="w-9 h-9 rounded-[11px] bg-white/65 border border-white/70 flex items-center justify-center shrink-0 dark:!bg-brand-500/16 dark:border-brand-400/30">
-                      <Icon className="w-[18px] h-[18px] text-brand-800 dark:text-brand-100" />
+                    <span className="w-9 h-9 rounded-[11px] bg-white border border-[#e0e0e0] flex items-center justify-center shrink-0 dark:!bg-[#1c1c1e] dark:border-white/10">
+                      <Icon className="w-[18px] h-[18px] text-brand-800 dark:text-white" />
                     </span>
                     <div className="min-w-0">
-                      <h2 className="text-base font-bold text-neutral-900 truncate dark:text-neutral-50">{title}</h2>
-                      <p className="text-xs font-semibold text-neutral-500 dark:text-neutral-400">
+                      <h2 className="text-base font-bold text-neutral-900 truncate dark:text-white">{title}</h2>
+                      <p className="text-xs font-semibold text-neutral-500 dark:text-white">
                         {groupedSales[key].length} {groupedSales[key].length === 1 ? 'order' : 'orders'}
                       </p>
                     </div>
                   </div>
-                  <p className="text-sm font-bold tabular-nums text-neutral-900 shrink-0 dark:text-neutral-50">
+                  <p className="text-sm font-bold tabular-nums text-neutral-900 shrink-0 dark:text-white">
                     {formatCurrency(totalByColumn[key])}
                   </p>
                 </div>
 
                 {groupedSales[key].length === 0 ? (
-                  <div className="min-h-[180px] rounded-[11px] border border-dashed border-white/70 bg-white/25 flex flex-col items-center justify-center text-center px-4 py-6 text-neutral-500 dark:!bg-white/6 dark:border-white/16 dark:text-neutral-400">
+                  <div className="min-h-[180px] rounded-[11px] border border-dashed border-white/70 bg-white/25 flex flex-col items-center justify-center text-center px-4 py-6 text-neutral-500 dark:!bg-black/30 dark:border-white/16 dark:text-white">
                     <Icon className="w-7 h-7 opacity-40 mb-2" />
                     <p className="text-sm font-semibold">{empty}</p>
                   </div>
@@ -645,10 +645,10 @@ export default function ActiveDineIn() {
             role="dialog"
             aria-labelledby="assign-rider-title"
           >
-            <h2 id="assign-rider-title" className="text-lg font-bold text-neutral-900 dark:text-neutral-50">
+            <h2 id="assign-rider-title" className="text-lg font-bold text-neutral-900 dark:text-white">
               Assign rider — {orderLabel(assignModalSale)}
             </h2>
-            <p className="text-sm text-neutral-600 dark:text-neutral-300">
+            <p className="text-sm text-neutral-600 dark:text-white">
               Order #{assignModalSale.id} · rider must be assigned before this delivery can be marked delivered.
             </p>
             <div>
@@ -661,7 +661,7 @@ export default function ActiveDineIn() {
                 value={assignRiderName}
                 onChange={event => setAssignRiderName(event.target.value)}
                 placeholder="Select or type rider name"
-                className="w-full px-3 py-2.5 rounded-[11px] border border-neutral-200 bg-white/80 text-sm font-semibold text-neutral-900 focus:outline-none focus:ring-2 focus:ring-brand-500 dark:text-neutral-50"
+                className="w-full px-3 py-2.5 rounded-[11px] border border-neutral-200 bg-white/80 text-sm font-semibold text-neutral-900 focus:outline-none focus:ring-2 focus:ring-brand-500 dark:text-white"
               />
               <datalist id="assign-rider-options">
                 {assignRiderOptions.map(rider => (
@@ -679,7 +679,7 @@ export default function ActiveDineIn() {
                   setAssignModalSale(null);
                   setAssignRiderName('');
                 }}
-                className="flex-1 py-3 rounded-[11px] border border-neutral-200 font-semibold text-neutral-700 dark:border-white/14 dark:text-neutral-200"
+                className="flex-1 py-3 rounded-[11px] border border-neutral-200 font-semibold text-neutral-700 dark:border-white/14 dark:text-white"
               >
                 Cancel
               </button>
@@ -703,10 +703,10 @@ export default function ActiveDineIn() {
             role="dialog"
             aria-labelledby="pay-modal-title"
           >
-            <h2 id="pay-modal-title" className="text-lg font-bold text-neutral-900 dark:text-neutral-50">
+            <h2 id="pay-modal-title" className="text-lg font-bold text-neutral-900 dark:text-white">
               Take payment — {orderLabel(payModalSale)}
             </h2>
-            <p className="text-sm text-neutral-600 dark:text-neutral-300">
+            <p className="text-sm text-neutral-600 dark:text-white">
               Order #{payModalSale.id} · {formatCurrency(payModalSale.total_amount)} subtotal (tax applied on confirm)
             </p>
             <div>
@@ -730,7 +730,7 @@ export default function ActiveDineIn() {
               <button
                 type="button"
                 onClick={() => setPayModalSale(null)}
-                className="flex-1 py-3 rounded-[11px] border border-neutral-200 font-semibold text-neutral-700 dark:border-white/14 dark:text-neutral-200"
+                className="flex-1 py-3 rounded-[11px] border border-neutral-200 font-semibold text-neutral-700 dark:border-white/14 dark:text-white"
               >
                 Cancel
               </button>

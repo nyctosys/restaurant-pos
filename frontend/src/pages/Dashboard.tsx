@@ -232,6 +232,28 @@ function isDealConfigurableRow(row: DealComboItem, catalog: Product[]): boolean 
   return isCategoryChoiceRow(row) || rowNeedsFixedItemVariant(row, catalog);
 }
 
+function buildDealSelectionForRowFromChild(
+  row: DealComboItem,
+  child: {
+    product_id: number;
+    product_title?: string;
+    variant_sku_suffix?: string | null;
+  },
+  catalog: Product[]
+): DealSelection {
+  const childProduct = catalog.find(product => product.id === child.product_id);
+  const childVariant = (child.variant_sku_suffix || '').trim();
+  return {
+    combo_item_id: row.id,
+    product_id: child.product_id,
+    product_title: child.product_title || childProduct?.title || 'Item',
+    category_name: isCategoryChoiceRow(row)
+      ? (childProduct?.section || '').trim() || getChoiceRowLabel(row)
+      : '',
+    ...(childVariant ? { variant: childVariant } : {}),
+  };
+}
+
 function buildCartItemUniqueId(productId: number, variant?: string, dealSelections?: DealSelection[]): string {
   const normalizedVariant = (variant || '').trim();
   const selectionKey = [...(dealSelections || [])]
@@ -473,37 +495,30 @@ export default function Dashboard() {
             const deal = deals.find(candidate => candidate.id === pid);
             const activeRows = getDealComboItemsForVariant(deal, v);
             let dealSelections: DealSelection[] | undefined;
-            if (line.is_deal && activeRows.some(isCategoryChoiceRow)) {
+            if (line.is_deal && activeRows.some(row => isDealConfigurableRow(row, products))) {
               const remainingChildren = [...(line.children || [])];
-              activeRows
-                .filter(row => !isCategoryChoiceRow(row))
-                .forEach(row => {
-                  const expectedQty = row.quantity * line.quantity;
-                  const matchIndex = remainingChildren.findIndex(child => child.product_id === row.product_id && child.quantity === expectedQty);
-                  if (matchIndex >= 0) {
-                    remainingChildren.splice(matchIndex, 1);
-                  }
-                });
               const reconstructed = activeRows
-                .filter(isCategoryChoiceRow)
+                .filter(row => isDealConfigurableRow(row, products))
                 .map(row => {
+                  const expectedQty = row.quantity * line.quantity;
+                  if (!isCategoryChoiceRow(row)) {
+                    const matchIndex = remainingChildren.findIndex(
+                      child => child.product_id === row.product_id && child.quantity === expectedQty
+                    );
+                    if (matchIndex < 0) return null;
+                    return buildDealSelectionForRowFromChild(row, remainingChildren.splice(matchIndex, 1)[0], products);
+                  }
                   const expectedCategories = getChoiceRowCategories(row);
                   const expectedKeys = new Set(expectedCategories.map(category => category.toLowerCase()));
                   const matchIndex = remainingChildren.findIndex(child => {
                     const childProduct = products.find(product => product.id === child.product_id);
-                    return expectedKeys.has((childProduct?.section || '').trim().toLowerCase());
+                    return (
+                      expectedKeys.has((childProduct?.section || '').trim().toLowerCase()) &&
+                      child.quantity === expectedQty
+                    );
                   });
                   if (matchIndex < 0) return null;
-                  const child = remainingChildren.splice(matchIndex, 1)[0];
-                  const childProduct = products.find(product => product.id === child.product_id);
-                  const childVariant = (child.variant_sku_suffix || '').trim();
-                  return {
-                    combo_item_id: row.id,
-                    product_id: child.product_id,
-                    product_title: child.product_title || 'Item',
-                    category_name: (childProduct?.section || '').trim() || getChoiceRowLabel(row),
-                    ...(childVariant ? { variant: childVariant } : {}),
-                  };
+                  return buildDealSelectionForRowFromChild(row, remainingChildren.splice(matchIndex, 1)[0], products);
                 })
                 .filter(Boolean) as DealSelection[];
               if (reconstructed.length > 0) {
@@ -871,18 +886,17 @@ export default function Dashboard() {
           categoryName: sel.category_name,
         };
       }
-    } else {
-      const deal = dealsById.get(product.id);
-      if (deal) {
-        const cfgRows = getDealComboItemsForVariant(deal, item.variant);
-        for (const r of cfgRows) {
-          if (r.product_id) {
-            const fixedProduct = products.find(p => p.id === r.product_id);
-            selections[r.id] = {
-              productId: String(r.product_id),
-              variant: getDefaultProductVariant(fixedProduct),
-            };
-          }
+    }
+    const deal = dealsById.get(product.id);
+    if (deal) {
+      const cfgRows = getDealComboItemsForVariant(deal, item.variant);
+      for (const r of cfgRows) {
+        if (r.product_id && !selections[r.id]) {
+          const fixedProduct = products.find(p => p.id === r.product_id);
+          selections[r.id] = {
+            productId: String(r.product_id),
+            variant: getDefaultProductVariant(fixedProduct),
+          };
         }
       }
     }
