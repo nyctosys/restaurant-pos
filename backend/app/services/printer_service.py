@@ -333,6 +333,9 @@ class PrinterService:
                         target_width = 384 if '80' in paper else 256
                         logo_height = settings.get('logo_height', 140)
                         pil_image = self._prepare_logo_for_thermal(pil_image, target_width, logo_height)
+                        # Explicitly center before image — some firmware ignores center= kwarg
+                        # and a fresh connection defaults to left alignment.
+                        self.printer.set(align='center')
                         self.printer.image(pil_image, center=True, impl='bitImageRaster')
                         self.printer.text("\n")
                 except Exception as e:
@@ -406,22 +409,55 @@ class PrinterService:
             self.printer.text(thin + "\n")
 
             # ----- Items -----
-            for item in items:
-                title = (item.get('title') or 'Item').strip()
+            def _print_receipt_item(raw_item, indent=""):
+                if not isinstance(raw_item, dict):
+                    return
+                title = (raw_item.get('title') or raw_item.get('product_title') or 'Item').strip()
                 try:
-                    qty = int(item.get('quantity') or 1)
+                    qty = int(raw_item.get('quantity') or 1)
                 except (TypeError, ValueError):
                     qty = 1
                 try:
-                    unit = float(item.get('unit_price') or 0)
+                    unit = float(raw_item.get('unit_price') or 0)
                 except (TypeError, ValueError):
                     unit = 0.0
+
+                variant = (raw_item.get("variant") or raw_item.get("variant_sku_suffix") or "").strip()
+                if variant.lower() == "default":
+                    variant = ""
+                
+                is_deal = bool(raw_item.get("is_deal"))
+
                 line_total = qty * unit
-                name_part = f"{title} x{qty}" if qty != 1 else title
+                
+                name_part = f"{indent}{qty}x {title}" if qty != 1 else f"{indent}{title}"
+                if variant:
+                    name_part = f"{name_part} ({variant})"
+
                 if len(name_part) > self.ITEM_COL_WIDTH:
                     name_part = name_part[: self.ITEM_COL_WIDTH - 2] + ".."
-                amount_str = f"Rs.{line_total:,.0f}"
+                
+                amount_str = "" if (indent and line_total == 0) else f"Rs.{line_total:,.0f}"
+
                 self.printer.text(name_part.ljust(self.ITEM_COL_WIDTH) + amount_str.rjust(self.AMOUNT_COL_WIDTH) + "\n")
+
+                modifiers = raw_item.get("modifiers") or []
+                if isinstance(modifiers, list):
+                    for mod in modifiers:
+                        if not isinstance(mod, str) or not mod.strip():
+                            continue
+                        mod_line = f"{indent}  + {mod.strip()}"
+                        if len(mod_line) > self.ITEM_COL_WIDTH:
+                            mod_line = mod_line[: self.ITEM_COL_WIDTH - 2] + ".."
+                        self.printer.text(mod_line.ljust(self.ITEM_COL_WIDTH) + "".rjust(self.AMOUNT_COL_WIDTH) + "\n")
+
+                children = raw_item.get("children") or []
+                if isinstance(children, list):
+                    for child in children:
+                        _print_receipt_item(child, indent=indent + "  ")
+
+            for raw in items:
+                _print_receipt_item(raw)
 
             self.printer.text(thin + "\n")
 
@@ -602,7 +638,7 @@ class PrinterService:
             return False
 
     def print_kot_modification(self, payload: dict) -> bool:
-        """Print an order modification slip on KOT printer."""
+        """Print an order modification slip on KOT printer — full order layout with MODIFIED ORDER heading."""
         if not self._ensure_connected("kot", fresh=True):
             return False
         from datetime import datetime, timezone
@@ -611,16 +647,16 @@ class PrinterService:
         thin = "-" * self.RECEIPT_WIDTH
         now = datetime.now(timezone.utc)
         dt_line = f"{now.strftime('%m/%d/%Y')}  {now.strftime('%I:%M %p').lstrip('0')}"
-        changes = payload.get("changes") or []
-        if not isinstance(changes, list):
-            changes = []
         try:
+            # ---- Heading ----
             self._set_font_scale(2)
             self.printer.set(align="center", bold=True)
             self.printer.text("MODIFIED ORDER\n")
             self.printer.set(bold=False)
             self._set_font_scale(1)
             self.printer.text(sep + "\n")
+
+            # ---- Order meta ----
             self.printer.set(align="left")
             self.printer.text(f"Order #{payload.get('sale_id', '')}\n")
             order_type = (payload.get("order_type") or "").strip().lower()
@@ -633,29 +669,71 @@ class PrinterService:
             table_name = (payload.get("table_name") or "").strip()
             if table_name:
                 self.printer.text(f"Table: {table_name}\n")
+            branch = (payload.get("branch") or "").strip()
+            if branch:
+                self.printer.text(f"Store: {branch}\n")
             operator = (payload.get("operator") or "").strip()
             if operator:
-                self.printer.text(f"Operator: {operator}\n")
+                self.printer.text(f"Server: {operator}\n")
             self.printer.text(dt_line.rjust(self.RECEIPT_WIDTH) + "\n")
             self.printer.text(thin + "\n")
+
+            # ---- Items (identical rendering to print_kot) ----
             self.printer.set(bold=True)
-            self.printer.text("CHANGES\n")
+            self.printer.text("ITEMS\n")
             self.printer.set(bold=False)
             self.printer.text(thin + "\n")
-            if not changes:
-                self.printer.text("No item differences captured\n")
-            for change in changes:
-                marker = "+"
-                ctype = str(change.get("type") or "").lower()
-                if ctype == "remove":
-                    marker = "-"
-                elif ctype == "change":
-                    marker = "~"
-                line = f"{marker} {str(change.get('description') or '').strip()}"
+
+            items = payload.get("items") or []
+            if not isinstance(items, list):
+                items = []
+
+            def _print_mod_item(raw_item, indent=""):
+                if not isinstance(raw_item, dict):
+                    return
+                title = (raw_item.get("title") or raw_item.get("product_title") or "Item").strip()
+                try:
+                    qty = int(raw_item.get("quantity") or 1)
+                except (TypeError, ValueError):
+                    qty = 1
+                variant = (raw_item.get("variant") or raw_item.get("variant_sku_suffix") or "").strip()
+                # Suppress the implicit "Default" sentinel — only real variant names.
+                if variant.lower() == "default":
+                    variant = ""
+                is_deal = bool(raw_item.get("is_deal"))
+
+                line = f"{indent}{qty}x {title}"
+                if is_deal:
+                    line = f"{line} [DEAL]"
+                if variant:
+                    line = f"{line} ({variant})"
                 while len(line) > self.RECEIPT_WIDTH:
                     self.printer.text(line[: self.RECEIPT_WIDTH] + "\n")
                     line = line[self.RECEIPT_WIDTH :]
                 self.printer.text(line + "\n")
+
+                modifiers = raw_item.get("modifiers") or []
+                if isinstance(modifiers, list):
+                    for mod in modifiers:
+                        if not isinstance(mod, str) or not mod.strip():
+                            continue
+                        mod_line = f"{indent}  + {mod.strip()}"
+                        while len(mod_line) > self.RECEIPT_WIDTH:
+                            self.printer.text(mod_line[: self.RECEIPT_WIDTH] + "\n")
+                            mod_line = mod_line[self.RECEIPT_WIDTH :]
+                        self.printer.text(mod_line + "\n")
+
+                children = raw_item.get("children") or []
+                if isinstance(children, list):
+                    for child in children:
+                        _print_mod_item(child, indent="  ")
+
+            if items:
+                for raw in items:
+                    _print_mod_item(raw)
+            else:
+                self.printer.text("(no items)\n")
+
             self.printer.text(thin + "\n")
             self.printer.set(align="center")
             self.printer.text("— Modified Order —\n\n")

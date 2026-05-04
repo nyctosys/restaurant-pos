@@ -18,6 +18,16 @@ def run_print_receipt_job(receipt_data: dict[str, Any]) -> None:
         logger.exception("Deferred receipt print failed")
 
 
+def run_print_kot_modification_job(mod_payload: dict[str, Any]) -> None:
+    """Deferred KOT modification slip — runs after HTTP response is sent."""
+    try:
+        from app.services.printer_service import PrinterService
+
+        PrinterService().print_kot_modification(mod_payload)
+    except Exception:
+        logger.exception("Deferred KOT modification print failed")
+
+
 def run_print_kot_and_stamp_job(
     sale_id: int,
     kot_payload: dict[str, Any] | None,

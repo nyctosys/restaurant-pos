@@ -61,7 +61,7 @@ export default function ToastContainer() {
           className={`pointer-events-auto flex items-start gap-3 px-4 py-3 rounded-[11px] border ${bg(t.type)} animate-slide-in`}
         >
           {icon(t.type)}
-          <p className="text-sm font-medium text-soot-800 flex-1">{t.message}</p>
+          <p className="text-sm font-medium text-soot-800 dark:text-[#1d1d1f] flex-1">{t.message}</p>
           <button onClick={() => dismiss(t.id)} className="p-0.5 rounded hover:bg-black/5 transition-colors shrink-0">
             <X className="w-4 h-4 text-soot-400" />
           </button>

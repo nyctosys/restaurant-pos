@@ -30,7 +30,7 @@ from app.services.ingredient_deduction import (
     ingredient_display_name,
     restore_inventory_allocations,
 )
-from app.services.printer_background import run_print_kot_and_stamp_job, run_print_receipt_job
+from app.services.printer_background import run_print_kot_and_stamp_job, run_print_receipt_job, run_print_kot_modification_job as _run_print_kot_modification_job
 from app.services.printer_service import PrinterService
 from app.services.product_pricing import effective_sale_price_for_variant
 from app.services.recipe_variants import (
@@ -1131,18 +1131,7 @@ def checkout(
                 branch_id,
                 current_user.username,
             )
-        product_ids = [int(i["product_id"]) for i in items]
-        products_by_id = {p.id: p for p in Product.query.filter(Product.id.in_(product_ids)).all()}
-        receipt_items = []
-        for i in items:
-            product = products_by_id.get(int(i["product_id"]))
-            receipt_items.append(
-                {
-                    "title": str(product.title if product else "Item"),
-                    "quantity": int(i.get("quantity", 1)),
-                    "unit_price": _sale_unit_price(product, i.get("variant_sku_suffix")) if product else 0.0,
-                }
-            )
+        receipt_items = _build_receipt_items(new_sale.id)
         discount_name = (
             discount_snapshot.get("name")
             if isinstance(discount_snapshot, dict)
@@ -2404,6 +2393,42 @@ def _create_open_kot_response(
         return _json_error("Bad Request", f"KOT failed: {str(exc)}", 400)
 
 
+def _build_receipt_items(sale_id: int) -> list[dict[str, Any]]:
+    receipt_rows = (
+        db.session.query(
+            SaleItem.id,
+            SaleItem.sale_id,
+            SaleItem.variant_sku_suffix,
+            SaleItem.quantity,
+            SaleItem.modifiers,
+            SaleItem.parent_sale_item_id,
+            SaleItem.unit_price,
+            Product.title,
+            Product.is_deal,
+        )
+        .outerjoin(Product, SaleItem.product_id == Product.id)
+        .filter(SaleItem.sale_id == sale_id)
+        .all()
+    )
+    receipt_flat_items: list[dict[str, Any]] = []
+    for row in receipt_rows:
+        receipt_flat_items.append(
+            {
+                "id": row.id,
+                "sale_id": row.sale_id,
+                "title": row.title if row.title else "Unknown",
+                "variant_sku_suffix": _display_variant_suffix(row.variant_sku_suffix),
+                "quantity": row.quantity,
+                "unit_price": float(row.unit_price),
+                "modifiers": _modifiers_for_display(row.modifiers or []),
+                "parent_sale_item_id": row.parent_sale_item_id,
+                "is_deal": row.is_deal,
+                "children": [],
+            }
+        )
+    return _nest_sale_item_dicts(receipt_flat_items).get(sale_id, [])
+
+
 def _build_kot_print_payload(
     sale_id: int, branch_id: str | None, operator_name: str | None = None
 ) -> dict[str, Any]:
@@ -2465,6 +2490,7 @@ def _build_kot_print_payload(
 @orders_router.patch("/{sale_id}/items")
 def update_open_sale_items(
     sale_id: int,
+    background_tasks: BackgroundTasks,
     payload: dict[str, Any] | None = None,
     current_user: User = Depends(get_current_user),
 ):
@@ -2602,18 +2628,17 @@ def update_open_sale_items(
         if isinstance(snapshot, dict):
             table_name = snapshot.get("table_name") or ""
         if changes:
-            printer_service = PrinterService()
-            printer_service.print_kot_modification(
-                {
-                    "sale_id": sale.id,
-                    "branch_id": sale.branch_id,
-                    "branch": branch_name,
-                    "operator": current_user.username,
-                    "table_name": table_name,
-                    "order_type": getattr(sale, "order_type", None),
-                    "changes": changes,
-                }
-            )
+            mod_payload = {
+                "sale_id": sale.id,
+                "branch_id": sale.branch_id,
+                "branch": branch_name,
+                "operator": current_user.username,
+                "table_name": table_name,
+                "order_type": getattr(sale, "order_type", None),
+                "items": new_nested,
+                "changes": changes,
+            }
+            background_tasks.add_task(_run_print_kot_modification_job, mod_payload)
         return {"message": "Order updated", "sale_id": sale_id, "total_amount": float(total_amount)}
     except Exception as exc:
         db.session.rollback()
@@ -2705,14 +2730,7 @@ def finalize_open_sale(
         branch_name = "Main Branch"
         if sale.branch:
             branch_name = sale.branch.name
-        receipt_items = [
-            {
-                "title": str(i.product.title if i.product else "Item"),
-                "quantity": i.quantity,
-                "unit_price": float(i.unit_price),
-            }
-            for i in sale.items
-        ]
+        receipt_items = _build_receipt_items(sale.id)
         discount_name = (
             discount_snapshot.get("name")
             if isinstance(discount_snapshot, dict)
@@ -3023,14 +3041,7 @@ def print_sale(sale_id: int, current_user: User = Depends(get_current_user)):
         "operator": sale.user.username if sale.user else "Unknown",
         "branch": sale.branch.name if sale.branch else "Main Branch",
         "branch_id": sale.branch_id,
-        "items": [
-            {
-                "title": i.product.title if i.product else "Unknown",
-                "quantity": i.quantity,
-                "unit_price": float(i.unit_price),
-            }
-            for i in sale.items
-        ],
+        "items": _build_receipt_items(sale.id),
         "order_type": getattr(sale, "order_type", None),
         "order_snapshot": getattr(sale, "order_snapshot", None),
     }
