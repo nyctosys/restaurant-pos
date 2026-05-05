@@ -136,54 +136,57 @@ def _print_worker_loop() -> None:
 
 
 def _run_print_job(job: "_QueuedPrintJob") -> bool:
-    last_message = None
-    for attempt in range(1, _MAX_PRINT_ATTEMPTS + 1):
-        try:
-            logger.info(
-                "Print job started",
-                extra={"job_id": job.job_id, "label": job.label, "attempt": attempt},
-            )
-            _append_job_log(
-                job.job_id,
-                job.label,
-                "started",
-                f"Attempt {attempt} of {_MAX_PRINT_ATTEMPTS}",
-            )
-            ok = job.fn(*job.args)
-            if ok is False:
-                last_message = _printer_last_error() or "Printer reported failure"
-                logger.warning(
-                    "Print job attempt failed",
+    from app import database_shell
+
+    with database_shell.app_context():
+        last_message = None
+        for attempt in range(1, _MAX_PRINT_ATTEMPTS + 1):
+            try:
+                logger.info(
+                    "Print job started",
                     extra={"job_id": job.job_id, "label": job.label, "attempt": attempt},
                 )
-            else:
-                _append_job_log(job.job_id, job.label, "succeeded")
-                return True
-        except Exception as exc:
-            last_message = "Unhandled exception while printing"
-            logger.exception(
-                "Print job attempt raised",
-                extra={"job_id": job.job_id, "label": job.label, "attempt": attempt},
-            )
-            try:
-                from app.services.printer_service import PrinterService
+                _append_job_log(
+                    job.job_id,
+                    job.label,
+                    "started",
+                    f"Attempt {attempt} of {_MAX_PRINT_ATTEMPTS}",
+                )
+                ok = job.fn(*job.args)
+                if ok is False:
+                    last_message = _printer_last_error() or "Printer reported failure"
+                    logger.warning(
+                        "Print job attempt failed",
+                        extra={"job_id": job.job_id, "label": job.label, "attempt": attempt},
+                    )
+                else:
+                    _append_job_log(job.job_id, job.label, "succeeded")
+                    return True
+            except Exception as exc:
+                last_message = "Unhandled exception while printing"
+                logger.exception(
+                    "Print job attempt raised",
+                    extra={"job_id": job.job_id, "label": job.label, "attempt": attempt},
+                )
+                try:
+                    from app.services.printer_service import PrinterService
 
-                PrinterService()._set_last_error(str(exc))
-            except Exception:
-                pass
+                    PrinterService()._set_last_error(str(exc))
+                except Exception:
+                    pass
 
-        if attempt < _MAX_PRINT_ATTEMPTS:
-            _append_job_log(
-                job.job_id,
-                job.label,
-                "retrying",
-                f"{last_message}; retrying attempt {attempt + 1}",
-            )
-            time.sleep(_RETRY_DELAY_SECONDS)
+            if attempt < _MAX_PRINT_ATTEMPTS:
+                _append_job_log(
+                    job.job_id,
+                    job.label,
+                    "retrying",
+                    f"{last_message}; retrying attempt {attempt + 1}",
+                )
+                time.sleep(_RETRY_DELAY_SECONDS)
 
-    _append_job_log(job.job_id, job.label, "failed", last_message or "Printer reported failure")
-    _record_print_failure_event(job, last_message or "Printer reported failure")
-    return False
+        _append_job_log(job.job_id, job.label, "failed", last_message or "Printer reported failure")
+        _record_print_failure_event(job, last_message or "Printer reported failure")
+        return False
 
 
 def _printer_last_error() -> str | None:

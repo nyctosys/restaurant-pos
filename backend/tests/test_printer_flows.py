@@ -3,7 +3,8 @@ from __future__ import annotations
 import pytest
 from werkzeug.security import generate_password_hash
 
-from app.models import Branch, Ingredient, IngredientBranchStock, Product, RecipeItem, User, db
+from app.models import Branch, Ingredient, IngredientBranchStock, Product, RecipeItem, Setting, User, db
+from app.services.printer_background import _QueuedPrintJob, _do_print_kot, _do_print_receipt, _run_print_job
 from app.services.branch_ingredient_stock import seed_branch_stocks_for_new_ingredient
 
 
@@ -44,6 +45,43 @@ def _login_token(client):
     r = client.post("/api/auth/login", json={"username": "owner-printer", "password": "pass"})
     assert r.status_code == 200
     return r.get_json()["token"]
+
+
+class _StubPrinter:
+    def set(self, *args, **kwargs):
+        return None
+
+    def text(self, *args, **kwargs):
+        return None
+
+    def cut(self, *args, **kwargs):
+        return None
+
+    def close(self):
+        return None
+
+    def buzzer(self, *args, **kwargs):
+        return None
+
+
+def _seed_printer_settings(app, branch_id: int) -> None:
+    with app.app_context():
+        db.session.add(
+            Setting(
+                branch_id=branch_id,
+                config={
+                    "hardware": {
+                        "receipt_printer_mode": "lan",
+                        "receipt_printer_ip": "127.0.0.1",
+                        "receipt_printer_port": 9100,
+                        "kot_printer_mode": "lan",
+                        "kot_printer_ip": "127.0.0.1",
+                        "kot_printer_port": 9100,
+                    }
+                },
+            )
+        )
+        db.session.commit()
 
 
 @pytest.mark.parametrize(
@@ -257,3 +295,69 @@ def test_deferred_receipt_print_retries_transient_failure(app, monkeypatch):
     run_print_receipt_job({"branch_id": branch_id, "items": [], "total": 0})
 
     assert len(calls) == 2
+
+
+def test_deferred_receipt_worker_runs_with_app_context(app, monkeypatch):
+    branch_id, _ = _setup_owner_and_menu_item(app)
+    _seed_printer_settings(app, branch_id)
+
+    def _fake_ensure_connected(self, printer_kind, *, branch_id=None, fresh=False):
+        self.printer = _StubPrinter()
+        return True
+
+    monkeypatch.setattr("app.services.printer_service.PrinterService._ensure_connected", _fake_ensure_connected)
+    monkeypatch.setattr("app.services.printer_service.PrinterService._disconnect", lambda self: None)
+
+    job = _QueuedPrintJob(
+        priority=0,
+        seq=1,
+        job_id=1,
+        label="receipt",
+        fn=_do_print_receipt,
+        args=(
+            {
+                "branch_id": branch_id,
+                "items": [{"title": "Printer Item", "quantity": 1, "unit_price": 10.0}],
+                "subtotal": 10.0,
+                "tax_amount": 0.0,
+                "total": 10.0,
+                "operator": "owner-printer",
+                "branch": "Main",
+                "order_type": "takeaway",
+            },
+        ),
+    )
+
+    assert _run_print_job(job) is True
+
+
+def test_deferred_kot_worker_runs_with_app_context(app, monkeypatch):
+    branch_id, _ = _setup_owner_and_menu_item(app)
+    _seed_printer_settings(app, branch_id)
+
+    def _fake_ensure_connected(self, printer_kind, *, branch_id=None, fresh=False):
+        self.printer = _StubPrinter()
+        return True
+
+    monkeypatch.setattr("app.services.printer_service.PrinterService._ensure_connected", _fake_ensure_connected)
+    monkeypatch.setattr("app.services.printer_service.PrinterService._disconnect", lambda self: None)
+
+    job = _QueuedPrintJob(
+        priority=1,
+        seq=1,
+        job_id=2,
+        label="kot",
+        fn=_do_print_kot,
+        args=(
+            {
+                "sale_id": 99,
+                "branch_id": branch_id,
+                "branch": "Main",
+                "operator": "owner-printer",
+                "order_type": "takeaway",
+                "items": [{"title": "Printer Item", "quantity": 1}],
+            },
+        ),
+    )
+
+    assert _run_print_job(job) is True
