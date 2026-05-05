@@ -824,7 +824,7 @@ export default function IngredientsTab() {
         </div>
       </div>
 
-      <div className="page-padding flex min-h-0 min-w-0 flex-1 flex-col overflow-auto pt-4 lg:pt-5">
+      <div className="page-padding flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden pt-4 lg:pt-5">
         {loading ? (
           <div className="flex flex-1 items-center justify-center py-20 text-soot-400 gap-2">
             <Loader2 className="w-5 h-5 animate-spin" /> Loading materials...
@@ -838,9 +838,9 @@ export default function IngredientsTab() {
              <p className="text-sm">Click "Add material" to start tracking inventory.</p>
            </div>
         ) : (
-          <div className="app-table-shell">
+          <div className="app-table-shell flex min-h-0 min-w-0 flex-1 flex-col">
             {lowStockIngredients.length > 0 && (
-              <div className="flex flex-wrap items-center gap-2 border-b border-red-200/70 bg-red-50/85 px-4 py-3 text-sm text-red-800">
+              <div className="flex flex-wrap items-center gap-2 border-b border-red-200/70 bg-red-50/85 px-4 py-3 text-sm text-red-800 shrink-0">
                 <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden="true" />
                 <span className="font-semibold">
                   {lowStockIngredients.length} material{lowStockIngredients.length === 1 ? '' : 's'} running low
@@ -851,7 +851,7 @@ export default function IngredientsTab() {
                 </span>
               </div>
             )}
-            <div className="app-table-scroll max-h-[calc(100vh-18rem)] min-h-[22rem] overscroll-contain lg:max-h-[calc(100vh-16rem)]">
+            <div className="app-table-scroll min-h-0 min-w-0 flex-1 overflow-x-auto overflow-y-auto overscroll-contain pb-3">
               <table className="app-table menu-items-table min-w-[760px]">
                 <thead>
                   <tr>

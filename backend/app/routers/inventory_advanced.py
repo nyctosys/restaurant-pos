@@ -39,9 +39,22 @@ from app.services.product_pricing import recalculate_product_cost
 from app.services.branch_scope import resolve_terminal_branch_id
 from app.deps import get_current_user
 from app.schemas.inventory_schemas import (
-    SupplierCreate, SupplierUpdate, IngredientCreate, IngredientUpdate, IngredientBulkCreate,
-    RecipeItemCreate, PurchaseOrderCreate, PurchaseOrderReceive, StockMovementCreate,
-    PreparedItemCreate, PreparedItemUpdate, PreparedItemBatchCreate, RecipePreparedItemCreate, RecipeExtraCostCreate,
+    SupplierCreate,
+    SupplierUpdate,
+    IngredientCreate,
+    IngredientUpdate,
+    IngredientBulkCreate,
+    RecipeItemCreate,
+    RecipeItemUpdate,
+    RecipePreparedItemUpdate,
+    PurchaseOrderCreate,
+    PurchaseOrderReceive,
+    StockMovementCreate,
+    PreparedItemCreate,
+    PreparedItemUpdate,
+    PreparedItemBatchCreate,
+    RecipePreparedItemCreate,
+    RecipeExtraCostCreate,
 )
 
 inventory_advanced_router = APIRouter(prefix="/api/inventory-advanced", tags=["inventory-advanced"])
@@ -617,6 +630,58 @@ def add_recipe_item(payload: RecipeItemCreate, current_user: User = Depends(get_
     db.session.commit()
     return {"id": r.id, "message": "Recipe item mapped"}
 
+
+@inventory_advanced_router.patch("/recipes/{recipe_item_id}")
+def update_recipe_item(
+    recipe_item_id: int,
+    payload: RecipeItemUpdate,
+    current_user: User = Depends(get_current_user),
+):
+    r = db.session.get(RecipeItem, recipe_item_id)
+    if r is None:
+        return JSONResponse(status_code=404, content={"message": "Recipe line not found"})
+    data = payload.model_dump(exclude_unset=True)
+    if not data:
+        return {"message": "No changes", "id": r.id}
+
+    has_qty = "quantity" in data or "unit" in data
+    if has_qty and ("quantity" not in data or "unit" not in data):
+        return JSONResponse(
+            status_code=400,
+            content={"message": "quantity and unit must be provided together when changing amounts"},
+        )
+    if "ingredient_id" in data and not has_qty:
+        return JSONResponse(
+            status_code=400,
+            content={"message": "When changing ingredient, provide quantity and unit (same as when adding a line)"},
+        )
+
+    ing_id = int(data["ingredient_id"]) if "ingredient_id" in data else r.ingredient_id
+    ingredient = db.session.get(Ingredient, ing_id)
+    if ingredient is None:
+        return JSONResponse(status_code=404, content={"message": "Ingredient not found"})
+
+    if has_qty:
+        try:
+            qty_base = to_base_unit(float(data["quantity"]), str(data["unit"]), ingredient)
+        except ValueError as exc:
+            return JSONResponse(status_code=400, content={"message": str(exc)})
+        r.quantity = qty_base
+        r.unit = ingredient.unit
+        r.ingredient_id = ing_id
+
+    if "notes" in data:
+        r.notes = data["notes"]
+    if "variant_key" in data:
+        r.variant_key = str(data["variant_key"] or "").strip()[:100]
+
+    product = db.session.get(Product, r.product_id)
+    if product is not None:
+        recalculate_product_cost(product)
+    db.session.commit()
+    return {"message": "Recipe line updated", "id": r.id}
+
+
 @inventory_advanced_router.delete("/recipes/{recipe_item_id}")
 def delete_recipe_item(recipe_item_id: int, current_user: User = Depends(get_current_user)):
     r = db.session.get(RecipeItem, recipe_item_id)
@@ -662,6 +727,68 @@ def add_recipe_prepared_item(payload: RecipePreparedItemCreate, current_user: Us
         recalculate_product_cost(product)
     db.session.commit()
     return {"id": r.id, "message": "Prepared sauce/marination mapped"}
+
+
+@inventory_advanced_router.patch("/recipes/prepared-items/{recipe_item_id}")
+def update_recipe_prepared_item(
+    recipe_item_id: int,
+    payload: RecipePreparedItemUpdate,
+    current_user: User = Depends(get_current_user),
+):
+    r = db.session.get(RecipePreparedItem, recipe_item_id)
+    if r is None:
+        return JSONResponse(status_code=404, content={"message": "Recipe line not found"})
+    data = payload.model_dump(exclude_unset=True)
+    if not data:
+        return {"message": "No changes", "id": r.id}
+
+    has_qty = "quantity" in data or "unit" in data
+    if has_qty and ("quantity" not in data or "unit" not in data):
+        return JSONResponse(
+            status_code=400,
+            content={"message": "quantity and unit must be provided together when changing amounts"},
+        )
+    if "prepared_item_id" in data and not has_qty:
+        return JSONResponse(
+            status_code=400,
+            content={"message": "When changing sauce/marination, provide quantity and unit"},
+        )
+
+    prep_id = int(data["prepared_item_id"]) if "prepared_item_id" in data else r.prepared_item_id
+    prepared_item = db.session.get(PreparedItem, prep_id)
+    if prepared_item is None:
+        return JSONResponse(status_code=404, content={"message": "Prepared item not found"})
+    prepared_unit = (
+        prepared_item.unit.value
+        if hasattr(prepared_item.unit, "value")
+        else str(prepared_item.unit or "")
+    )
+    if has_qty:
+        try:
+            qty_base = convert_quantity_to_unit(
+                float(data["quantity"]),
+                normalize_unit_token(str(data["unit"])),
+                normalize_unit_token(prepared_unit),
+            )
+        except ValueError as exc:
+            return JSONResponse(
+                status_code=400,
+                content={"message": f"Cannot convert recipe unit to prepared item unit ({prepared_unit}): {exc}"},
+            )
+        r.quantity = qty_base
+        r.unit = prepared_item.unit
+        r.prepared_item_id = prep_id
+
+    if "notes" in data:
+        r.notes = data["notes"]
+    if "variant_key" in data:
+        r.variant_key = str(data["variant_key"] or "").strip()[:100]
+
+    product = db.session.get(Product, r.product_id)
+    if product is not None:
+        recalculate_product_cost(product)
+    db.session.commit()
+    return {"message": "Recipe line updated", "id": r.id}
 
 
 @inventory_advanced_router.delete("/recipes/prepared-items/{recipe_item_id}")

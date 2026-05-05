@@ -208,6 +208,43 @@ export function quantityToStorageBase(quantity: number, fromUnit: string, storag
   throw new Error(`Incompatible units: ${from} → ${to}`);
 }
 
+/**
+ * Inverse of `quantityToStorageBase`: storage quantity → same amount expressed in `inputUnit`
+ * (for editing BOM lines on prepared items).
+ */
+export function storageBaseToInputQuantity(
+  storageQty: number,
+  inputUnit: string,
+  storageUnit: string
+): number {
+  if (!Number.isFinite(storageQty)) return NaN;
+  return quantityToStorageBase(storageQty, storageUnit, inputUnit);
+}
+
+/**
+ * Inverse of `toBaseUnit` for editing raw-ingredient BOM lines (includes carton/packet).
+ */
+export function ingredientBaseToInputQuantity(
+  baseQty: number,
+  inputUnit: string,
+  ing: IngredientUnitFields
+): number {
+  if (!Number.isFinite(baseQty)) return NaN;
+  const fromU = normalizeUnitToken(inputUnit);
+  const baseU = normalizeUnitToken(ing.unit ?? ing.unitOfMeasure ?? '');
+  if (!baseU) throw new Error('Ingredient has no base unit');
+  if (fromU === baseU) return baseQty;
+  if (fromU === 'carton' || fromU === 'packet') {
+    const conv = effectivePackagingConversions(ing);
+    const perOne = conv[fromU as 'carton' | 'packet'];
+    if (perOne == null || perOne <= 0) {
+      throw new Error(`Missing positive unit_conversions['${fromU}'] for this ingredient (base ${baseU})`);
+    }
+    return baseQty / perOne;
+  }
+  return quantityToStorageBase(baseQty, baseU, fromU);
+}
+
 /** Static pair conversion (prepared items / legacy). For raw ingredients with packaging use `toBaseUnit`. */
 export function quantityToIngredientBase(
   quantity: number,

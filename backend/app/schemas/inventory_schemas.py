@@ -205,6 +205,37 @@ class RecipeItemBase(BaseModel):
 class RecipeItemCreate(RecipeItemBase):
     product_id: int
 
+
+class RecipeItemUpdate(BaseModel):
+    """Partial update for a BOM ingredient line — same conversion rules as create."""
+
+    model_config = ConfigDict(extra="ignore")
+    ingredient_id: int | None = None
+    quantity: float | None = None
+    unit: str | None = None
+    notes: str | None = None
+    variant_key: str | None = None
+
+    @field_validator("unit")
+    @classmethod
+    def normalize_optional_bom_unit(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return _normalize_bom_input_unit(value)
+
+    @field_validator("notes")
+    @classmethod
+    def normalize_optional_notes(cls, value: str | None) -> str | None:
+        return _clean_optional_text(value)
+
+    @field_validator("variant_key")
+    @classmethod
+    def normalize_optional_variant_key(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return str(value or "").strip()
+
+
 class RecipeItemResponse(RecipeItemBase):
     id: int
     product_id: int
@@ -294,6 +325,36 @@ class RecipePreparedItemBase(BaseModel):
 
 class RecipePreparedItemCreate(RecipePreparedItemBase):
     product_id: int
+
+
+class RecipePreparedItemUpdate(BaseModel):
+    """Partial update for a BOM prepared-item line."""
+
+    model_config = ConfigDict(extra="ignore")
+    prepared_item_id: int | None = None
+    quantity: float | None = None
+    unit: str | None = None
+    notes: str | None = None
+    variant_key: str | None = None
+
+    @field_validator("unit")
+    @classmethod
+    def normalize_optional_bom_unit_prep(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return _normalize_bom_input_unit(value)
+
+    @field_validator("notes")
+    @classmethod
+    def normalize_optional_notes_prep(cls, value: str | None) -> str | None:
+        return _clean_optional_text(value)
+
+    @field_validator("variant_key")
+    @classmethod
+    def normalize_optional_variant_key_prep(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return str(value or "").strip()
 
 
 class RecipeExtraCostBase(BaseModel):

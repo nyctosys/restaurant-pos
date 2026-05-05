@@ -270,16 +270,17 @@ export default function PreparedItemsTab() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-20 text-soot-400 gap-2">
+      <div className="flex min-h-0 flex-1 items-center justify-center gap-2 py-20 text-soot-400">
         <Loader2 className="w-5 h-5 animate-spin" /> Loading sauces and marinations...
       </div>
     );
   }
 
   return (
-    <div className="grid grid-cols-1 xl:grid-cols-[1fr_24rem] gap-4 px-4 lg:px-6 py-4">
-      <div className="glass-card app-table-shell">
-        <div className="p-4 border-b border-white/20 bg-white/20 flex items-center justify-between gap-3">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 px-4 py-4 lg:px-6">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 xl:flex-row xl:items-stretch">
+      <div className="glass-card app-table-shell flex min-h-0 min-w-0 flex-1 flex-col">
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-white/20 bg-white/20 p-4">
           <div>
             <h3 className="font-bold text-soot-900">Marinations & Sauces</h3>
             <p className="text-xs text-soot-500 mt-0.5">Batch-made prep items built from raw ingredients.</p>
@@ -292,27 +293,28 @@ export default function PreparedItemsTab() {
           </button>
         </div>
 
-        <div className="app-table-scroll">
-          {lowStockItems.length > 0 && (
-            <div className="flex flex-wrap items-center gap-2 border-b border-red-200/70 bg-red-50/85 px-4 py-3 text-sm text-red-800">
-              <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden="true" />
-              <span className="font-semibold">
-                {lowStockItems.length} sauce/marination{lowStockItems.length === 1 ? '' : 's'} running low
-              </span>
-              <span className="text-red-700">
-                {lowStockItems.slice(0, 3).map((item) => item.name).join(', ')}
-                {lowStockItems.length > 3 ? ` +${lowStockItems.length - 3} more` : ''}
-              </span>
-            </div>
-          )}
-          <table className="app-table text-sm">
+        {lowStockItems.length > 0 && (
+          <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-red-200/70 bg-red-50/85 px-4 py-3 text-sm text-red-800">
+            <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden="true" />
+            <span className="font-semibold">
+              {lowStockItems.length} sauce/marination{lowStockItems.length === 1 ? '' : 's'} running low
+            </span>
+            <span className="text-red-700">
+              {lowStockItems.slice(0, 3).map((item) => item.name).join(', ')}
+              {lowStockItems.length > 3 ? ` +${lowStockItems.length - 3} more` : ''}
+            </span>
+          </div>
+        )}
+
+        <div className="app-table-scroll min-h-0 min-w-0 flex-1 overflow-x-auto overflow-y-auto overscroll-contain pb-3">
+          <table className="app-table min-w-[640px] text-sm">
             <thead>
               <tr>
-                <th>Name</th>
-                <th>Type</th>
-                <th className="text-right">Stock</th>
-                <th className="text-right">Cost per yield</th>
-                <th>Formula</th>
+                <th className="sticky top-0 z-10">Name</th>
+                <th className="sticky top-0 z-10">Type</th>
+                <th className="sticky top-0 z-10 text-right">Stock</th>
+                <th className="sticky top-0 z-10 text-right">Cost per yield</th>
+                <th className="sticky top-0 z-10">Formula</th>
               </tr>
             </thead>
             <tbody>
@@ -355,7 +357,7 @@ export default function PreparedItemsTab() {
         </div>
       </div>
 
-      <div className="space-y-4">
+      <div className="shrink-0 space-y-4 xl:w-96 xl:min-w-[24rem]">
         <form onSubmit={handleBatchSubmit} className="glass-card p-4 space-y-4">
           <div className="flex items-center gap-2">
             <Beaker className="w-5 h-5 text-brand-700" />
@@ -390,11 +392,12 @@ export default function PreparedItemsTab() {
           </button>
         </form>
       </div>
+      </div>
 
       {showForm && (
         <div className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center p-4">
           <form onSubmit={handleSubmit} className="glass-card w-full max-w-3xl max-h-[90vh] overflow-hidden p-5 flex flex-col">
-            <div className="sticky top-0 z-20 bg-[rgba(15,18,28,0.86)] backdrop-blur-sm pb-3 -mt-1 pt-1 flex items-center justify-between gap-3">
+            <div className="mb-3 flex items-center justify-between gap-3 border-b border-white/20 pb-2">
               <h3 className="font-bold text-soot-900">{editingItem ? 'Edit' : 'New'} Sauce/Marination</h3>
               <button type="button" onClick={() => setShowForm(false)} className="p-2 text-soot-500 hover:text-soot-900">
                 <X className="w-5 h-5" />
@@ -444,19 +447,22 @@ export default function PreparedItemsTab() {
                 />
               </div>
 
-              <div className="space-y-3">
-                <div className="sticky top-0 z-10 bg-[rgba(15,18,28,0.86)] backdrop-blur-sm py-1 flex items-center justify-between">
+                <div className="space-y-3">
+                <div className="flex items-center justify-between">
                   <h4 className="text-sm font-bold text-soot-900">Formula per 1 {unit}</h4>
                   <span className="text-xs font-semibold text-brand-700">
                     Est. cost / {formatYieldUnit(unit)}: {formatCurrency(formCost)}
                   </span>
                 </div>
                 <div className="max-h-[40vh] overflow-y-auto overflow-x-hidden pr-1 space-y-1.5">
-                  <div className="grid grid-cols-[minmax(0,1fr)_6.25rem_4.25rem_8.5rem_2rem] gap-1.5 px-1 text-[10px] font-bold uppercase tracking-wide text-soot-500 sticky top-0 z-10 bg-[rgba(15,18,28,0.9)] py-1">
-                    <div>Ingredient</div>
-                    <div className="text-right">Unit price</div>
-                    <div className="text-right">Total</div>
-                    <div>Qty</div>
+                  <div className="grid grid-cols-[minmax(14rem,28rem)_8.75rem_7rem_10.5rem_2rem] gap-2 px-1 text-[10px] font-bold uppercase tracking-wide text-soot-500 py-1">
+                    <div className="pl-1">Ingredient</div>
+                    <div className="text-center whitespace-nowrap">Unit price</div>
+                    <div className="text-center whitespace-nowrap">Total</div>
+                    <div className="grid grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)] gap-1.5 min-w-0">
+                      <div className="text-center whitespace-nowrap">Qty</div>
+                      <div className="text-center whitespace-nowrap">Unit</div>
+                    </div>
                     <div />
                   </div>
                   {components.map((row, index) => {
@@ -483,7 +489,7 @@ export default function PreparedItemsTab() {
 
                     return (
                       <div key={index} className="space-y-1">
-                        <div className="grid grid-cols-[minmax(0,1fr)_6.25rem_4.25rem_8.5rem_2rem] gap-1.5 items-center">
+                        <div className="grid grid-cols-[minmax(14rem,28rem)_8.75rem_7rem_10.5rem_2rem] gap-2 items-center">
                           <SearchableSelect
                             value={row.ingredientId}
                             onChange={(value) => {
@@ -497,16 +503,16 @@ export default function PreparedItemsTab() {
                             options={ingredientOptions}
                             className="glass-card border-0 px-2.5 py-1.5 min-w-0"
                           />
-                          <div className="text-right text-[11px] leading-tight font-semibold text-brand-700 px-1 min-w-0">
+                          <div className="text-center text-[11px] leading-tight font-semibold text-brand-700 min-w-0 tabular-nums px-0.5">
                             <div>{ingredientUnitPrice}</div>
                             {ingredient && ingredientPerKgPrice !== null && (
                               <div className="text-[9px] text-soot-400">{formatCurrency(ingredientPerKgPrice)} / kg</div>
                             )}
                           </div>
-                          <div className="text-right text-[11px] font-semibold text-soot-700 px-1">
+                          <div className="text-center text-[11px] font-semibold text-soot-700 tabular-nums px-0.5">
                             {ingredient ? formatCurrency(lineTotal) : '-'}
                           </div>
-                          <div className="grid grid-cols-[1fr_3.75rem] gap-1.5 min-w-0">
+                          <div className="grid grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)] gap-1.5 min-w-0">
                             <input
                               type="number"
                               min="0.000001"

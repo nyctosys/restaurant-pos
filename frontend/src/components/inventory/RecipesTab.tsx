@@ -1,10 +1,15 @@
 import React, { useState, useEffect, useRef, useLayoutEffect, useMemo } from 'react';
-import { Plus, X, Loader2, Trash2, ArrowRight, Utensils, PackageSearch } from 'lucide-react';
-import { get, post, del, getUserMessage } from '../../api';
+import { Plus, X, Loader2, Trash2, ArrowRight, Utensils, PackageSearch, Pencil } from 'lucide-react';
+import { get, post, patch, del, getUserMessage } from '../../api';
 import SearchableSelect from '../SearchableSelect';
 import { showToast } from '../Toast';
 import { formatCurrency } from '../../utils/formatCurrency';
-import { formatBaseQuantityGlobal, getSelectableInputUnits } from '../../utils/unitConversion';
+import {
+  formatBaseQuantityGlobal,
+  getSelectableInputUnits,
+  ingredientBaseToInputQuantity,
+  storageBaseToInputQuantity,
+} from '../../utils/unitConversion';
 
 type Product = {
   id: number;
@@ -70,6 +75,11 @@ type RecipeExtraCost = {
   variant_key?: string;
 };
 
+type RecipeLineEdit =
+  | { kind: 'ingredient'; row: RecipeItem }
+  | { kind: 'prepared'; row: RecipePreparedItem }
+  | { kind: 'extra'; row: RecipeExtraCost };
+
 type BomSectionModel = {
   scopeKey: string;
   label: string;
@@ -83,7 +93,17 @@ function vkNorm(vk: string | undefined): string {
   return (vk || '').trim();
 }
 
-export default function RecipesTab() {
+export type RecipesTabProps = {
+  /** When set (e.g. from `/inventory?tab=recipes&recipeProduct=123`), select this menu item once data loads. */
+  initialFocusProductId?: number | null;
+  /** Called after the initial focus is applied or determined invalid, so the URL can drop `recipeProduct`. */
+  onInitialRecipeFocusConsumed?: () => void;
+};
+
+export default function RecipesTab({
+  initialFocusProductId = null,
+  onInitialRecipeFocusConsumed,
+}: RecipesTabProps) {
   const [products, setProducts] = useState<Product[]>([]);
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
   const [preparedItems, setPreparedItems] = useState<PreparedItem[]>([]);
@@ -112,6 +132,9 @@ export default function RecipesTab() {
   const [showExtraCostForm, setShowExtraCostForm] = useState(false);
   const [extraCostName, setExtraCostName] = useState('');
   const [extraCostAmount, setExtraCostAmount] = useState('');
+  const [recipeLineEdit, setRecipeLineEdit] = useState<RecipeLineEdit | null>(null);
+
+  const initialFocusAppliedRef = useRef(false);
 
   const selectedProduct = useMemo(
     () => (selectedProductId != null ? products.find((p) => p.id === selectedProductId) : undefined),
@@ -176,6 +199,29 @@ export default function RecipesTab() {
     fetchBaseData();
   }, []);
 
+  /** Deep-link from Menu catalog: open this product's BOM once lists are ready. */
+  useEffect(() => {
+    if (loadingInitial || initialFocusProductId == null) return;
+    if (initialFocusAppliedRef.current) return;
+    const product = products.find((item) => item.id === initialFocusProductId);
+    if (!product) {
+      if (products.length > 0) {
+        initialFocusAppliedRef.current = true;
+        showToast('That menu item was not found in the recipe list.', 'error');
+        onInitialRecipeFocusConsumed?.();
+      }
+      return;
+    }
+    initialFocusAppliedRef.current = true;
+    selectProductForRecipe(initialFocusProductId);
+    onInitialRecipeFocusConsumed?.();
+  }, [
+    loadingInitial,
+    initialFocusProductId,
+    products,
+    onInitialRecipeFocusConsumed,
+  ]);
+
   useEffect(() => {
     if (!selectedProduct) return;
     const firstVariant = (selectedProduct.variants || [])
@@ -190,6 +236,7 @@ export default function RecipesTab() {
   }, [selectedProduct, recipeVariantScope]);
 
   useEffect(() => {
+    if (recipeLineEdit) return;
     if (formMaterialType === 'ingredient' && formIngredientId) {
       const ing = ingredients.find((i) => i.id.toString() === formIngredientId);
       if (ing) {
@@ -203,7 +250,50 @@ export default function RecipesTab() {
         setFormInputUnit(opts[0] || p.unit);
       }
     }
-  }, [formMaterialType, formIngredientId, formPreparedItemId, ingredients, preparedItems]);
+  }, [recipeLineEdit, formMaterialType, formIngredientId, formPreparedItemId, ingredients, preparedItems]);
+
+  useEffect(() => {
+    if (!recipeLineEdit) return;
+    if (recipeLineEdit.kind === 'extra') {
+      setExtraCostName(recipeLineEdit.row.name);
+      setExtraCostAmount(String(recipeLineEdit.row.amount));
+      return;
+    }
+    if (recipeLineEdit.kind === 'ingredient') {
+      const ri = recipeLineEdit.row;
+      const ing = ingredients.find((i) => i.id === ri.ingredient_id);
+      if (!ing) return;
+      setFormMaterialType('ingredient');
+      setFormIngredientId(String(ri.ingredient_id));
+      const opts = getSelectableInputUnits(ing);
+      const inputU = opts[0] || ing.unit;
+      setFormInputUnit(inputU);
+      try {
+        const q = ingredientBaseToInputQuantity(ri.quantity, inputU, ing);
+        setFormQuantity(String(Number.isFinite(q) ? q : ri.quantity));
+      } catch {
+        setFormQuantity(String(ri.quantity));
+      }
+      setFormNotes((ri.notes as string | undefined) || '');
+      return;
+    }
+    const ri = recipeLineEdit.row;
+    const p = preparedItems.find((i) => i.id === ri.prepared_item_id);
+    if (!p) return;
+    setFormMaterialType('prepared');
+    setFormPreparedItemId(String(ri.prepared_item_id));
+    const opts = getSelectableInputUnits(p.unit);
+    const unitStr = p.unit;
+    const inputU = opts[0] || unitStr;
+    setFormInputUnit(inputU);
+    try {
+      const q = storageBaseToInputQuantity(ri.quantity, inputU, unitStr);
+      setFormQuantity(String(Number.isFinite(q) ? q : ri.quantity));
+    } catch {
+      setFormQuantity(String(ri.quantity));
+    }
+    setFormNotes((ri.notes as string | undefined) || '');
+  }, [recipeLineEdit, ingredients, preparedItems]);
 
   useLayoutEffect(() => {
     if (!scrollToRowId) return;
@@ -263,28 +353,59 @@ export default function RecipesTab() {
     }
     setShowAddForm(false);
     setShowExtraCostForm(false);
+    setRecipeLineEdit(null);
     void refreshRecipeData(productId);
   };
 
   const handleAddSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedProductId || !formQuantity) return;
-    
+
     const qty = parseFloat(formQuantity);
     if (isNaN(qty) || qty <= 0) {
       showToast('Enter a valid quantity', 'error');
       return;
     }
 
-    const ing = ingredients.find(i => i.id.toString() === formIngredientId);
-    const prepared = preparedItems.find(i => i.id.toString() === formPreparedItemId);
+    const ing = ingredients.find((i) => i.id.toString() === formIngredientId);
+    const prepared = preparedItems.find((i) => i.id.toString() === formPreparedItemId);
     if (formMaterialType === 'ingredient' && !ing) return;
     if (formMaterialType === 'prepared' && !prepared) return;
 
     setSubmitting(true);
     try {
       let newRowKey: string | null = null;
-      if (formMaterialType === 'ingredient' && ing) {
+      if (recipeLineEdit?.kind === 'ingredient' && ing) {
+        const opts = getSelectableInputUnits(ing);
+        const inputU =
+          formInputUnit && opts.includes(formInputUnit) ? formInputUnit : opts[0] || ing.unit;
+        await patch(`/inventory-advanced/recipes/${recipeLineEdit.row.id}`, {
+          ingredient_id: parseInt(formIngredientId, 10),
+          quantity: qty,
+          unit: inputU,
+          notes: formNotes || undefined,
+          variant_key: vkNorm(recipeLineEdit.row.variant_key),
+        });
+        newRowKey = `ing-${recipeLineEdit.row.id}`;
+        showToast('Recipe line updated', 'success');
+        setRecipeLineEdit(null);
+        setShowAddForm(false);
+      } else if (recipeLineEdit?.kind === 'prepared' && prepared) {
+        const opts = getSelectableInputUnits(prepared.unit);
+        const inputU =
+          formInputUnit && opts.includes(formInputUnit) ? formInputUnit : opts[0] || prepared.unit;
+        await patch(`/inventory-advanced/recipes/prepared-items/${recipeLineEdit.row.id}`, {
+          prepared_item_id: parseInt(formPreparedItemId, 10),
+          quantity: qty,
+          unit: inputU,
+          notes: formNotes || undefined,
+          variant_key: vkNorm(recipeLineEdit.row.variant_key),
+        });
+        newRowKey = `prep-${recipeLineEdit.row.id}`;
+        showToast('Recipe line updated', 'success');
+        setRecipeLineEdit(null);
+        setShowAddForm(false);
+      } else if (formMaterialType === 'ingredient' && ing) {
         const opts = getSelectableInputUnits(ing);
         const inputU =
           formInputUnit && opts.includes(formInputUnit) ? formInputUnit : opts[0] || ing.unit;
@@ -300,6 +421,7 @@ export default function RecipesTab() {
         if (res && typeof res === 'object' && 'id' in res) {
           newRowKey = `ing-${(res as { id: number }).id}`;
         }
+        showToast('Material added to recipe', 'success');
       } else if (prepared) {
         const opts = getSelectableInputUnits(prepared.unit);
         const inputU =
@@ -315,8 +437,8 @@ export default function RecipesTab() {
         if (res && typeof res === 'object' && 'id' in res) {
           newRowKey = `prep-${(res as { id: number }).id}`;
         }
+        showToast('Material added to recipe', 'success');
       }
-      showToast('Material added to recipe', 'success');
 
       setFormIngredientId('');
       setFormPreparedItemId('');
@@ -327,8 +449,8 @@ export default function RecipesTab() {
         await refreshRecipeData(selectedProductId);
         if (newRowKey) setScrollToRowId(newRowKey);
       }
-    } catch (e) {
-      showToast(getUserMessage(e), 'error');
+    } catch (err) {
+      showToast(getUserMessage(err), 'error');
     } finally {
       setSubmitting(false);
     }
@@ -370,19 +492,29 @@ export default function RecipesTab() {
     }
     setSubmitting(true);
     try {
-      await post('/inventory-advanced/recipes/extra-costs', {
-        product_id: selectedProductId,
-        name,
-        amount,
-        variant_key: recipeVariantScope || '',
-      });
-      showToast('Extra cost added', 'success');
+      if (recipeLineEdit?.kind === 'extra') {
+        await patch(`/inventory-advanced/recipes/extra-costs/${recipeLineEdit.row.id}`, {
+          name,
+          amount,
+          variant_key: vkNorm(recipeLineEdit.row.variant_key),
+        });
+        showToast('Extra cost updated', 'success');
+        setRecipeLineEdit(null);
+      } else {
+        await post('/inventory-advanced/recipes/extra-costs', {
+          product_id: selectedProductId,
+          name,
+          amount,
+          variant_key: recipeVariantScope || '',
+        });
+        showToast('Extra cost added', 'success');
+      }
       setExtraCostName('');
       setExtraCostAmount('');
       setShowExtraCostForm(false);
       await refreshRecipeData(selectedProductId);
-    } catch (e) {
-      showToast(getUserMessage(e), 'error');
+    } catch (err) {
+      showToast(getUserMessage(err), 'error');
     } finally {
       setSubmitting(false);
     }
@@ -540,7 +672,7 @@ export default function RecipesTab() {
                           <th>Qty</th>
                           <th className="text-right">Unit cost</th>
                           <th className="text-right text-brand-800">Total</th>
-                          <th className="w-9" aria-label="Actions" />
+                          <th className="min-w-[4.25rem] w-[4.25rem]" aria-label="Actions" />
                         </tr>
                       </thead>
                       <tbody>
@@ -572,15 +704,32 @@ export default function RecipesTab() {
                                     <td className="py-1 px-2 align-middle text-right font-semibold text-brand-800 tabular-nums whitespace-nowrap text-[11px]">
                                       {formatCurrency(lineCost)}
                                     </td>
-                                    <td className="py-1 px-1 align-middle text-center">
-                                      <button
-                                        type="button"
-                                        onClick={() => handleDelete(ri.id)}
-                                        className="p-1 text-soot-400 hover:text-red-600 rounded-md"
-                                        title="Remove"
-                                      >
-                                        <Trash2 className="w-4 h-4" />
-                                      </button>
+                                    <td className="py-1 px-0.5 align-middle text-center">
+                                      <div className="inline-flex items-center justify-center gap-0.5">
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setRecipeLineEdit({ kind: 'ingredient', row: ri });
+                                            setShowAddForm(true);
+                                            setShowExtraCostForm(false);
+                                            requestAnimationFrame(() =>
+                                              addFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+                                            );
+                                          }}
+                                          className="p-1 text-soot-500 hover:text-brand-700 rounded-md"
+                                          title="Edit line"
+                                        >
+                                          <Pencil className="w-4 h-4" />
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleDelete(ri.id)}
+                                          className="p-1 text-soot-400 hover:text-red-600 rounded-md"
+                                          title="Remove"
+                                        >
+                                          <Trash2 className="w-4 h-4" />
+                                        </button>
+                                      </div>
                                     </td>
                                   </tr>
                                 );
@@ -617,15 +766,32 @@ export default function RecipesTab() {
                                       <td className="py-1 px-2 align-middle text-right font-semibold text-brand-800 tabular-nums text-[11px]">
                                         {formatCurrency(lineCost)}
                                       </td>
-                                      <td className="py-1 px-1 align-middle text-center">
-                                        <button
-                                          type="button"
-                                          onClick={() => handleDelete(ri.id, 'prepared')}
-                                          className="p-1 text-soot-400 hover:text-red-600 rounded-md"
-                                          title="Remove"
-                                        >
-                                          <Trash2 className="w-4 h-4" />
-                                        </button>
+                                      <td className="py-1 px-0.5 align-middle text-center">
+                                        <div className="inline-flex items-center justify-center gap-0.5">
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              setRecipeLineEdit({ kind: 'prepared', row: ri });
+                                              setShowAddForm(true);
+                                              setShowExtraCostForm(false);
+                                              requestAnimationFrame(() =>
+                                                addFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+                                              );
+                                            }}
+                                            className="p-1 text-soot-500 hover:text-brand-700 rounded-md"
+                                            title="Edit line"
+                                          >
+                                            <Pencil className="w-4 h-4" />
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => handleDelete(ri.id, 'prepared')}
+                                            className="p-1 text-soot-400 hover:text-red-600 rounded-md"
+                                            title="Remove"
+                                          >
+                                            <Trash2 className="w-4 h-4" />
+                                          </button>
+                                        </div>
                                       </td>
                                     </tr>
                                     {components.length > 0 && (
@@ -668,15 +834,32 @@ export default function RecipesTab() {
                                   <td className="py-1 px-2 align-middle text-right font-semibold text-brand-800 tabular-nums text-[11px]">
                                     {formatCurrency(ec.amount)}
                                   </td>
-                                  <td className="py-1 px-1 align-middle text-center">
-                                    <button
-                                      type="button"
-                                      onClick={() => handleDeleteExtraCost(ec.id)}
-                                      className="p-1 text-soot-400 hover:text-red-600 rounded-md"
-                                      title="Remove"
-                                    >
-                                      <Trash2 className="w-4 h-4" />
-                                    </button>
+                                  <td className="py-1 px-0.5 align-middle text-center">
+                                    <div className="inline-flex items-center justify-center gap-0.5">
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setRecipeLineEdit({ kind: 'extra', row: ec });
+                                          setShowExtraCostForm(true);
+                                          setShowAddForm(false);
+                                          requestAnimationFrame(() =>
+                                            addFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+                                          );
+                                        }}
+                                        className="p-1 text-soot-500 hover:text-brand-700 rounded-md"
+                                        title="Edit extra cost"
+                                      >
+                                        <Pencil className="w-4 h-4" />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleDeleteExtraCost(ec.id)}
+                                        className="p-1 text-soot-400 hover:text-red-600 rounded-md"
+                                        title="Remove"
+                                      >
+                                        <Trash2 className="w-4 h-4" />
+                                      </button>
+                                    </div>
                                   </td>
                                 </tr>
                               ))}
@@ -696,11 +879,12 @@ export default function RecipesTab() {
 
             {/* Sticky bottom actions */}
             <div className="sticky bottom-0 z-10 shrink-0 border-t border-soot-200/80 bg-white/95 backdrop-blur-md px-2 py-2 shadow-[0_-4px_12px_rgba(0,0,0,0.06)]">
-              {!showAddForm && !showExtraCostForm ? (
+              {!showAddForm && !showExtraCostForm && !recipeLineEdit ? (
                 <div className="flex flex-col gap-2 sm:flex-row">
                   <button
                     type="button"
                     onClick={() => {
+                      setRecipeLineEdit(null);
                       setShowExtraCostForm(true);
                       requestAnimationFrame(() =>
                         addFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
@@ -713,6 +897,7 @@ export default function RecipesTab() {
                   <button
                     type="button"
                     onClick={() => {
+                      setRecipeLineEdit(null);
                       setShowAddForm(true);
                       requestAnimationFrame(() =>
                         addFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
@@ -726,16 +911,32 @@ export default function RecipesTab() {
               ) : (
                 <form
                   ref={addFormRef}
-                  onSubmit={showExtraCostForm ? handleAddExtraCost : handleAddSubmit}
+                  onSubmit={showExtraCostForm || recipeLineEdit?.kind === 'extra' ? handleAddExtraCost : handleAddSubmit}
                   className="glass-card p-3 space-y-3 shadow-sm border border-brand-200 bg-white/50 max-h-[70vh] overflow-y-auto overscroll-contain"
                 >
                   <div className="flex justify-between items-center mb-1">
-                    <h4 className="font-bold text-soot-900 text-sm">{showExtraCostForm ? 'Add Extra Cost' : 'Add Material'}</h4>
-                    <button type="button" onClick={() => { setShowAddForm(false); setShowExtraCostForm(false); }} className="text-soot-400 hover:text-soot-700 p-1">
+                    <h4 className="font-bold text-soot-900 text-sm">
+                      {recipeLineEdit?.kind === 'extra'
+                        ? 'Edit extra cost'
+                        : showExtraCostForm
+                          ? 'Add Extra Cost'
+                          : recipeLineEdit?.kind === 'ingredient' || recipeLineEdit?.kind === 'prepared'
+                            ? 'Edit recipe line'
+                            : 'Add Material'}
+                    </h4>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowAddForm(false);
+                        setShowExtraCostForm(false);
+                        setRecipeLineEdit(null);
+                      }}
+                      className="text-soot-400 hover:text-soot-700 p-1"
+                    >
                       <X className="w-4 h-4" />
                     </button>
                   </div>
-                  {showExtraCostForm ? (
+                  {showExtraCostForm || recipeLineEdit?.kind === 'extra' ? (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div>
                         <label className="block text-xs font-semibold text-soot-600 uppercase tracking-wider mb-1">Cost Name</label>
@@ -768,12 +969,13 @@ export default function RecipesTab() {
                       <label className="block text-xs font-semibold text-soot-600 uppercase tracking-wider mb-1">Material type</label>
                       <select
                         value={formMaterialType}
+                        disabled={!!recipeLineEdit}
                         onChange={(e) => {
                           setFormMaterialType(e.target.value as 'ingredient' | 'prepared');
                           setFormIngredientId('');
                           setFormPreparedItemId('');
                         }}
-                        className="w-full px-3 py-2 glass-card text-sm focus:ring-2 focus:ring-brand-500"
+                        className="w-full px-3 py-2 glass-card text-sm focus:ring-2 focus:ring-brand-500 disabled:opacity-60"
                       >
                         <option value="ingredient">Ingredient</option>
                         <option value="prepared">Sauce/Marination</option>
@@ -792,6 +994,7 @@ export default function RecipesTab() {
                             label: `${ingredient.name} (${ingredient.unit})`,
                             searchText: ingredient.name,
                           }))}
+                          disabled={!!recipeLineEdit}
                           className="glass-card border-0 px-3 py-2"
                         />
                       </div>
@@ -808,6 +1011,7 @@ export default function RecipesTab() {
                             label: `${item.name} (${item.unit})`,
                             searchText: item.name,
                           }))}
+                          disabled={!!recipeLineEdit}
                           className="glass-card border-0 px-3 py-2"
                         />
                       </div>
@@ -858,6 +1062,18 @@ export default function RecipesTab() {
                         </select>
                       </div>
                     </div>
+                    <div className="sm:col-span-2">
+                      <label className="block text-xs font-semibold text-soot-600 uppercase tracking-wider mb-1">
+                        Notes (optional)
+                      </label>
+                      <textarea
+                        value={formNotes}
+                        onChange={(e) => setFormNotes(e.target.value)}
+                        rows={2}
+                        placeholder="Kitchen notes for this line…"
+                        className="w-full px-3 py-2 glass-card text-sm focus:ring-2 focus:ring-brand-500 resize-y min-h-[2.5rem]"
+                      />
+                    </div>
                   </div>
                   )}
                   
@@ -867,7 +1083,13 @@ export default function RecipesTab() {
                       disabled={submitting}
                       className="px-4 py-2 bg-brand-700 text-white rounded-[8px] text-sm font-semibold hover:bg-brand-600 disabled:opacity-50 touch-target"
                     >
-                      {submitting ? 'Adding...' : (showExtraCostForm ? 'Save extra cost' : 'Save mapping')}
+                      {submitting
+                        ? 'Saving...'
+                        : recipeLineEdit
+                          ? 'Save changes'
+                          : showExtraCostForm
+                            ? 'Save extra cost'
+                            : 'Save mapping'}
                     </button>
                   </div>
                 </form>

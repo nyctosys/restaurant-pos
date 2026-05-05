@@ -438,19 +438,19 @@ export default function MenuItemsTab() {
           </div>
         </div>
 
-        <div className="page-padding flex-1 min-h-0 overflow-hidden pt-4 lg:pt-5">
+        <div className="page-padding flex min-h-0 flex-1 flex-col overflow-hidden pt-4 lg:pt-5">
           {loading ? (
-            <div className="flex items-center justify-center py-20 text-soot-400 gap-2">
+            <div className="flex flex-1 items-center justify-center gap-2 py-20 text-soot-400">
               <Loader2 className="w-5 h-5 animate-spin" /> Loading menu…
             </div>
           ) : products.length === 0 ? (
-            <div className="text-center py-20 text-soot-400">
+            <div className="flex flex-1 flex-col justify-center py-20 text-center text-soot-400">
               <p className="text-lg font-medium mb-1">No menu items yet</p>
               <p className="text-sm">Click &quot;Add menu item&quot; to get started.</p>
             </div>
           ) : (
-            <div className="app-table-shell">
-              <div className="app-table-scroll max-h-[calc(100vh-18rem)] min-h-[22rem] overflow-y-auto overscroll-contain lg:max-h-[calc(100vh-16rem)]">
+            <div className="app-table-shell flex min-h-0 min-w-0 flex-1 flex-col">
+              <div className="app-table-scroll min-h-0 min-w-0 flex-1 overflow-x-auto overflow-y-auto overscroll-contain pb-3">
                 <table className="app-table menu-items-table min-w-[980px]">
                   <colgroup>
                     <col className="w-[13%]" />

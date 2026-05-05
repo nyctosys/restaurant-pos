@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import IngredientsTab from '../components/inventory/IngredientsTab';
 import PreparedItemsTab from '../components/inventory/PreparedItemsTab';
 import RecipesTab from '../components/inventory/RecipesTab';
@@ -7,8 +8,40 @@ import PurchaseOrdersTab from '../components/inventory/PurchaseOrdersTab';
 
 type TabId = 'ingredients' | 'prepared_items' | 'recipes' | 'suppliers' | 'purchase_orders';
 
+const VALID_TABS: TabId[] = ['ingredients', 'prepared_items', 'recipes', 'suppliers', 'purchase_orders'];
+
 export default function InventoryPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState<TabId>('ingredients');
+
+  const tabFromUrl = searchParams.get('tab');
+  const recipeFocusProductId = useMemo(() => {
+    const raw = searchParams.get('recipeProduct');
+    if (!raw) return null;
+    const n = Number(raw);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  }, [searchParams]);
+
+  useEffect(() => {
+    if (tabFromUrl && VALID_TABS.includes(tabFromUrl as TabId)) {
+      setActiveTab(tabFromUrl as TabId);
+      return;
+    }
+    if (recipeFocusProductId != null) {
+      setActiveTab('recipes');
+    }
+  }, [tabFromUrl, recipeFocusProductId]);
+
+  const clearRecipeProductParam = useCallback(() => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete('recipeProduct');
+        return next;
+      },
+      { replace: true }
+    );
+  }, [setSearchParams]);
 
   const tabs: { id: TabId; label: string }[] = [
     { id: 'ingredients', label: 'Ingredients' },
@@ -45,7 +78,7 @@ export default function InventoryPage() {
       <div className="flex-1 min-h-0 relative">
         <div
           className={`absolute inset-0 page-padding pt-2 pb-6 min-h-0 ${
-            activeTab === 'ingredients'
+            activeTab === 'ingredients' || activeTab === 'prepared_items'
               ? 'flex flex-col overflow-hidden'
               : 'overflow-y-auto'
           }`}
@@ -56,7 +89,12 @@ export default function InventoryPage() {
             </div>
           )}
           {activeTab === 'prepared_items' && <PreparedItemsTab />}
-          {activeTab === 'recipes' && <RecipesTab />}
+          {activeTab === 'recipes' && (
+            <RecipesTab
+              initialFocusProductId={recipeFocusProductId}
+              onInitialRecipeFocusConsumed={clearRecipeProductParam}
+            />
+          )}
           {activeTab === 'suppliers' && <SuppliersTab />}
           {activeTab === 'purchase_orders' && <PurchaseOrdersTab />}
         </div>
