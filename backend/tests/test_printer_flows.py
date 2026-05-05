@@ -240,3 +240,20 @@ def test_print_kot_endpoint_prints_existing_sale(client, app, monkeypatch):
     assert len(calls) == 1
     assert calls[0].get("sale_id") == sale_id
     assert calls[0].get("order_type") == "takeaway"
+
+
+def test_deferred_receipt_print_retries_transient_failure(app, monkeypatch):
+    branch_id, _ = _setup_owner_and_menu_item(app)
+    calls: list[dict] = []
+
+    def _flaky_print_receipt(self, receipt_data):
+        calls.append(receipt_data)
+        return len(calls) >= 2
+
+    monkeypatch.setattr("app.services.printer_service.PrinterService.print_receipt", _flaky_print_receipt)
+
+    from app.services.printer_background import run_print_receipt_job
+
+    run_print_receipt_job({"branch_id": branch_id, "items": [], "total": 0})
+
+    assert len(calls) == 2

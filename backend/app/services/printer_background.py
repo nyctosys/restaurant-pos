@@ -10,6 +10,7 @@ import logging
 import os
 import queue
 import threading
+import time
 from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -17,6 +18,24 @@ from itertools import count
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+
+def _int_env(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, str(default)) or default)
+    except (TypeError, ValueError):
+        return default
+
+
+def _float_env(name: str, default: float) -> float:
+    try:
+        return float(os.getenv(name, str(default)) or default)
+    except (TypeError, ValueError):
+        return default
+
+
+_MAX_PRINT_ATTEMPTS = max(1, _int_env("POS_PRINT_MAX_ATTEMPTS", 3))
+_RETRY_DELAY_SECONDS = max(0.1, _float_env("POS_PRINT_RETRY_DELAY_SECONDS", 0.75))
 
 _job_counter = count(1)
 _job_seq = count(1)
@@ -33,7 +52,7 @@ _job_logs: deque["PrintJobLogEntry"] = deque(maxlen=_MAX_JOB_LOGS)
 class PrintJobLogEntry:
     job_id: int
     label: str
-    status: str  # queued|started|succeeded|failed
+    status: str  # queued|started|retrying|succeeded|failed
     at: str
     message: str | None = None
 
@@ -111,26 +130,120 @@ def _print_worker_loop() -> None:
     while True:
         job = _print_jobs.get()
         try:
-            logger.info("Print job started", extra={"job_id": job.job_id, "label": job.label})
-            _append_job_log(job.job_id, job.label, "started")
-            ok = job.fn(*job.args)
-            if ok is False:
-                _append_job_log(job.job_id, job.label, "failed", "Printer reported failure")
-            else:
-                _append_job_log(job.job_id, job.label, "succeeded")
-        except Exception:
-            logger.exception(
-                "Print job failed",
-                extra={"job_id": job.job_id, "label": job.label},
-            )
-            _append_job_log(job.job_id, job.label, "failed", "Unhandled exception while printing")
+            _run_print_job(job)
         finally:
             _print_jobs.task_done()
 
 
+def _run_print_job(job: "_QueuedPrintJob") -> bool:
+    last_message = None
+    for attempt in range(1, _MAX_PRINT_ATTEMPTS + 1):
+        try:
+            logger.info(
+                "Print job started",
+                extra={"job_id": job.job_id, "label": job.label, "attempt": attempt},
+            )
+            _append_job_log(
+                job.job_id,
+                job.label,
+                "started",
+                f"Attempt {attempt} of {_MAX_PRINT_ATTEMPTS}",
+            )
+            ok = job.fn(*job.args)
+            if ok is False:
+                last_message = _printer_last_error() or "Printer reported failure"
+                logger.warning(
+                    "Print job attempt failed",
+                    extra={"job_id": job.job_id, "label": job.label, "attempt": attempt},
+                )
+            else:
+                _append_job_log(job.job_id, job.label, "succeeded")
+                return True
+        except Exception as exc:
+            last_message = "Unhandled exception while printing"
+            logger.exception(
+                "Print job attempt raised",
+                extra={"job_id": job.job_id, "label": job.label, "attempt": attempt},
+            )
+            try:
+                from app.services.printer_service import PrinterService
+
+                PrinterService()._set_last_error(str(exc))
+            except Exception:
+                pass
+
+        if attempt < _MAX_PRINT_ATTEMPTS:
+            _append_job_log(
+                job.job_id,
+                job.label,
+                "retrying",
+                f"{last_message}; retrying attempt {attempt + 1}",
+            )
+            time.sleep(_RETRY_DELAY_SECONDS)
+
+    _append_job_log(job.job_id, job.label, "failed", last_message or "Printer reported failure")
+    _record_print_failure_event(job, last_message or "Printer reported failure")
+    return False
+
+
+def _printer_last_error() -> str | None:
+    try:
+        from app.services.printer_service import PrinterService
+
+        return PrinterService().last_error
+    except Exception:
+        return None
+
+
+def _branch_id_from_job(job: "_QueuedPrintJob") -> str | None:
+    if not job.args:
+        return None
+    first = job.args[0]
+    if isinstance(first, dict):
+        branch_id = first.get("branch_id")
+        return str(branch_id) if branch_id else None
+    if job.label == "kot-and-stamp" and len(job.args) >= 3:
+        branch_id = job.args[2]
+        return str(branch_id) if branch_id else None
+    return None
+
+
+def _record_print_failure_event(job: "_QueuedPrintJob", message: str) -> None:
+    try:
+        from app.services.app_event_log import record_event
+
+        record_event(
+            severity="error",
+            message=f"Print job failed: {job.label}",
+            branch_id=_branch_id_from_job(job),
+            source="backend",
+            category="printer",
+            context={
+                "job_id": job.job_id,
+                "label": job.label,
+                "attempts": _MAX_PRINT_ATTEMPTS,
+                "detail": str(message)[:800],
+            },
+        )
+    except Exception:
+        logger.warning(
+            "Failed to persist printer failure event",
+            extra={"job_id": job.job_id, "label": job.label},
+            exc_info=True,
+        )
+
+
 def _queue_print_job(priority: int, label: str, fn: Any, *args: Any) -> int | None:
     if _run_inline_for_tests():
-        fn(*args)
+        job = _QueuedPrintJob(
+            priority=priority,
+            seq=0,
+            job_id=0,
+            label=label,
+            fn=fn,
+            args=args,
+        )
+        _run_print_job(job)
         return None
     _start_worker_if_needed()
     job_id = next(_job_counter)
@@ -171,6 +284,16 @@ def _do_print_kot_modification(mod_payload: dict[str, Any]) -> bool:
         return bool(PrinterService().print_kot_modification(mod_payload))
     except Exception:
         logger.exception("Deferred KOT modification print failed")
+        return False
+
+
+def _do_print_kot(kot_payload: dict[str, Any]) -> bool:
+    try:
+        from app.services.printer_service import PrinterService
+
+        return bool(PrinterService().print_kot(kot_payload))
+    except Exception:
+        logger.exception("Deferred KOT print failed")
         return False
 
 
@@ -218,6 +341,10 @@ def run_print_receipt_job(receipt_data: dict[str, Any]) -> int | None:
 
 def run_print_kot_modification_job(mod_payload: dict[str, Any]) -> int | None:
     return _queue_print_job(1, "kot-modification", _do_print_kot_modification, mod_payload)
+
+
+def run_print_kot_job(kot_payload: dict[str, Any]) -> int | None:
+    return _queue_print_job(1, "kot", _do_print_kot, kot_payload)
 
 
 def run_print_kot_and_stamp_job(

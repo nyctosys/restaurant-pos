@@ -30,8 +30,12 @@ from app.services.ingredient_deduction import (
     ingredient_display_name,
     restore_inventory_allocations,
 )
-from app.services.printer_background import run_print_kot_and_stamp_job, run_print_receipt_job, run_print_kot_modification_job as _run_print_kot_modification_job
-from app.services.printer_service import PrinterService
+from app.services.printer_background import (
+    run_print_kot_and_stamp_job,
+    run_print_kot_job,
+    run_print_receipt_job,
+    run_print_kot_modification_job as _run_print_kot_modification_job,
+)
 from app.services.product_pricing import effective_sale_price_for_variant
 from app.services.recipe_variants import (
     combo_category_label,
@@ -2045,7 +2049,11 @@ def _kds_ticket_reference_utc(sale: Sale) -> datetime | None:
 
 
 def _sale_visible_on_kds(sale: Sale) -> bool:
-    """Hide stale KDS tickets after the 12h operating window."""
+    """Hide voided/archived tickets and stale KDS cards after the 12h operating window."""
+    if getattr(sale, "status", None) == "refunded":
+        return False
+    if getattr(sale, "archived_at", None) is not None:
+        return False
     ref = _kds_ticket_reference_utc(sale)
     if ref is None:
         return True
@@ -2777,24 +2785,16 @@ def print_sale_kot(sale_id: int, current_user: User = Depends(get_current_user))
     if getattr(sale, "status", "") == "refunded":
         return _json_error("Bad Request", "Cannot print KOT for a refunded order", 400)
 
-    printer_service = PrinterService()
-    print_ok = printer_service.print_kot(
+    job_id = run_print_kot_job(
         _build_kot_print_payload(sale_id, sale.branch_id, current_user.username)
     )
-    if print_ok:
-        return {
-            "message": "Kitchen order ticket sent",
-            "sale_id": sale_id,
-            "print_success": True,
-        }
-    return JSONResponse(
-        status_code=503,
-        content={
-            "message": "Kitchen printer unavailable",
-            "sale_id": sale_id,
-            "print_success": False,
-        },
-    )
+    return {
+        "message": "Kitchen order ticket sent",
+        "sale_id": sale_id,
+        "print_success": True,
+        "print_deferred": True,
+        "print_job_id": job_id,
+    }
 
 
 @orders_router.post("/{sale_id}/cancel-open")
@@ -3021,7 +3021,6 @@ def print_sale(sale_id: int, current_user: User = Depends(get_current_user)):
         if isinstance(getattr(sale, "discount_snapshot", None), dict)
         else None
     )
-    printer_service = PrinterService()
     receipt_data = {
         "total": float(sale.total_amount),
         "subtotal": subtotal,
@@ -3038,7 +3037,10 @@ def print_sale(sale_id: int, current_user: User = Depends(get_current_user)):
         "order_type": getattr(sale, "order_type", None),
         "order_snapshot": getattr(sale, "order_snapshot", None),
     }
-    ok = printer_service.print_receipt(receipt_data)
-    if ok:
-        return {"message": "Print job sent successfully"}
-    return JSONResponse(status_code=503, content={"message": "Printer unavailable"})
+    job_id = run_print_receipt_job(receipt_data)
+    return {
+        "message": "Print job sent successfully",
+        "print_success": True,
+        "print_deferred": True,
+        "print_job_id": job_id,
+    }

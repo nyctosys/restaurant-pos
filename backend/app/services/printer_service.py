@@ -1,8 +1,23 @@
 import base64
 import io
+import logging
 import re
+import threading
+from functools import wraps
 from escpos.printer import Network, Usb
 from app.models import Setting
+
+logger = logging.getLogger(__name__)
+
+
+def _serialized_printer_method(fn):
+    @wraps(fn)
+    def wrapper(self, *args, **kwargs):
+        with self._io_lock:
+            return fn(self, *args, **kwargs)
+
+    return wrapper
+
 
 class PrinterService:
     _instance = None
@@ -13,7 +28,21 @@ class PrinterService:
             cls._instance.printer = None
             cls._instance.printer_kind = "receipt"
             cls._instance.printer_branch_id = None
+            cls._instance._io_lock = threading.RLock()
+            cls._instance._last_error = None
+        else:
+            if not hasattr(cls._instance, "_io_lock"):
+                cls._instance._io_lock = threading.RLock()
+            if not hasattr(cls._instance, "_last_error"):
+                cls._instance._last_error = None
         return cls._instance
+
+    @property
+    def last_error(self) -> str | None:
+        return self._last_error
+
+    def _set_last_error(self, message: str | None) -> None:
+        self._last_error = (str(message)[:800] if message else None)
 
     def _get_printer_config(self, printer_kind: str = "receipt", branch_id: str | None = None):
         """Fetch hardware settings (global + branch merged, branch overrides)."""
@@ -57,6 +86,17 @@ class PrinterService:
         if port <= 0:
             port = 9100
 
+        timeout_raw = (
+            hardware.get(f"{prefix}_timeout_seconds")
+            if hardware.get(f"{prefix}_timeout_seconds") not in (None, "")
+            else hardware.get("printer_timeout_seconds")
+        )
+        try:
+            timeout = float(timeout_raw or 10)
+        except (TypeError, ValueError):
+            timeout = 10.0
+        timeout = max(1.0, min(30.0, timeout))
+
         vendor_id = (
             str(hardware.get(f"{prefix}_vendor_id") or "").strip()
             or str(hardware.get("receipt_printer_vendor_id") or "").strip()
@@ -72,17 +112,22 @@ class PrinterService:
             "mode": mode,
             "ip": ip,
             "port": port,
+            "timeout": timeout,
             "vendor_id": vendor_id,
             "product_id": product_id,
         }
 
+    @_serialized_printer_method
     def connect(self, printer_kind: str = "receipt", branch_id: str | None = None):
         config = self._get_printer_config(printer_kind, branch_id=branch_id)
         if not config:
-            print("Printer hardware not configured in settings.")
+            message = "Printer hardware not configured in settings."
+            print(message)
+            self._set_last_error(message)
             return False
 
         try:
+            self._set_last_error(None)
             self.printer_kind = "kot" if str(printer_kind).lower() == "kot" else "receipt"
             self.printer_branch_id = branch_id
             mode = config.get("mode", "usb")
@@ -90,11 +135,14 @@ class PrinterService:
             if mode == "lan":
                 host = str(config.get("ip") or "").strip()
                 port = int(config.get("port") or 9100)
+                timeout = float(config.get("timeout") or 10)
                 if not host:
-                    print(f"{self.printer_kind.upper()} LAN printer IP is not configured.")
+                    message = f"{self.printer_kind.upper()} LAN printer IP is not configured."
+                    print(message)
+                    self._set_last_error(message)
                     return False
                 print(f"Connecting to LAN Printer ({self.printer_kind}: {host}:{port})...")
-                self.printer = Network(host=host, port=port)
+                self.printer = Network(host=host, port=port, timeout=timeout)
                 self.printer.open()
                 return True
 
@@ -103,7 +151,9 @@ class PrinterService:
             product_id = str(config.get("product_id") or "").strip()
 
             if not vendor_id or not product_id:
-                print(f"{self.printer_kind.upper()} USB Vendor ID or Product ID not configured.")
+                message = f"{self.printer_kind.upper()} USB Vendor ID or Product ID not configured."
+                print(message)
+                self._set_last_error(message)
                 return False
 
             # Convert hex string to int (supports "0x04b8" or "04b8" formats)
@@ -115,10 +165,14 @@ class PrinterService:
             self.printer.open()
             return True
         except Exception as e:
-            print(f"Failed to connect to {self.printer_kind} printer: {e}")
+            message = f"Failed to connect to {self.printer_kind} printer: {e}"
+            print(message)
+            logger.warning(message, exc_info=True)
+            self._set_last_error(message)
             self.printer = None
             return False
 
+    @_serialized_printer_method
     def _disconnect(self):
         """Release USB connection so Windows does not hold the device. Call after each print."""
         if not self.printer:
@@ -170,6 +224,7 @@ class PrinterService:
             return True
         return self.connect(desired_kind, branch_id=branch_id)
 
+    @_serialized_printer_method
     def print_text(self, text):
         if not self._ensure_connected("receipt", fresh=True):
             return False
@@ -180,7 +235,9 @@ class PrinterService:
             self._disconnect()
             return True
         except Exception as e:
-            print(f"Printing failed: {e}")
+            message = f"Printing failed: {e}"
+            print(message)
+            self._set_last_error(message)
             self._disconnect()
             return False
 
@@ -270,6 +327,7 @@ class PrinterService:
         binary = gray.point(lambda x: 0 if x < 130 else 255, mode='1')
         return binary
 
+    @_serialized_printer_method
     def print_receipt(self, sale_data):
         if not self._ensure_connected("receipt", branch_id=sale_data.get("branch_id"), fresh=True):
             return False
@@ -363,7 +421,9 @@ class PrinterService:
                         or "'nonetype' object has no attribute 'write'" in err_msg
                     )
                     if is_usb_error:
-                        print(f"Printer unavailable (USB permission or device): {e}")
+                        message = f"Printer unavailable (USB permission or device): {e}"
+                        print(message)
+                        self._set_last_error(message)
                         self._disconnect()
                         return False
                     print(f"Receipt logo skipped: {e}")
@@ -544,14 +604,18 @@ class PrinterService:
             err_msg = str(e).lower()
             self._disconnect()
             if "'nonetype' object has no attribute 'write'" in err_msg or 'access denied' in err_msg or 'usb' in err_msg or 'errno 13' in err_msg:
-                print(
+                message = (
                     "Receipt printing failed (USB access). On Windows: install WinUSB for the printer using Zadig "
                     "(https://zadig.akeo.ie), then unplug and replug the printer. Run this app as Administrator if needed."
                 )
+                print(message)
             else:
-                print(f"Receipt printing failed: {e}")
+                message = f"Receipt printing failed: {e}"
+                print(message)
+            self._set_last_error(message)
             return False
 
+    @_serialized_printer_method
     def print_kot(self, kot_data: dict) -> bool:
         """Kitchen order ticket for KDS / prep station (no prices, no tax)."""
         if not self._ensure_connected("kot", branch_id=kot_data.get("branch_id"), fresh=True):
@@ -649,10 +713,13 @@ class PrinterService:
             self._disconnect()
             return True
         except Exception as e:
-            print(f"KOT printing failed: {e}")
+            message = f"KOT printing failed: {e}"
+            print(message)
+            self._set_last_error(message)
             self._disconnect()
             return False
 
+    @_serialized_printer_method
     def print_kot_modification(self, payload: dict) -> bool:
         """Print an order modification slip on KOT printer — full order layout with MODIFIED ORDER heading."""
         if not self._ensure_connected("kot", branch_id=payload.get("branch_id"), fresh=True):
@@ -758,10 +825,13 @@ class PrinterService:
             self._disconnect()
             return True
         except Exception as e:
-            print(f"KOT modification printing failed: {e}")
+            message = f"KOT modification printing failed: {e}"
+            print(message)
+            self._set_last_error(message)
             self._disconnect()
             return False
 
+    @_serialized_printer_method
     def print_barcode_label(self, sku: str, title: str = '') -> bool:
         """Print a barcode label (product name + CODE128) on the configured receipt printer."""
         if not sku or not sku.strip():
@@ -781,6 +851,8 @@ class PrinterService:
             self._disconnect()
             return True
         except Exception as e:
-            print(f"Barcode label print failed: {e}")
+            message = f"Barcode label print failed: {e}"
+            print(message)
+            self._set_last_error(message)
             self._disconnect()
             return False

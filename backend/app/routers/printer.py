@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse
 
 from app.models import User
 from app.services.branch_scope import resolve_terminal_branch_id
-from app.services.printer_background import get_recent_print_job_logs
+from app.services.printer_background import get_recent_print_job_logs, run_print_receipt_job
 from app.services.printer_service import PrinterService
 from app.deps import get_current_user
 
@@ -93,10 +93,8 @@ def print_receipt(payload: dict[str, Any] | None = None, _: User = Depends(get_c
         receipt_data = data["receipt_data"] or {}
         if isinstance(receipt_data, dict) and "branch_id" not in receipt_data:
             receipt_data = {**receipt_data, "branch_id": branch_id}
-        ok = PrinterService().print_receipt(receipt_data)
-        if ok:
-            return {"success": True}
-        return JSONResponse(status_code=503, content={"success": False, "error": "Hardware print failed"})
+        job_id = run_print_receipt_job(receipt_data)
+        return {"success": True, "print_deferred": True, "print_job_id": job_id}
     except Exception as exc:
         return JSONResponse(status_code=500, content={"success": False, "error": str(exc)})
 

@@ -1000,6 +1000,88 @@ def test_kitchen_resets_placed_tickets_after_twelve_hours(client, app):
     assert kds.get_json()["orders"] == []
 
 
+def test_kitchen_hides_refunded_orders_even_if_kitchen_status_is_preparing(client, app):
+    client.post(
+        "/api/auth/setup",
+        json={"username": "owner1", "password": "pass", "branch_name": "Main"},
+    )
+    token = _get_token(client)
+    with app.app_context():
+        branch = Branch.query.filter_by(name="Main").first()
+        bid = branch.id
+        pid, _ = _create_menu_item_with_recipe(app, bid, title="RefundedKdsBurger", stock=50.0)
+
+    create_res = client.post(
+        "/api/orders/checkout",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "items": [{"product_id": pid, "quantity": 1}],
+            "payment_method": "Cash",
+            "order_type": "takeaway",
+        },
+    )
+    assert create_res.status_code == 201
+    sale_id = create_res.get_json()["sale_id"]
+
+    patch_res = client.patch(
+        f"/api/orders/{sale_id}/kitchen-status",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"kitchen_status": "preparing"},
+    )
+    assert patch_res.status_code == 200
+
+    refund_res = client.post(
+        f"/api/orders/{sale_id}/rollback",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert refund_res.status_code == 200
+
+    kds = client.get("/api/orders/kitchen", headers={"Authorization": f"Bearer {token}"})
+    assert kds.status_code == 200
+    assert kds.get_json()["orders"] == []
+
+
+def test_kitchen_hides_archived_orders_even_if_kitchen_status_is_ready(client, app):
+    client.post(
+        "/api/auth/setup",
+        json={"username": "owner1", "password": "pass", "branch_name": "Main"},
+    )
+    token = _get_token(client)
+    with app.app_context():
+        branch = Branch.query.filter_by(name="Main").first()
+        bid = branch.id
+        pid, _ = _create_menu_item_with_recipe(app, bid, title="ArchivedKdsBurger", stock=50.0)
+
+    create_res = client.post(
+        "/api/orders/checkout",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "items": [{"product_id": pid, "quantity": 1}],
+            "payment_method": "Cash",
+            "order_type": "takeaway",
+        },
+    )
+    assert create_res.status_code == 201
+    sale_id = create_res.get_json()["sale_id"]
+
+    patch_res = client.patch(
+        f"/api/orders/{sale_id}/kitchen-status",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"kitchen_status": "ready"},
+    )
+    assert patch_res.status_code == 200
+
+    archive_res = client.patch(
+        f"/api/orders/{sale_id}/archive",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert archive_res.status_code == 200
+
+    kds = client.get("/api/orders/kitchen", headers={"Authorization": f"Bearer {token}"})
+    assert kds.status_code == 200
+    assert kds.get_json()["orders"] == []
+
+
 def test_checkout_variant_uses_variant_specific_bom(client, app):
     """Selling a variant deducts ingredients from variant-scoped recipe rows when present."""
     client.post(
