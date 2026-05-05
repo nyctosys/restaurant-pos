@@ -4,7 +4,13 @@ import { get, getUserMessage, post, put } from '../../api';
 import SearchableSelect from '../SearchableSelect';
 import { showToast } from '../Toast';
 import { formatCurrency } from '../../utils/formatCurrency';
-import { formatBaseQuantityGlobal, getSelectableInputUnits, normalizeUnitToken, toBaseUnit } from '../../utils/unitConversion';
+import {
+  formatBaseQuantityGlobal,
+  getSelectableInputUnits,
+  normalizeUnitToken,
+  quantityToStorageBase,
+  toBaseUnit,
+} from '../../utils/unitConversion';
 import { generateAutoSku } from '../../utils/sku';
 
 type Ingredient = {
@@ -63,7 +69,8 @@ function getPerKgPrice(ingredient: Ingredient): number | null {
   const unit = (ingredient.unit || '').toLowerCase();
   const cost = Number(ingredient.average_cost || 0);
   if (!Number.isFinite(cost) || cost < 0) return null;
-  if (unit === 'kg') return cost;
+  // Avoid duplicating the same "/ kg" price when the ingredient is already priced per kg.
+  if (unit === 'kg') return null;
   if (unit === 'g') return cost * 1000;
   return null;
 }
@@ -180,6 +187,37 @@ export default function PreparedItemsTab() {
       return sum;
     }
   }, 0);
+
+  const formulaYield = components.reduce((sum, row) => {
+    const ingredient = ingredients.find((ing) => String(ing.id) === row.ingredientId);
+    const qty = Number.parseFloat(row.quantity);
+    if (!ingredient || !Number.isFinite(qty) || qty <= 0) return sum;
+    try {
+      const inputUnit = resolveInputUnit(row, ingredient) || ingredient.unit;
+      // Approximate prepared yield as the sum of ingredient quantities, expressed in the prepared item's unit.
+      // (Only static weight/volume/count conversions are supported here.)
+      const qtyInPreparedUnit = quantityToStorageBase(qty, inputUnit, unit);
+      return sum + qtyInPreparedUnit;
+    } catch {
+      return sum;
+    }
+  }, 0);
+
+  const formulaCostPerUnit = formulaYield > 0 ? formCost / formulaYield : 0;
+
+  const formulaCostPerCanonical = useMemo(() => {
+    if (!(formulaYield > 0)) return null;
+    const u = normalizeUnitToken(unit);
+    const canonical = u === 'g' ? 'kg' : u === 'ml' ? 'l' : u;
+    if (canonical === u) return null;
+    try {
+      const yieldCanonical = quantityToStorageBase(formulaYield, unit, canonical);
+      if (!(yieldCanonical > 0)) return null;
+      return { canonicalUnit: canonical, cost: formCost / yieldCanonical };
+    } catch {
+      return null;
+    }
+  }, [formCost, formulaYield, unit]);
 
   const lowStockItems = useMemo(
     () => items.filter((item) => item.current_stock <= (item.minimum_stock || 0)),
@@ -449,9 +487,19 @@ export default function PreparedItemsTab() {
 
                 <div className="space-y-3">
                 <div className="flex items-center justify-between">
-                  <h4 className="text-sm font-bold text-soot-900">Formula per 1 {unit}</h4>
-                  <span className="text-xs font-semibold text-brand-700">
-                    Est. cost / {formatYieldUnit(unit)}: {formatCurrency(formCost)}
+                  <h4 className="text-sm font-bold text-soot-900">
+                    Formula yield: {formatBaseQuantityGlobal(formulaYield, unit)}
+                  </h4>
+                  <span className="text-xs font-semibold text-brand-700 text-right">
+                    <span className="whitespace-nowrap">
+                      Est. cost / {formatYieldUnit(unit)}: {formatCurrency(formulaCostPerUnit || 0)}
+                    </span>
+                    {formulaCostPerCanonical && (
+                      <span className="block whitespace-nowrap text-soot-500 font-semibold">
+                        Est. cost / {formatYieldUnit(formulaCostPerCanonical.canonicalUnit)}:{' '}
+                        {formatCurrency(formulaCostPerCanonical.cost)}
+                      </span>
+                    )}
                   </span>
                 </div>
                 <div className="max-h-[40vh] overflow-y-auto overflow-x-hidden pr-1 space-y-1.5">
