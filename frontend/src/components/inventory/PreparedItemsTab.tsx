@@ -4,7 +4,7 @@ import { get, getUserMessage, post, put } from '../../api';
 import SearchableSelect from '../SearchableSelect';
 import { showToast } from '../Toast';
 import { formatCurrency } from '../../utils/formatCurrency';
-import { formatBaseQuantityGlobal } from '../../utils/unitConversion';
+import { formatBaseQuantityGlobal, getSelectableInputUnits, normalizeUnitToken, toBaseUnit } from '../../utils/unitConversion';
 import { generateAutoSku } from '../../utils/sku';
 
 type Ingredient = {
@@ -41,13 +41,13 @@ type PreparedItem = {
 type ComponentRow = {
   ingredientId: string;
   quantity: string;
-  usePurchaseUnit?: boolean;
+  inputUnit?: string;
 };
 
 const UNIT_OPTIONS = ['kg', 'g', 'l', 'ml', 'piece', 'pack', 'can', 'bottle'];
 
 function emptyComponentRow(): ComponentRow {
-  return { ingredientId: '', quantity: '', usePurchaseUnit: false };
+  return { ingredientId: '', quantity: '', inputUnit: '' };
 }
 
 function formatYieldUnit(unit: string) {
@@ -57,6 +57,15 @@ function formatYieldUnit(unit: string) {
 
 function formatCostPerYield(amount: number, unit: string) {
   return `${formatCurrency(amount)} / ${formatYieldUnit(unit)}`;
+}
+
+function getPerKgPrice(ingredient: Ingredient): number | null {
+  const unit = (ingredient.unit || '').toLowerCase();
+  const cost = Number(ingredient.average_cost || 0);
+  if (!Number.isFinite(cost) || cost < 0) return null;
+  if (unit === 'kg') return cost;
+  if (unit === 'g') return cost * 1000;
+  return null;
 }
 
 export default function PreparedItemsTab() {
@@ -125,6 +134,7 @@ export default function PreparedItemsTab() {
         ? item.components.map((component) => ({
             ingredientId: String(component.ingredient_id),
             quantity: String(component.quantity),
+            inputUnit: component.unit || '',
           }))
         : [emptyComponentRow()]
     );
@@ -135,6 +145,17 @@ export default function PreparedItemsTab() {
     setComponents((current) =>
       current.map((row, rowIndex) => (rowIndex === index ? { ...row, ...patch } : row))
     );
+  };
+
+  const resolveInputUnit = (row: ComponentRow, ingredient?: Ingredient): string => {
+    if (!ingredient) return row.inputUnit || '';
+    const allowed = getSelectableInputUnits(ingredient);
+    const normalized = normalizeUnitToken(row.inputUnit || '');
+    if (normalized) {
+      const matched = allowed.find((u) => normalizeUnitToken(u) === normalized);
+      if (matched) return matched;
+    }
+    return allowed[0] || ingredient.unit;
   };
 
   const ingredientOptions = ingredients.map((ingredient) => ({
@@ -150,14 +171,14 @@ export default function PreparedItemsTab() {
 
   const formCost = components.reduce((sum, row) => {
     const ingredient = ingredients.find((ing) => String(ing.id) === row.ingredientId);
-    let qty = Number.parseFloat(row.quantity);
-    if (!ingredient || !Number.isFinite(qty)) return sum;
-    
-    if (row.usePurchaseUnit && ingredient.conversion_factor) {
-      qty = qty * ingredient.conversion_factor;
+    const qty = Number.parseFloat(row.quantity);
+    if (!ingredient || !Number.isFinite(qty) || qty <= 0) return sum;
+    try {
+      const qtyBase = toBaseUnit(qty, resolveInputUnit(row, ingredient) || ingredient.unit, ingredient);
+      return sum + ingredient.average_cost * qtyBase;
+    } catch {
+      return sum;
     }
-    
-    return sum + ingredient.average_cost * qty;
   }, 0);
 
   const lowStockItems = useMemo(
@@ -175,16 +196,19 @@ export default function PreparedItemsTab() {
     const payloadComponents = components
       .map((row) => {
         const ingredient = ingredients.find((ing) => String(ing.id) === row.ingredientId);
-        let quantity = Number.parseFloat(row.quantity);
-        if (!ingredient || !Number.isFinite(quantity) || quantity <= 0) return null;
-        
-        if (row.usePurchaseUnit && ingredient.conversion_factor) {
-          quantity = quantity * ingredient.conversion_factor;
+        const quantityRaw = Number.parseFloat(row.quantity);
+        if (!ingredient || !Number.isFinite(quantityRaw) || quantityRaw <= 0) return null;
+        const selectedInputUnit = resolveInputUnit(row, ingredient) || ingredient.unit;
+        let quantityBase = quantityRaw;
+        try {
+          quantityBase = toBaseUnit(quantityRaw, selectedInputUnit, ingredient);
+        } catch {
+          return null;
         }
 
         return {
           ingredient_id: ingredient.id,
-          quantity,
+          quantity: quantityBase,
           unit: ingredient.unit,
         };
       })
@@ -369,140 +393,176 @@ export default function PreparedItemsTab() {
 
       {showForm && (
         <div className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center p-4">
-          <form onSubmit={handleSubmit} className="glass-card w-full max-w-3xl max-h-[90vh] overflow-y-auto p-5 space-y-4">
-            <div className="flex items-center justify-between gap-3">
+          <form onSubmit={handleSubmit} className="glass-card w-full max-w-3xl max-h-[90vh] overflow-hidden p-5 flex flex-col">
+            <div className="sticky top-0 z-20 bg-[rgba(15,18,28,0.86)] backdrop-blur-sm pb-3 -mt-1 pt-1 flex items-center justify-between gap-3">
               <h3 className="font-bold text-soot-900">{editingItem ? 'Edit' : 'New'} Sauce/Marination</h3>
               <button type="button" onClick={() => setShowForm(false)} className="p-2 text-soot-500 hover:text-soot-900">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <input
-                required
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-                className="w-full px-3 py-2 glass-card text-sm focus:ring-2 focus:ring-brand-500"
-                placeholder="Name"
-              />
-              <input
-                value={sku || nextSku}
-                onChange={(event) => setSku(event.target.value)}
-                className="w-full px-3 py-2 glass-card text-sm focus:ring-2 focus:ring-brand-500"
-                placeholder="SKU"
-              />
-              <select
-                value={kind}
-                onChange={(event) => setKind(event.target.value as 'sauce' | 'marination')}
-                className="w-full px-3 py-2 glass-card text-sm focus:ring-2 focus:ring-brand-500"
-              >
-                <option value="sauce">Sauce</option>
-                <option value="marination">Marination</option>
-              </select>
-              <select
-                value={unit}
-                onChange={(event) => setUnit(event.target.value)}
-                className="w-full px-3 py-2 glass-card text-sm focus:ring-2 focus:ring-brand-500"
-              >
-                {UNIT_OPTIONS.map((option) => (
-                  <option key={option} value={option}>{option}</option>
-                ))}
-              </select>
-              <input
-                type="number"
-                min="0"
-                step="any"
-                value={minimumStock}
-                onChange={(event) => setMinimumStock(event.target.value)}
-                className="w-full px-3 py-2 glass-card text-sm focus:ring-2 focus:ring-brand-500"
-                placeholder="Low stock alert"
-              />
-            </div>
-
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <h4 className="text-sm font-bold text-soot-900">Formula per 1 {unit}</h4>
-                <span className="text-xs font-semibold text-brand-700">
-                  Est. cost / {formatYieldUnit(unit)}: {formatCurrency(formCost)}
-                </span>
+            <div className="overflow-y-auto pr-1 space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <input
+                  required
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                  className="w-full px-3 py-2 glass-card text-sm focus:ring-2 focus:ring-brand-500"
+                  placeholder="Name"
+                />
+                <input
+                  value={sku || nextSku}
+                  onChange={(event) => setSku(event.target.value)}
+                  className="w-full px-3 py-2 glass-card text-sm focus:ring-2 focus:ring-brand-500"
+                  placeholder="SKU"
+                />
+                <select
+                  value={kind}
+                  onChange={(event) => setKind(event.target.value as 'sauce' | 'marination')}
+                  className="w-full px-3 py-2 glass-card text-sm focus:ring-2 focus:ring-brand-500"
+                >
+                  <option value="sauce">Sauce</option>
+                  <option value="marination">Marination</option>
+                </select>
+                <select
+                  value={unit}
+                  onChange={(event) => setUnit(event.target.value)}
+                  className="w-full px-3 py-2 glass-card text-sm focus:ring-2 focus:ring-brand-500"
+                >
+                  {UNIT_OPTIONS.map((option) => (
+                    <option key={option} value={option}>{option}</option>
+                  ))}
+                </select>
+                <input
+                  type="number"
+                  min="0"
+                  step="any"
+                  value={minimumStock}
+                  onChange={(event) => setMinimumStock(event.target.value)}
+                  className="w-full px-3 py-2 glass-card text-sm focus:ring-2 focus:ring-brand-500"
+                  placeholder="Low stock alert"
+                />
               </div>
-              {components.map((row, index) => {
-                const ingredient = ingredients.find(ing => String(ing.id) === row.ingredientId);
-                const showConversionToggle = ingredient?.purchase_unit && (ingredient.conversion_factor ?? 0) > 1;
-                
-                return (
-                  <div key={index} className="space-y-1">
-                    <div className="grid grid-cols-[1fr_8rem_2.5rem] gap-2 items-center">
-                      <SearchableSelect
-                        value={row.ingredientId}
-                        onChange={(value) => updateComponent(index, { ingredientId: value, usePurchaseUnit: false })}
-                        placeholder="Ingredient"
-                        options={ingredientOptions}
-                        className="glass-card border-0 px-3 py-2"
-                      />
-                      <div className="relative">
-                        <input
-                          type="number"
-                          min="0.000001"
-                          step="any"
-                          required
-                          value={row.quantity}
-                          onChange={(event) => updateComponent(index, { quantity: event.target.value })}
-                          className="w-full px-3 py-2 pr-10 glass-card text-sm focus:ring-2 focus:ring-brand-500"
-                          placeholder="Qty"
-                        />
-                        <div className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-bold text-soot-400 pointer-events-none">
-                          {row.usePurchaseUnit ? ingredient?.purchase_unit : ingredient?.unit}
+
+              <div className="space-y-3">
+                <div className="sticky top-0 z-10 bg-[rgba(15,18,28,0.86)] backdrop-blur-sm py-1 flex items-center justify-between">
+                  <h4 className="text-sm font-bold text-soot-900">Formula per 1 {unit}</h4>
+                  <span className="text-xs font-semibold text-brand-700">
+                    Est. cost / {formatYieldUnit(unit)}: {formatCurrency(formCost)}
+                  </span>
+                </div>
+                <div className="max-h-[40vh] overflow-y-auto overflow-x-hidden pr-1 space-y-1.5">
+                  <div className="grid grid-cols-[minmax(0,1fr)_6.25rem_4.25rem_8.5rem_2rem] gap-1.5 px-1 text-[10px] font-bold uppercase tracking-wide text-soot-500 sticky top-0 z-10 bg-[rgba(15,18,28,0.9)] py-1">
+                    <div>Ingredient</div>
+                    <div className="text-right">Unit price</div>
+                    <div className="text-right">Total</div>
+                    <div>Qty</div>
+                    <div />
+                  </div>
+                  {components.map((row, index) => {
+                    const ingredient = ingredients.find(ing => String(ing.id) === row.ingredientId);
+                    const selectedInputUnit = resolveInputUnit(row, ingredient);
+                    const qty = Number.parseFloat(row.quantity);
+                    let lineTotal = 0;
+                    if (ingredient && Number.isFinite(qty) && qty > 0) {
+                      try {
+                        const qtyBase = toBaseUnit(qty, selectedInputUnit || ingredient.unit, ingredient);
+                        lineTotal = qtyBase * Number(ingredient.average_cost || 0);
+                      } catch {
+                        lineTotal = 0;
+                      }
+                    }
+                    const ingredientPerKgPrice = ingredient ? getPerKgPrice(ingredient) : null;
+                    const ingredientUnitPrice = ingredient ? `${formatCurrency(Number(ingredient.average_cost || 0))} / ${ingredient.unit}` : '-';
+                    const qtyUnitOptions = ingredient
+                      ? getSelectableInputUnits(ingredient).filter((u) => {
+                          const normalized = normalizeUnitToken(u);
+                          return normalized !== 'carton' && normalized !== 'packet';
+                        })
+                      : [];
+
+                    return (
+                      <div key={index} className="space-y-1">
+                        <div className="grid grid-cols-[minmax(0,1fr)_6.25rem_4.25rem_8.5rem_2rem] gap-1.5 items-center">
+                          <SearchableSelect
+                            value={row.ingredientId}
+                            onChange={(value) => {
+                              const selectedIngredient = ingredients.find((ing) => String(ing.id) === value);
+                              const firstUnit = selectedIngredient
+                                ? (getSelectableInputUnits(selectedIngredient)[0] || selectedIngredient.unit)
+                                : '';
+                              updateComponent(index, { ingredientId: value, inputUnit: firstUnit });
+                            }}
+                            placeholder="Ingredient"
+                            options={ingredientOptions}
+                            className="glass-card border-0 px-2.5 py-1.5 min-w-0"
+                          />
+                          <div className="text-right text-[11px] leading-tight font-semibold text-brand-700 px-1 min-w-0">
+                            <div>{ingredientUnitPrice}</div>
+                            {ingredient && ingredientPerKgPrice !== null && (
+                              <div className="text-[9px] text-soot-400">{formatCurrency(ingredientPerKgPrice)} / kg</div>
+                            )}
+                          </div>
+                          <div className="text-right text-[11px] font-semibold text-soot-700 px-1">
+                            {ingredient ? formatCurrency(lineTotal) : '-'}
+                          </div>
+                          <div className="grid grid-cols-[1fr_3.75rem] gap-1.5 min-w-0">
+                            <input
+                              type="number"
+                              min="0.000001"
+                              step="any"
+                              required
+                              value={row.quantity}
+                              onChange={(event) => updateComponent(index, { quantity: event.target.value })}
+                              className="w-full px-2 py-1.5 glass-card text-sm focus:ring-2 focus:ring-brand-500"
+                              placeholder="Qty"
+                            />
+                            <select
+                              value={selectedInputUnit}
+                              onChange={(event) => updateComponent(index, { inputUnit: event.target.value })}
+                              className="w-full px-1.5 py-1.5 glass-card text-[11px] focus:ring-2 focus:ring-brand-500"
+                              disabled={!ingredient}
+                            >
+                              {qtyUnitOptions.length === 0 && <option value="">Unit</option>}
+                              {qtyUnitOptions.map((u) => (
+                                <option key={u} value={u}>
+                                  {u}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setComponents((current) => current.filter((_, rowIndex) => rowIndex !== index))}
+                            className="p-1.5 text-soot-400 hover:text-red-600"
+                            disabled={components.length === 1}
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
                         </div>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => setComponents((current) => current.filter((_, rowIndex) => rowIndex !== index))}
-                        className="p-2 text-soot-400 hover:text-red-600"
-                        disabled={components.length === 1}
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
-                    </div>
-                    {showConversionToggle && (
-                      <div className="flex items-center gap-2 pl-1">
-                        <button
-                          type="button"
-                          onClick={() => updateComponent(index, { usePurchaseUnit: !row.usePurchaseUnit })}
-                          className={`text-[10px] uppercase font-bold px-1.5 py-0.5 rounded border transition-colors ${
-                            row.usePurchaseUnit ? 'bg-brand-100 text-brand-700 border-brand-200' : 'bg-neutral-50 text-neutral-400 border-neutral-200'
-                          }`}
-                        >
-                          {row.usePurchaseUnit ? `In ${ingredient.purchase_unit}` : `Use ${ingredient.purchase_unit}?`}
-                        </button>
-                        {row.usePurchaseUnit && row.quantity && (
-                          <span className="text-[10px] text-brand-600 font-medium italic">
-                            = {(parseFloat(row.quantity) * (ingredient.conversion_factor || 1)).toFixed(4)} {ingredient.unit}
-                          </span>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-              <button
-                type="button"
-                onClick={() => setComponents((current) => [...current, emptyComponentRow()])}
-                className="inline-flex items-center gap-2 text-sm font-semibold text-brand-700 hover:text-brand-600"
-              >
-                <Plus className="w-4 h-4" /> Add ingredient
-              </button>
+                    );
+                  })}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setComponents((current) => [...current, emptyComponentRow()])}
+                  className="inline-flex items-center gap-2 text-sm font-semibold text-brand-700 hover:text-brand-600"
+                >
+                  <Plus className="w-4 h-4" /> Add ingredient
+                </button>
+              </div>
+
+              <textarea
+                value={notes}
+                onChange={(event) => setNotes(event.target.value)}
+                className="w-full px-3 py-2 glass-card text-sm focus:ring-2 focus:ring-brand-500"
+                rows={3}
+                placeholder="Notes"
+              />
             </div>
 
-            <textarea
-              value={notes}
-              onChange={(event) => setNotes(event.target.value)}
-              className="w-full px-3 py-2 glass-card text-sm focus:ring-2 focus:ring-brand-500"
-              rows={3}
-              placeholder="Notes"
-            />
-
-            <div className="flex justify-end gap-2 pt-2">
+            <div className="pt-3 mt-3 border-t border-white/20 flex justify-end gap-2">
               <button type="button" onClick={() => setShowForm(false)} className="px-4 py-2 text-sm font-semibold text-soot-600">
                 Cancel
               </button>

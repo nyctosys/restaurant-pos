@@ -96,6 +96,11 @@ type CollectiveLine = {
   modifiers: string[];
 };
 
+function shouldHideFromKds(line: KdsLine): boolean {
+  const title = String(line.product_title ?? '').trim().toLowerCase();
+  return /\b(dip|dips|drink|drinks)\b/.test(title);
+}
+
 /** Reused context so repeated KOTs do not leak AudioContext instances. */
 let kotAudioContext: AudioContext | null = null;
 
@@ -147,6 +152,7 @@ function aggregateCollectiveLines(orders: KdsOrder[]): CollectiveLine[] {
   for (const order of orders) {
     const source = order.prep_lines != null ? order.prep_lines : order.items ?? [];
     for (const line of source) {
+      if (shouldHideFromKds(line)) continue;
       const q = Math.max(0, Math.floor(Number(line.quantity) || 0));
       if (q <= 0) continue;
       const key = lineAggregateKey(line);
@@ -205,7 +211,7 @@ const OrderCard = memo(function OrderCard({
   const priority = getPriorityColor(ks, order.created_at, nowMs);
   const otCfg = getOrderTypeConfig(order.order_type);
   const OtIcon = otCfg.icon;
-  const lines = order.items ?? [];
+  const lines = (order.items ?? []).filter(line => !shouldHideFromKds(line));
   const snap = order.order_snapshot || {};
   const tableName = order.table_name || (snap as Record<string, string>).table_name;
   const customerName = (snap as Record<string, string>).customer_name;
@@ -232,7 +238,7 @@ const OrderCard = memo(function OrderCard({
       {/* Card Header */}
       <div className="px-5 pt-6 pb-3 flex justify-between items-start border-b border-black/5 shrink-0 dark:border-white/10">
         <div className="min-w-0 pr-2">
-          <span className="text-3xl font-black text-neutral-900 tracking-tight leading-none block truncate dark:text-white">#{order.id}</span>
+          <span className={`text-neutral-900 tracking-tight leading-none block truncate dark:text-white ${order.is_modified ? 'text-[2.35rem] font-extrabold' : 'text-3xl font-black'}`}>#{order.id}</span>
           <div className={`mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded border font-bold text-[10px] uppercase tracking-wider ${otCfg.pillColor}`}>
             <OtIcon className="w-3 h-3 shrink-0" strokeWidth={2.5} />
             <span className="truncate">{otCfg.label}</span>

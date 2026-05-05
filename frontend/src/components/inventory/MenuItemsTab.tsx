@@ -438,7 +438,7 @@ export default function MenuItemsTab() {
           </div>
         </div>
 
-        <div className="page-padding flex-1 min-h-0 overflow-auto pt-4 lg:pt-5">
+        <div className="page-padding flex-1 min-h-0 overflow-hidden pt-4 lg:pt-5">
           {loading ? (
             <div className="flex items-center justify-center py-20 text-soot-400 gap-2">
               <Loader2 className="w-5 h-5 animate-spin" /> Loading menu…
@@ -450,7 +450,7 @@ export default function MenuItemsTab() {
             </div>
           ) : (
             <div className="app-table-shell">
-              <div className="app-table-scroll max-h-[calc(100vh-18rem)] min-h-[22rem] overscroll-contain lg:max-h-[calc(100vh-16rem)]">
+              <div className="app-table-scroll max-h-[calc(100vh-18rem)] min-h-[22rem] overflow-y-auto overscroll-contain lg:max-h-[calc(100vh-16rem)]">
                 <table className="app-table menu-items-table min-w-[980px]">
                   <colgroup>
                     <col className="w-[13%]" />
