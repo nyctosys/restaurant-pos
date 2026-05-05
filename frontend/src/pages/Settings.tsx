@@ -1,5 +1,5 @@
 import { useState, useEffect, useLayoutEffect, useSyncExternalStore, useRef } from 'react';
-import { Plus, Trash2, Loader2, Moon, Sun, ScrollText, Copy, Trash, Download, ChevronDown, ChevronUp, Archive, ArchiveRestore, LayoutGrid, List } from 'lucide-react';
+import { Plus, Trash2, Loader2, Moon, Sun, ScrollText, Copy, Trash, Download, ChevronDown, ChevronUp, Archive, ArchiveRestore, LayoutGrid, List, Printer } from 'lucide-react';
 import UsersSettings from '../components/settings/UsersSettings';
 import ReceiptSettings from '../components/settings/ReceiptSettings';
 import BranchesSettings from '../components/settings/BranchesSettings';
@@ -101,6 +101,7 @@ export default function Settings() {
   if (isOwner || user?.role === 'manager') {
     tabs.push('Branches');
   }
+  tabs.push('Printer Logs');
   tabs.push('App Logs');
 
   // Fetch settings on mount
@@ -435,12 +436,12 @@ export default function Settings() {
   };
 
   return (
-    <div className="settings-layout flex h-full min-h-0 flex-col bg-transparent overflow-hidden lg:flex-row">
+    <div className="settings-layout flex h-full min-h-0 flex-col bg-transparent overflow-y-auto lg:overflow-hidden lg:flex-row">
       
       {/* Sidebar Nav — scrollable on short viewports; xl+ wider rail */}
       <div
         ref={settingsNavScrollRef}
-        className="settings-nav w-full lg:w-56 xl:w-64 shrink-0 glass-card border-b lg:border-b-0 lg:border-r border-white/20 p-3 lg:p-4 overflow-y-auto overscroll-contain max-h-[min(42vh,360px)] lg:max-h-[calc(100%-1rem)] lg:min-h-0 m-0 lg:m-2"
+        className="settings-nav w-full lg:w-56 xl:w-64 shrink-0 glass-card border-b lg:border-b-0 lg:border-r border-white/20 p-3 lg:p-4 !overflow-y-auto overscroll-contain max-h-[calc(100dvh-120px)] lg:max-h-[calc(100%-1rem)] lg:min-h-0 m-0 lg:m-2 touch-pan-y"
       >
         <h2 className="text-lg font-bold text-soot-900 mb-4 lg:mb-6 px-2 lg:px-4">System Settings</h2>
         <nav className="space-y-1">
@@ -1104,13 +1105,132 @@ export default function Settings() {
           </div>
         )}
 
+        {activeTab === 'printerlogs' && <PrinterLogsPanel />}
         {activeTab === 'applogs' && <AppLogsPanel />}
 
         {/* Fallback for other tabs */}
-        {!['general', 'hardware', 'categories', 'tables', 'riders', 'modifiers', 'taxrates', 'receipt', 'users', 'branches', 'applogs', 'discounts'].includes(activeTab) && (
+        {!['general', 'hardware', 'categories', 'tables', 'riders', 'modifiers', 'taxrates', 'receipt', 'users', 'branches', 'printerlogs', 'applogs', 'discounts'].includes(activeTab) && (
            <div className="text-soot-500">Settings panel for {activeTab} coming soon.</div>
         )}
 
+      </div>
+    </div>
+  );
+}
+
+// ────────────────────────────────────────────────────────
+// Printer Logs Panel
+// ────────────────────────────────────────────────────────
+
+type PrinterJobLogEntry = {
+  job_id: number;
+  label: string;
+  status: 'queued' | 'started' | 'succeeded' | 'failed' | string;
+  at: string;
+  message?: string | null;
+};
+
+function PrinterLogsPanel() {
+  const [jobs, setJobs] = useState<PrinterJobLogEntry[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [onlyFailed, setOnlyFailed] = useState(false);
+
+  const load = () => {
+    setLoading(true);
+    setError(null);
+    void get<{ jobs: PrinterJobLogEntry[] }>(`/printer/jobs?limit=200`)
+      .then(data => setJobs(Array.isArray(data?.jobs) ? data.jobs : []))
+      .catch(e => setError(getUserMessageWithRef(e)))
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  const displayed = (onlyFailed ? jobs.filter(j => j.status === 'failed') : jobs).slice(0, 200);
+
+  const statusPill = (status: string) => {
+    if (status === 'failed') return 'bg-red-50 text-red-700 border-red-200';
+    if (status === 'succeeded') return 'bg-emerald-50 text-emerald-700 border-emerald-200';
+    if (status === 'started') return 'bg-amber-50 text-amber-800 border-amber-200';
+    return 'bg-soot-50 text-soot-600 border-soot-200';
+  };
+
+  const formatAt = (iso: string) => {
+    try {
+      return new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'medium' });
+    } catch {
+      return iso;
+    }
+  };
+
+  return (
+    <div className="max-w-4xl xl:max-w-5xl">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+        <div>
+          <h3 className="text-2xl font-bold text-soot-900 flex items-center gap-2">
+            <Printer className="w-6 h-6 text-soot-400" />
+            Printer Logs
+          </h3>
+          <p className="text-sm text-soot-500 mt-1">
+            Recent receipt/KOT print jobs queued by this server process.
+            {loading && ' · loading…'}
+          </p>
+          {error && <p className="text-xs text-red-600 mt-2 font-medium">Printer log fetch: {error}</p>}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="flex items-center gap-2 text-xs font-semibold text-soot-600 select-none">
+            <input
+              type="checkbox"
+              checked={onlyFailed}
+              onChange={() => setOnlyFailed(v => !v)}
+              className="rounded border-soot-300 text-brand-600 focus:ring-brand-500"
+            />
+            Only failed
+          </label>
+          <button
+            type="button"
+            onClick={load}
+            disabled={loading}
+            className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-soot-600 bg-white border border-soot-200 rounded-[8px] hover:bg-soot-50 transition-colors disabled:opacity-50"
+          >
+            <Loader2 className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+            Refresh
+          </button>
+        </div>
+      </div>
+
+      <div className="glass-card overflow-hidden">
+        {displayed.length === 0 ? (
+          <div className="py-16 text-center text-soot-400">
+            <Printer className="w-10 h-10 mx-auto mb-3 stroke-1" />
+            <p className="font-medium">{onlyFailed ? 'No failed print jobs' : 'No print jobs yet'}</p>
+            <p className="text-xs mt-1">Run a test print or complete an order, then refresh.</p>
+          </div>
+        ) : (
+          <div className="divide-y divide-soot-100 max-h-[60vh] overflow-auto">
+            {displayed.map(entry => (
+              <div key={`${entry.job_id}-${entry.at}`} className="px-4 py-3 hover:bg-white/60 transition-colors">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-[11px] font-mono text-soot-400">#{entry.job_id}</span>
+                  <span className={`text-[11px] font-bold uppercase px-2 py-0.5 rounded border ${statusPill(entry.status)}`}>
+                    {entry.status}
+                  </span>
+                  <span className="text-xs font-semibold text-soot-700">{entry.label}</span>
+                  <span className="text-xs text-soot-500">{formatAt(entry.at)}</span>
+                </div>
+                {entry.message && (
+                  <p className="mt-1 text-xs text-soot-600">
+                    {entry.message}
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

@@ -12,15 +12,21 @@ class PrinterService:
             cls._instance = super(PrinterService, cls).__new__(cls)
             cls._instance.printer = None
             cls._instance.printer_kind = "receipt"
+            cls._instance.printer_branch_id = None
         return cls._instance
 
-    def _get_printer_config(self, printer_kind="receipt"):
-        # Fetch global hardware settings
-        setting = Setting.query.filter_by(branch_id=None).first()
-        if setting and "hardware" in setting.config:
-            hardware = setting.config["hardware"] or {}
-            return self._resolve_printer_config(hardware, printer_kind)
-        return None
+    def _get_printer_config(self, printer_kind: str = "receipt", branch_id: str | None = None):
+        """Fetch hardware settings (global + branch merged, branch overrides)."""
+        global_setting = Setting.query.filter_by(branch_id=None).first()
+        global_config = (global_setting.config or {}).copy() if global_setting else {}
+        if branch_id is not None:
+            branch_setting = Setting.query.filter_by(branch_id=branch_id).first()
+            if branch_setting and branch_setting.config:
+                global_config = {**global_config, **branch_setting.config}
+        hardware = global_config.get("hardware") or {}
+        if not isinstance(hardware, dict) or not hardware:
+            return None
+        return self._resolve_printer_config(hardware, printer_kind)
 
     def _resolve_printer_config(self, hardware, printer_kind):
         kind = "kot" if str(printer_kind).lower() == "kot" else "receipt"
@@ -70,14 +76,15 @@ class PrinterService:
             "product_id": product_id,
         }
 
-    def connect(self, printer_kind="receipt"):
-        config = self._get_printer_config(printer_kind)
+    def connect(self, printer_kind: str = "receipt", branch_id: str | None = None):
+        config = self._get_printer_config(printer_kind, branch_id=branch_id)
         if not config:
             print("Printer hardware not configured in settings.")
             return False
 
         try:
             self.printer_kind = "kot" if str(printer_kind).lower() == "kot" else "receipt"
+            self.printer_branch_id = branch_id
             mode = config.get("mode", "usb")
 
             if mode == "lan":
@@ -139,7 +146,13 @@ class PrinterService:
         except Exception:
             pass
 
-    def _ensure_connected(self, printer_kind: str, *, fresh: bool = False) -> bool:
+    def _ensure_connected(
+        self,
+        printer_kind: str,
+        *,
+        branch_id: str | None = None,
+        fresh: bool = False,
+    ) -> bool:
         """
         Ensure printer is connected for the requested kind.
         `fresh=True` forces a reconnect to avoid stale OS/device handles between jobs.
@@ -149,10 +162,13 @@ class PrinterService:
             self._disconnect()
         elif self.printer and self.printer_kind != desired_kind:
             self._disconnect()
+        elif self.printer and self.printer_branch_id != branch_id:
+            # Different branch hardware config can differ per terminal/branch.
+            self._disconnect()
 
         if self.printer:
             return True
-        return self.connect(desired_kind)
+        return self.connect(desired_kind, branch_id=branch_id)
 
     def print_text(self, text):
         if not self._ensure_connected("receipt", fresh=True):
@@ -255,7 +271,7 @@ class PrinterService:
         return binary
 
     def print_receipt(self, sale_data):
-        if not self._ensure_connected("receipt", fresh=True):
+        if not self._ensure_connected("receipt", branch_id=sale_data.get("branch_id"), fresh=True):
             return False
 
         settings = self._get_receipt_settings(sale_data.get('branch_id'))
@@ -538,7 +554,7 @@ class PrinterService:
 
     def print_kot(self, kot_data: dict) -> bool:
         """Kitchen order ticket for KDS / prep station (no prices, no tax)."""
-        if not self._ensure_connected("kot", fresh=True):
+        if not self._ensure_connected("kot", branch_id=kot_data.get("branch_id"), fresh=True):
             return False
         settings = self._get_receipt_settings(kot_data.get("branch_id"))
         from datetime import datetime, timezone
@@ -639,7 +655,7 @@ class PrinterService:
 
     def print_kot_modification(self, payload: dict) -> bool:
         """Print an order modification slip on KOT printer — full order layout with MODIFIED ORDER heading."""
-        if not self._ensure_connected("kot", fresh=True):
+        if not self._ensure_connected("kot", branch_id=payload.get("branch_id"), fresh=True):
             return False
         from datetime import datetime, timezone
 

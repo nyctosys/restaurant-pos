@@ -10,6 +10,7 @@ import logging
 import os
 import queue
 import threading
+from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from itertools import count
@@ -22,6 +23,57 @@ _job_seq = count(1)
 _queue_lock = threading.Lock()
 _worker_started = False
 _print_jobs: queue.PriorityQueue["_QueuedPrintJob"] = queue.PriorityQueue()
+
+_MAX_JOB_LOGS = 250
+_job_logs_lock = threading.Lock()
+_job_logs: deque["PrintJobLogEntry"] = deque(maxlen=_MAX_JOB_LOGS)
+
+
+@dataclass(frozen=True)
+class PrintJobLogEntry:
+    job_id: int
+    label: str
+    status: str  # queued|started|succeeded|failed
+    at: str
+    message: str | None = None
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _append_job_log(job_id: int, label: str, status: str, message: str | None = None) -> None:
+    with _job_logs_lock:
+        _job_logs.append(
+            PrintJobLogEntry(
+                job_id=int(job_id),
+                label=str(label),
+                status=str(status),
+                at=_now_iso(),
+                message=(str(message)[:800] if message else None),
+            )
+        )
+
+
+def get_recent_print_job_logs(limit: int = 50) -> list[dict[str, Any]]:
+    """Return most recent print job events (sanitized, in-memory)."""
+    try:
+        n = int(limit or 50)
+    except (TypeError, ValueError):
+        n = 50
+    n = max(1, min(250, n))
+    with _job_logs_lock:
+        items = list(_job_logs)[-n:]
+    return [
+        {
+            "job_id": e.job_id,
+            "label": e.label,
+            "status": e.status,
+            "at": e.at,
+            "message": e.message,
+        }
+        for e in reversed(items)
+    ]
 
 
 @dataclass(order=True)
@@ -60,20 +112,26 @@ def _print_worker_loop() -> None:
         job = _print_jobs.get()
         try:
             logger.info("Print job started", extra={"job_id": job.job_id, "label": job.label})
-            job.fn(*job.args)
+            _append_job_log(job.job_id, job.label, "started")
+            ok = job.fn(*job.args)
+            if ok is False:
+                _append_job_log(job.job_id, job.label, "failed", "Printer reported failure")
+            else:
+                _append_job_log(job.job_id, job.label, "succeeded")
         except Exception:
             logger.exception(
                 "Print job failed",
                 extra={"job_id": job.job_id, "label": job.label},
             )
+            _append_job_log(job.job_id, job.label, "failed", "Unhandled exception while printing")
         finally:
             _print_jobs.task_done()
 
 
-def _queue_print_job(priority: int, label: str, fn: Any, *args: Any) -> None:
+def _queue_print_job(priority: int, label: str, fn: Any, *args: Any) -> int | None:
     if _run_inline_for_tests():
         fn(*args)
-        return
+        return None
     _start_worker_if_needed()
     job_id = next(_job_counter)
     seq = next(_job_seq)
@@ -91,25 +149,29 @@ def _queue_print_job(priority: int, label: str, fn: Any, *args: Any) -> None:
         "Print job queued",
         extra={"job_id": job_id, "label": label, "priority": priority},
     )
+    _append_job_log(job_id, label, "queued")
+    return int(job_id)
 
 
-def _do_print_receipt(receipt_data: dict[str, Any]) -> None:
+def _do_print_receipt(receipt_data: dict[str, Any]) -> bool:
     try:
         from app.services.printer_service import PrinterService
 
-        PrinterService().print_receipt(receipt_data)
+        return bool(PrinterService().print_receipt(receipt_data))
     except Exception:
         logger.exception("Deferred receipt print failed")
+        return False
 
 
-def _do_print_kot_modification(mod_payload: dict[str, Any]) -> None:
+def _do_print_kot_modification(mod_payload: dict[str, Any]) -> bool:
     """Deferred KOT modification slip — runs after HTTP response is sent."""
     try:
         from app.services.printer_service import PrinterService
 
-        PrinterService().print_kot_modification(mod_payload)
+        return bool(PrinterService().print_kot_modification(mod_payload))
     except Exception:
         logger.exception("Deferred KOT modification print failed")
+        return False
 
 
 def _do_print_kot_and_stamp(
@@ -117,7 +179,7 @@ def _do_print_kot_and_stamp(
     kot_payload: dict[str, Any] | None,
     branch_id: str | None = None,
     operator_name: str | None = None,
-) -> None:
+) -> bool:
     """Print KOT then persist kds_ticket_printed_at in a fresh app context."""
     try:
         from app.services.printer_service import PrinterService
@@ -132,7 +194,7 @@ def _do_print_kot_and_stamp(
 
         ok = PrinterService().print_kot(payload)
         if not ok:
-            return
+            return False
         from app import database_shell
         from app.models import Sale, db
 
@@ -143,17 +205,19 @@ def _do_print_kot_and_stamp(
             if getattr(sale, "kds_ticket_printed_at", None) is None:
                 sale.kds_ticket_printed_at = datetime.now(timezone.utc)
                 db.session.commit()
+        return True
     except Exception:
         logger.exception("Deferred KOT print/stamp failed")
+        return False
 
 
-def run_print_receipt_job(receipt_data: dict[str, Any]) -> None:
+def run_print_receipt_job(receipt_data: dict[str, Any]) -> int | None:
     # Highest priority: customer receipt should never sit behind KOT backlog.
-    _queue_print_job(0, "receipt", _do_print_receipt, receipt_data)
+    return _queue_print_job(0, "receipt", _do_print_receipt, receipt_data)
 
 
-def run_print_kot_modification_job(mod_payload: dict[str, Any]) -> None:
-    _queue_print_job(1, "kot-modification", _do_print_kot_modification, mod_payload)
+def run_print_kot_modification_job(mod_payload: dict[str, Any]) -> int | None:
+    return _queue_print_job(1, "kot-modification", _do_print_kot_modification, mod_payload)
 
 
 def run_print_kot_and_stamp_job(
@@ -161,12 +225,12 @@ def run_print_kot_and_stamp_job(
     kot_payload: dict[str, Any] | None,
     branch_id: str | None = None,
     operator_name: str | None = None,
-) -> None:
+) -> int | None:
     """Queue KOT print + stamp after response.
 
     Pass ``kot_payload=None`` to build payload in the print worker (keeps API fast).
     """
-    _queue_print_job(
+    return _queue_print_job(
         1,
         "kot-and-stamp",
         _do_print_kot_and_stamp,

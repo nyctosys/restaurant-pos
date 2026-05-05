@@ -1142,20 +1142,16 @@ def checkout(
             "order_type": order_type_norm,
             "order_snapshot": order_snapshot_norm,
         }
-        background_tasks.add_task(run_print_receipt_job, receipt_dict)
+        # Enqueue immediately (fast). Actual I/O runs on the print dispatcher thread.
+        receipt_job_id = run_print_receipt_job(receipt_dict)
         # Paid checkout must start the customer receipt before any kitchen printer I/O.
         # Kitchen printing can block on a separate LAN/USB device; it should never delay
         # the receipt for dine-in, takeaway, delivery, or any payment method.
         if getattr(new_sale, "order_type", None) in KITCHEN_OPEN_ORDER_TYPES and getattr(
             new_sale, "kds_ticket_printed_at", None
         ) is None:
-            background_tasks.add_task(
-                run_print_kot_and_stamp_job,
-                new_sale.id,
-                None,
-                branch_id,
-                current_user.username,
-            )
+            # Queue KOT after the receipt has been queued (lower priority).
+            run_print_kot_and_stamp_job(new_sale.id, None, branch_id, current_user.username)
         return JSONResponse(
             status_code=201,
             content={
@@ -1164,6 +1160,7 @@ def checkout(
                 "total": float(new_sale.total_amount),
                 "print_success": True,
                 "print_deferred": True,
+                "print_job_id": receipt_job_id,
             },
         )
     except Exception as exc:
@@ -2747,7 +2744,7 @@ def finalize_open_sale(
             "order_type": getattr(sale, "order_type", None),
             "order_snapshot": getattr(sale, "order_snapshot", None),
         }
-        background_tasks.add_task(run_print_receipt_job, receipt_dict)
+        receipt_job_id = run_print_receipt_job(receipt_dict)
         return JSONResponse(
             status_code=200,
             content={
@@ -2756,6 +2753,7 @@ def finalize_open_sale(
                 "total": float(sale.total_amount),
                 "print_success": True,
                 "print_deferred": True,
+                "print_job_id": receipt_job_id,
             },
         )
     except Exception as exc:

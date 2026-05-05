@@ -783,6 +783,42 @@ table td {
   -webkit-overflow-scrolling: touch;
 }
 
+/* Dim Settings scrollbars (subtle ~10% visibility) */
+.settings-nav,
+.settings-content {
+  scrollbar-width: thin; /* Firefox */
+  scrollbar-color: rgb(0 0 0 / 0.10) transparent;
+}
+.dark .settings-nav,
+.dark .settings-content {
+  scrollbar-color: rgb(255 255 255 / 0.10) transparent;
+}
+.settings-nav::-webkit-scrollbar,
+.settings-content::-webkit-scrollbar {
+  width: 8px;
+}
+.settings-nav::-webkit-scrollbar-track,
+.settings-content::-webkit-scrollbar-track {
+  background: transparent;
+}
+.settings-nav::-webkit-scrollbar-thumb,
+.settings-content::-webkit-scrollbar-thumb {
+  background: rgb(0 0 0 / 0.10);
+  border-radius: 9999px;
+}
+.dark .settings-nav::-webkit-scrollbar-thumb,
+.dark .settings-content::-webkit-scrollbar-thumb {
+  background: rgb(255 255 255 / 0.10);
+}
+.settings-nav::-webkit-scrollbar-thumb:hover,
+.settings-content::-webkit-scrollbar-thumb:hover {
+  background: rgb(0 0 0 / 0.18);
+}
+.dark .settings-nav::-webkit-scrollbar-thumb:hover,
+.dark .settings-content::-webkit-scrollbar-thumb:hover {
+  background: rgb(255 255 255 / 0.18);
+}
+
 .dark .border-white,
 .dark .border-white\/80,
 .dark .border-white\/70,
