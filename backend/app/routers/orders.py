@@ -1375,12 +1375,16 @@ def _build_detailed_report(
     profit_row = (
         db.session.query(
             func.coalesce(
-                func.sum((SaleItem.unit_price - Product.base_price) * SaleItem.quantity),
+                func.sum(
+                    (SaleItem.unit_price - func.coalesce(Product.base_price, 0))
+                    * SaleItem.quantity
+                ),
                 0,
             )
         )
         .join(Sale, Sale.id == SaleItem.sale_id)
-        .join(Product, Product.id == SaleItem.product_id)
+        # Outer join so old rows with missing/deleted products don't zero-out profit.
+        .outerjoin(Product, Product.id == SaleItem.product_id)
         .filter(*completed_filters)
         .one()
     )
