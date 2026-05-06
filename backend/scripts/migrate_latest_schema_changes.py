@@ -121,6 +121,17 @@ def _ensure_prepared_item_tables(dialect: str) -> None:
               notes VARCHAR(500)
             )
         """,
+        "prepared_item_prepared_components": f"""
+            CREATE TABLE prepared_item_prepared_components (
+              id {id_type},
+              prepared_item_id INTEGER NOT NULL REFERENCES prepared_items(id),
+              component_prepared_item_id INTEGER NOT NULL REFERENCES prepared_items(id),
+              quantity {float_type} NOT NULL,
+              unit VARCHAR(6) NOT NULL,
+              notes VARCHAR(500),
+              CONSTRAINT uq_prepared_item_prepared_component UNIQUE (prepared_item_id, component_prepared_item_id)
+            )
+        """,
         "prepared_item_branch_stocks": f"""
             CREATE TABLE prepared_item_branch_stocks (
               id {id_type},

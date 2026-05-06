@@ -226,7 +226,15 @@ def _apply_postgres_fixes(connection: Connection, report: RepairReport) -> None:
             "Ensured stockmovementtype enum contains PREPARATION",
         )
 
-    for table_name in ("ingredients", "recipe_items", "purchase_order_items", "prepared_items", "prepared_item_components", "recipe_prepared_items"):
+    for table_name in (
+        "ingredients",
+        "recipe_items",
+        "purchase_order_items",
+        "prepared_items",
+        "prepared_item_components",
+        "prepared_item_prepared_components",
+        "recipe_prepared_items",
+    ):
         exists = connection.execute(
             text(
                 """

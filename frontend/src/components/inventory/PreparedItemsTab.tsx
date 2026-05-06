@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, Beaker, Loader2, Plus, Save, X } from 'lucide-react';
+import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, Beaker, Loader2, Plus, Save, X } from 'lucide-react';
 import { get, getUserMessage, post, put } from '../../api';
 import SearchableSelect from '../SearchableSelect';
 import { showToast } from '../Toast';
@@ -25,10 +25,14 @@ type Ingredient = {
 };
 
 type PreparedComponent = {
-  ingredient_id: number;
+  component_type?: 'ingredient' | 'prepared_item';
+  ingredient_id?: number;
+  prepared_item_id?: number;
   quantity: number;
   unit: string;
   notes?: string;
+  prepared_item_name?: string | null;
+  prepared_item_unit?: string;
 };
 
 type PreparedItem = {
@@ -45,7 +49,10 @@ type PreparedItem = {
 };
 
 type ComponentRow = {
+  componentType: 'ingredient' | 'prepared_item';
   ingredientId: string;
+  preparedItemId: string;
+  preparedItemName: string;
   quantity: string;
   inputUnit?: string;
 };
@@ -53,7 +60,14 @@ type ComponentRow = {
 const UNIT_OPTIONS = ['kg', 'g', 'l', 'ml', 'piece', 'pack', 'can', 'bottle'];
 
 function emptyComponentRow(): ComponentRow {
-  return { ingredientId: '', quantity: '', inputUnit: '' };
+  return {
+    componentType: 'ingredient',
+    ingredientId: '',
+    preparedItemId: '',
+    preparedItemName: '',
+    quantity: '',
+    inputUnit: '',
+  };
 }
 
 function formatYieldUnit(unit: string) {
@@ -75,10 +89,21 @@ function getPerKgPrice(ingredient: Ingredient): number | null {
   return null;
 }
 
+function getSelectablePreparedInputUnits(unitRaw: string): string[] {
+  const unit = (unitRaw || '').toLowerCase();
+  if (unit === 'kg') return ['kg', 'g'];
+  if (unit === 'g') return ['g', 'kg'];
+  if (unit === 'l') return ['l', 'ml'];
+  if (unit === 'ml') return ['ml', 'l'];
+  return unit ? [unit] : [];
+}
+
 export default function PreparedItemsTab() {
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
   const [items, setItems] = useState<PreparedItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [sortKey, setSortKey] = useState<'name' | 'kind' | 'stock' | 'cost' | 'formula'>('kind');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const [editingItem, setEditingItem] = useState<PreparedItem | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState('');
@@ -138,11 +163,21 @@ export default function PreparedItemsTab() {
     setNotes(item.notes || '');
     setComponents(
       item.components.length
-        ? item.components.map((component) => ({
-            ingredientId: String(component.ingredient_id),
-            quantity: String(component.quantity),
-            inputUnit: component.unit || '',
-          }))
+        ? item.components.map((component) => {
+            const componentType =
+              component.component_type === 'prepared_item' ? 'prepared_item' : 'ingredient';
+            return {
+              componentType,
+              ingredientId:
+                componentType === 'ingredient' ? String(component.ingredient_id || '') : '',
+              preparedItemId:
+                componentType === 'prepared_item' ? String(component.prepared_item_id || '') : '',
+              preparedItemName:
+                componentType === 'prepared_item' ? String(component.prepared_item_name || '') : '',
+              quantity: String(component.quantity),
+              inputUnit: component.unit || '',
+            };
+          })
         : [emptyComponentRow()]
     );
     setShowForm(true);
@@ -154,7 +189,26 @@ export default function PreparedItemsTab() {
     );
   };
 
+  const findPreparedItemForRow = (row: ComponentRow): PreparedItem | undefined => {
+    if (row.preparedItemId) {
+      return items.find((it) => String(it.id) === row.preparedItemId);
+    }
+    const nameKey = (row.preparedItemName || '').trim().toLowerCase();
+    if (!nameKey) return undefined;
+    return items.find((it) => (it.name || '').trim().toLowerCase() === nameKey);
+  };
+
   const resolveInputUnit = (row: ComponentRow, ingredient?: Ingredient): string => {
+    if (row.componentType === 'prepared_item') {
+      const prepared = findPreparedItemForRow(row);
+      const allowed = getSelectablePreparedInputUnits(prepared?.unit || '');
+      const normalized = normalizeUnitToken(row.inputUnit || '');
+      if (normalized) {
+        const matched = allowed.find((u) => normalizeUnitToken(u) === normalized);
+        if (matched) return matched;
+      }
+      return allowed[0] || prepared?.unit || row.inputUnit || '';
+    }
     if (!ingredient) return row.inputUnit || '';
     const allowed = getSelectableInputUnits(ingredient);
     const normalized = normalizeUnitToken(row.inputUnit || '');
@@ -171,15 +225,35 @@ export default function PreparedItemsTab() {
     searchText: ingredient.name,
   }));
 
+  const preparedItemOptions = items.map((item) => ({
+    value: String(item.id),
+    label: `${item.name} (${item.unit})`,
+    searchText: item.name,
+  }));
+
   const nextSku = useMemo(() => {
     if (editingItem || sku.trim()) return sku;
     return generateAutoSku('PRP', name || kind, items.map((item) => item.sku || '').filter(Boolean));
   }, [editingItem, items, kind, name, sku]);
 
   const formCost = components.reduce((sum, row) => {
-    const ingredient = ingredients.find((ing) => String(ing.id) === row.ingredientId);
     const qty = Number.parseFloat(row.quantity);
-    if (!ingredient || !Number.isFinite(qty) || qty <= 0) return sum;
+    if (!Number.isFinite(qty) || qty <= 0) return sum;
+
+    if (row.componentType === 'prepared_item') {
+      const prepared = items.find((it) => String(it.id) === row.preparedItemId);
+      if (!prepared) return sum;
+      try {
+        const inputUnit = resolveInputUnit(row) || prepared.unit;
+        const qtyInPreparedUnit = quantityToStorageBase(qty, inputUnit, prepared.unit);
+        return sum + Number(prepared.average_cost || 0) * qtyInPreparedUnit;
+      } catch {
+        return sum;
+      }
+    }
+
+    const ingredient = ingredients.find((ing) => String(ing.id) === row.ingredientId);
+    if (!ingredient) return sum;
     try {
       const qtyBase = toBaseUnit(qty, resolveInputUnit(row, ingredient) || ingredient.unit, ingredient);
       return sum + ingredient.average_cost * qtyBase;
@@ -189,15 +263,29 @@ export default function PreparedItemsTab() {
   }, 0);
 
   const formulaYield = components.reduce((sum, row) => {
-    const ingredient = ingredients.find((ing) => String(ing.id) === row.ingredientId);
     const qty = Number.parseFloat(row.quantity);
-    if (!ingredient || !Number.isFinite(qty) || qty <= 0) return sum;
+    if (!Number.isFinite(qty) || qty <= 0) return sum;
+
+    if (row.componentType === 'prepared_item') {
+      const prepared = items.find((it) => String(it.id) === row.preparedItemId);
+      if (!prepared) return sum;
+      try {
+        const inputUnit = resolveInputUnit(row) || prepared.unit;
+        // Approximate prepared yield as the sum of all line quantities, expressed in this item's unit.
+        const qtyInThisUnit = quantityToStorageBase(qty, inputUnit, unit);
+        return sum + qtyInThisUnit;
+      } catch {
+        return sum;
+      }
+    }
+
+    const ingredient = ingredients.find((ing) => String(ing.id) === row.ingredientId);
+    if (!ingredient) return sum;
     try {
       const inputUnit = resolveInputUnit(row, ingredient) || ingredient.unit;
-      // Approximate prepared yield as the sum of ingredient quantities, expressed in the prepared item's unit.
-      // (Only static weight/volume/count conversions are supported here.)
-      const qtyInPreparedUnit = quantityToStorageBase(qty, inputUnit, unit);
-      return sum + qtyInPreparedUnit;
+      // Approximate prepared yield as the sum of ingredient quantities, expressed in this item's unit.
+      const qtyInThisUnit = quantityToStorageBase(qty, inputUnit, unit);
+      return sum + qtyInThisUnit;
     } catch {
       return sum;
     }
@@ -224,6 +312,59 @@ export default function PreparedItemsTab() {
     [items]
   );
 
+  const handleSort = (key: 'name' | 'kind' | 'stock' | 'cost' | 'formula') => {
+    if (sortKey === key) {
+      setSortDirection((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+      return;
+    }
+    setSortKey(key);
+    setSortDirection('asc');
+  };
+
+  const renderSortIcon = (key: 'name' | 'kind' | 'stock' | 'cost' | 'formula') => {
+    if (sortKey !== key) return <ArrowUpDown className="w-3.5 h-3.5 text-soot-400" aria-hidden="true" />;
+    return sortDirection === 'asc' ? (
+      <ArrowUp className="w-3.5 h-3.5 text-brand-700" aria-hidden="true" />
+    ) : (
+      <ArrowDown className="w-3.5 h-3.5 text-brand-700" aria-hidden="true" />
+    );
+  };
+
+  const sortedItems = useMemo(() => {
+    const direction = sortDirection === 'asc' ? 1 : -1;
+    const kindWeight = (kindValue: PreparedItem['kind']) => (kindValue === 'sauce' ? 0 : 1);
+
+    return items
+      .map((item, index) => ({ item, index }))
+      .sort((a, b) => {
+        const left = a.item;
+        const right = b.item;
+
+        let result = 0;
+        switch (sortKey) {
+          case 'kind':
+            result = kindWeight(left.kind) - kindWeight(right.kind);
+            break;
+          case 'stock':
+            result = Number(left.current_stock || 0) - Number(right.current_stock || 0);
+            break;
+          case 'cost':
+            result = Number(left.average_cost || 0) - Number(right.average_cost || 0);
+            break;
+          case 'formula':
+            result = Number(left.components?.length || 0) - Number(right.components?.length || 0);
+            break;
+          case 'name':
+            result = (left.name || '').localeCompare(right.name || '', undefined, { sensitivity: 'base' });
+            break;
+        }
+
+        if (result !== 0) return result * direction;
+        return a.index - b.index;
+      })
+      .map((entry) => entry.item);
+  }, [items, sortDirection, sortKey]);
+
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     const trimmedName = name.trim();
@@ -231,31 +372,93 @@ export default function PreparedItemsTab() {
       showToast('Name is required', 'error');
       return;
     }
-    const payloadComponents = components
-      .map((row) => {
-        const ingredient = ingredients.find((ing) => String(ing.id) === row.ingredientId);
+
+    setSubmitting(true);
+    const preparedNameToId = new Map<string, number>();
+    const payloadComponents: Array<
+      | { component_type: 'ingredient'; ingredient_id: number; quantity: number; unit: string }
+      | { component_type: 'prepared_item'; prepared_item_id: number; quantity: number; unit: string }
+    > = [];
+
+    try {
+      for (const row of components) {
         const quantityRaw = Number.parseFloat(row.quantity);
-        if (!ingredient || !Number.isFinite(quantityRaw) || quantityRaw <= 0) return null;
-        const selectedInputUnit = resolveInputUnit(row, ingredient) || ingredient.unit;
-        let quantityBase = quantityRaw;
-        try {
-          quantityBase = toBaseUnit(quantityRaw, selectedInputUnit, ingredient);
-        } catch {
-          return null;
+        if (!Number.isFinite(quantityRaw) || quantityRaw <= 0) continue;
+
+        if (row.componentType === 'ingredient') {
+          const ingredient = ingredients.find((ing) => String(ing.id) === row.ingredientId);
+          if (!ingredient) continue;
+          const selectedInputUnit = resolveInputUnit(row, ingredient) || ingredient.unit;
+          let quantityBase = quantityRaw;
+          try {
+            quantityBase = toBaseUnit(quantityRaw, selectedInputUnit, ingredient);
+          } catch {
+            continue;
+          }
+          payloadComponents.push({
+            component_type: 'ingredient',
+            ingredient_id: ingredient.id,
+            quantity: quantityBase,
+            unit: ingredient.unit,
+          });
+          continue;
         }
 
-        return {
-          ingredient_id: ingredient.id,
+        const preparedNameKey = (row.preparedItemName || '').trim().toLowerCase();
+        if (preparedNameKey && preparedNameKey === trimmedName.trim().toLowerCase()) {
+          showToast('A sauce/marination cannot include itself in its formula', 'error');
+          setSubmitting(false);
+          return;
+        }
+
+        const selectedExisting = findPreparedItemForRow(row);
+        let preparedId: number | null = selectedExisting?.id ?? null;
+        if (!preparedId && preparedNameKey) {
+          preparedId = preparedNameToId.get(preparedNameKey) ?? null;
+        }
+
+        if (!preparedId) {
+          if (!preparedNameKey) continue;
+          const created = await post<{ id: number }>('/inventory-advanced/prepared-items', {
+            name: row.preparedItemName.trim(),
+            kind: 'sauce',
+            unit,
+            minimum_stock: 0,
+            components: [],
+          });
+          preparedId = created.id;
+          preparedNameToId.set(preparedNameKey, preparedId);
+        }
+
+        const prepared = items.find((it) => it.id === preparedId);
+        const preparedUnit = prepared?.unit || unit;
+        const selectedInputUnit =
+          resolveInputUnit({ ...row, preparedItemId: String(preparedId) }) || preparedUnit;
+        let quantityBase = quantityRaw;
+        try {
+          quantityBase = quantityToStorageBase(quantityRaw, selectedInputUnit, preparedUnit);
+        } catch {
+          continue;
+        }
+        payloadComponents.push({
+          component_type: 'prepared_item',
+          prepared_item_id: preparedId,
           quantity: quantityBase,
-          unit: ingredient.unit,
-        };
-      })
-      .filter(Boolean);
-    if (payloadComponents.length === 0) {
-      showToast('Add at least one ingredient to the formula', 'error');
+          unit: preparedUnit,
+        });
+      }
+    } catch (e) {
+      showToast(getUserMessage(e), 'error');
+      setSubmitting(false);
       return;
     }
-    setSubmitting(true);
+
+    if (payloadComponents.length === 0) {
+      showToast('Add at least one ingredient or sauce/marination to the formula', 'error');
+      setSubmitting(false);
+      return;
+    }
+
     try {
       const payload = {
         name: trimmedName,
@@ -348,15 +551,75 @@ export default function PreparedItemsTab() {
           <table className="app-table min-w-[640px] text-sm">
             <thead>
               <tr>
-                <th className="sticky top-0 z-10">Name</th>
-                <th className="sticky top-0 z-10">Type</th>
-                <th className="sticky top-0 z-10 text-right">Stock</th>
-                <th className="sticky top-0 z-10 text-right">Cost per yield</th>
-                <th className="sticky top-0 z-10">Formula</th>
+                <th
+                  aria-sort={sortKey === 'name' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}
+                  className="sticky top-0 z-10"
+                >
+                  <button
+                    type="button"
+                    onClick={() => handleSort('name')}
+                    className="flex w-full items-center gap-2 text-left transition-colors hover:text-soot-900 focus:outline-none focus-visible:text-soot-950"
+                  >
+                    <span>Name</span>
+                    {renderSortIcon('name')}
+                  </button>
+                </th>
+                <th
+                  aria-sort={sortKey === 'kind' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}
+                  className="sticky top-0 z-10"
+                >
+                  <button
+                    type="button"
+                    onClick={() => handleSort('kind')}
+                    className="flex w-full items-center gap-2 text-left transition-colors hover:text-soot-900 focus:outline-none focus-visible:text-soot-950"
+                  >
+                    <span>Type</span>
+                    {renderSortIcon('kind')}
+                  </button>
+                </th>
+                <th
+                  aria-sort={sortKey === 'stock' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}
+                  className="sticky top-0 z-10 text-right"
+                >
+                  <button
+                    type="button"
+                    onClick={() => handleSort('stock')}
+                    className="flex w-full items-center justify-end gap-2 text-right transition-colors hover:text-soot-900 focus:outline-none focus-visible:text-soot-950"
+                  >
+                    <span>Stock</span>
+                    {renderSortIcon('stock')}
+                  </button>
+                </th>
+                <th
+                  aria-sort={sortKey === 'cost' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}
+                  className="sticky top-0 z-10 text-right"
+                >
+                  <button
+                    type="button"
+                    onClick={() => handleSort('cost')}
+                    className="flex w-full items-center justify-end gap-2 text-right transition-colors hover:text-soot-900 focus:outline-none focus-visible:text-soot-950"
+                  >
+                    <span>Cost per yield</span>
+                    {renderSortIcon('cost')}
+                  </button>
+                </th>
+                <th
+                  aria-sort={sortKey === 'formula' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}
+                  className="sticky top-0 z-10"
+                >
+                  <button
+                    type="button"
+                    onClick={() => handleSort('formula')}
+                    className="flex w-full items-center gap-2 text-left transition-colors hover:text-soot-900 focus:outline-none focus-visible:text-soot-950"
+                  >
+                    <span>Formula</span>
+                    {renderSortIcon('formula')}
+                  </button>
+                </th>
               </tr>
             </thead>
             <tbody>
-              {items.map((item) => {
+              {sortedItems.map((item) => {
                 const isLowStock = item.current_stock <= (item.minimum_stock || 0);
 
                 return (
@@ -434,7 +697,7 @@ export default function PreparedItemsTab() {
 
       {showForm && (
         <div className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center p-4">
-          <form onSubmit={handleSubmit} className="glass-card w-full max-w-3xl max-h-[90vh] overflow-hidden p-5 flex flex-col">
+          <form onSubmit={handleSubmit} className="glass-card w-full max-w-5xl max-h-[90vh] overflow-hidden p-5 flex flex-col">
             <div className="mb-3 flex items-center justify-between gap-3 border-b border-white/20 pb-2">
               <h3 className="font-bold text-soot-900">{editingItem ? 'Edit' : 'New'} Sauce/Marination</h3>
               <button type="button" onClick={() => setShowForm(false)} className="p-2 text-soot-500 hover:text-soot-900">
@@ -503,22 +766,35 @@ export default function PreparedItemsTab() {
                   </span>
                 </div>
                 <div className="max-h-[40vh] overflow-y-auto overflow-x-hidden pr-1 space-y-1.5">
-                  <div className="grid grid-cols-[minmax(14rem,28rem)_8.75rem_7rem_10.5rem_2rem] gap-2 px-1 text-[10px] font-bold uppercase tracking-wide text-soot-500 py-1">
-                    <div className="pl-1">Ingredient</div>
+                  <div className="grid grid-cols-[minmax(0,3.4fr)_minmax(0,1.1fr)_minmax(0,1fr)_minmax(0,0.9fr)_minmax(0,0.8fr)_2.5rem] gap-1.5 px-1 text-[10px] font-bold uppercase tracking-wide text-soot-500 py-1">
+                    <div className="grid grid-cols-[8rem_minmax(0,1fr)] gap-2 pl-1 min-w-0">
+                      <div>Type</div>
+                      <div>Item</div>
+                    </div>
                     <div className="text-center whitespace-nowrap">Unit price</div>
                     <div className="text-center whitespace-nowrap">Total</div>
-                    <div className="grid grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)] gap-1.5 min-w-0">
-                      <div className="text-center whitespace-nowrap">Qty</div>
-                      <div className="text-center whitespace-nowrap">Unit</div>
-                    </div>
+                    <div className="text-center whitespace-nowrap">Qty</div>
+                    <div className="text-center whitespace-nowrap">Unit</div>
                     <div />
                   </div>
                   {components.map((row, index) => {
-                    const ingredient = ingredients.find(ing => String(ing.id) === row.ingredientId);
+                    const ingredient = row.componentType === 'ingredient'
+                      ? ingredients.find(ing => String(ing.id) === row.ingredientId)
+                      : undefined;
+                    const prepared = row.componentType === 'prepared_item'
+                      ? findPreparedItemForRow(row)
+                      : undefined;
                     const selectedInputUnit = resolveInputUnit(row, ingredient);
                     const qty = Number.parseFloat(row.quantity);
                     let lineTotal = 0;
-                    if (ingredient && Number.isFinite(qty) && qty > 0) {
+                    if (row.componentType === 'prepared_item' && prepared && Number.isFinite(qty) && qty > 0) {
+                      try {
+                        const qtyBase = quantityToStorageBase(qty, selectedInputUnit || prepared.unit, prepared.unit);
+                        lineTotal = qtyBase * Number(prepared.average_cost || 0);
+                      } catch {
+                        lineTotal = 0;
+                      }
+                    } else if (ingredient && Number.isFinite(qty) && qty > 0) {
                       try {
                         const qtyBase = toBaseUnit(qty, selectedInputUnit || ingredient.unit, ingredient);
                         lineTotal = qtyBase * Number(ingredient.average_cost || 0);
@@ -527,68 +803,99 @@ export default function PreparedItemsTab() {
                       }
                     }
                     const ingredientPerKgPrice = ingredient ? getPerKgPrice(ingredient) : null;
-                    const ingredientUnitPrice = ingredient ? `${formatCurrency(Number(ingredient.average_cost || 0))} / ${ingredient.unit}` : '-';
-                    const qtyUnitOptions = ingredient
-                      ? getSelectableInputUnits(ingredient).filter((u) => {
-                          const normalized = normalizeUnitToken(u);
-                          return normalized !== 'carton' && normalized !== 'packet';
-                        })
-                      : [];
+                    const unitPriceLabel = row.componentType === 'prepared_item'
+                      ? (prepared ? `${formatCurrency(Number(prepared.average_cost || 0))} / ${prepared.unit}` : '-')
+                      : (ingredient ? `${formatCurrency(Number(ingredient.average_cost || 0))} / ${ingredient.unit}` : '-');
+                    const qtyUnitOptions = row.componentType === 'prepared_item'
+                      ? (prepared ? getSelectablePreparedInputUnits(prepared.unit) : [])
+                      : (ingredient
+                          ? getSelectableInputUnits(ingredient).filter((u) => {
+                              const normalized = normalizeUnitToken(u);
+                              return normalized !== 'carton' && normalized !== 'packet';
+                            })
+                          : []);
 
                     return (
                       <div key={index} className="space-y-1">
-                        <div className="grid grid-cols-[minmax(14rem,28rem)_8.75rem_7rem_10.5rem_2rem] gap-2 items-center">
-                          <SearchableSelect
-                            value={row.ingredientId}
-                            onChange={(value) => {
-                              const selectedIngredient = ingredients.find((ing) => String(ing.id) === value);
-                              const firstUnit = selectedIngredient
-                                ? (getSelectableInputUnits(selectedIngredient)[0] || selectedIngredient.unit)
-                                : '';
-                              updateComponent(index, { ingredientId: value, inputUnit: firstUnit });
-                            }}
-                            placeholder="Ingredient"
-                            options={ingredientOptions}
-                            className="glass-card border-0 px-2.5 py-1.5 min-w-0"
-                          />
+                        <div className="grid grid-cols-[minmax(0,3.4fr)_minmax(0,1.1fr)_minmax(0,1fr)_minmax(0,0.9fr)_minmax(0,0.8fr)_2.5rem] gap-1.5 items-center">
+                          <div className="min-w-0 grid grid-cols-[8rem_minmax(0,1fr)] gap-2 items-center">
+                            <div className="min-w-0">
+                              <div className="inline-flex w-full items-center justify-start rounded-[10px] bg-white/50 px-2.5 py-1 text-[11px] font-semibold text-soot-700">
+                                {row.componentType === 'prepared_item' ? 'Marin./Sauce' : 'Ingredient'}
+                              </div>
+                            </div>
+                            <div className="min-w-0">
+                              {row.componentType === 'prepared_item' ? (
+                                <SearchableSelect
+                                  value={row.preparedItemId}
+                                  onChange={(value) => {
+                                    const selectedPrepared = items.find((it) => String(it.id) === value);
+                                    const firstUnit = selectedPrepared
+                                      ? (getSelectablePreparedInputUnits(selectedPrepared.unit)[0] || selectedPrepared.unit)
+                                      : '';
+                                    updateComponent(index, {
+                                      preparedItemId: value,
+                                      preparedItemName: selectedPrepared?.name || '',
+                                      inputUnit: firstUnit,
+                                    });
+                                  }}
+                                  placeholder="Select sauce/marination"
+                                  options={preparedItemOptions}
+                                  className="glass-card border-0 px-2.5 py-1.5 min-w-0 w-full"
+                                />
+                              ) : (
+                                <SearchableSelect
+                                  value={row.ingredientId}
+                                  onChange={(value) => {
+                                    const selectedIngredient = ingredients.find((ing) => String(ing.id) === value);
+                                    const firstUnit = selectedIngredient
+                                      ? (getSelectableInputUnits(selectedIngredient)[0] || selectedIngredient.unit)
+                                      : '';
+                                    updateComponent(index, { ingredientId: value, inputUnit: firstUnit });
+                                  }}
+                                  placeholder="Select ingredient"
+                                  options={ingredientOptions}
+                                  className="glass-card border-0 px-2.5 py-1.5 min-w-0 w-full"
+                                />
+                              )}
+                            </div>
+                          </div>
                           <div className="text-center text-[11px] leading-tight font-semibold text-brand-700 min-w-0 tabular-nums px-0.5">
-                            <div>{ingredientUnitPrice}</div>
-                            {ingredient && ingredientPerKgPrice !== null && (
+                            <div>{unitPriceLabel}</div>
+                            {ingredient && ingredientPerKgPrice !== null && row.componentType === 'ingredient' && (
                               <div className="text-[9px] text-soot-400">{formatCurrency(ingredientPerKgPrice)} / kg</div>
                             )}
                           </div>
                           <div className="text-center text-[11px] font-semibold text-soot-700 tabular-nums px-0.5">
-                            {ingredient ? formatCurrency(lineTotal) : '-'}
+                            {(ingredient || prepared) ? formatCurrency(lineTotal) : '-'}
                           </div>
-                          <div className="grid grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)] gap-1.5 min-w-0">
-                            <input
-                              type="number"
-                              min="0.000001"
-                              step="any"
-                              required
-                              value={row.quantity}
-                              onChange={(event) => updateComponent(index, { quantity: event.target.value })}
-                              className="w-full px-2 py-1.5 glass-card text-sm focus:ring-2 focus:ring-brand-500"
-                              placeholder="Qty"
-                            />
-                            <select
-                              value={selectedInputUnit}
-                              onChange={(event) => updateComponent(index, { inputUnit: event.target.value })}
-                              className="w-full px-1.5 py-1.5 glass-card text-[11px] focus:ring-2 focus:ring-brand-500"
-                              disabled={!ingredient}
-                            >
-                              {qtyUnitOptions.length === 0 && <option value="">Unit</option>}
-                              {qtyUnitOptions.map((u) => (
-                                <option key={u} value={u}>
-                                  {u}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
+                          <input
+                            type="number"
+                            min="0.000001"
+                            step="any"
+                            required
+                            value={row.quantity}
+                            onChange={(event) => updateComponent(index, { quantity: event.target.value })}
+                            className="w-full px-2 py-1.5 glass-card text-sm focus:ring-2 focus:ring-brand-500"
+                            placeholder="Qty"
+                          />
+                          <select
+                            value={selectedInputUnit}
+                            onChange={(event) => updateComponent(index, { inputUnit: event.target.value })}
+                            className="w-full px-1.5 py-1.5 glass-card text-[11px] focus:ring-2 focus:ring-brand-500"
+                            disabled={row.componentType === 'ingredient' ? !ingredient : !prepared}
+                          >
+                            {qtyUnitOptions.length === 0 && <option value="">Unit</option>}
+                            {qtyUnitOptions.map((u) => (
+                              <option key={u} value={u}>
+                                {u}
+                              </option>
+                            ))}
+                          </select>
                           <button
                             type="button"
                             onClick={() => setComponents((current) => current.filter((_, rowIndex) => rowIndex !== index))}
-                            className="p-1.5 text-soot-400 hover:text-red-600"
+                            className="justify-self-end p-1.5 text-soot-400 hover:text-red-600"
                             disabled={components.length === 1}
                           >
                             <X className="w-3.5 h-3.5" />
@@ -598,13 +905,27 @@ export default function PreparedItemsTab() {
                     );
                   })}
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setComponents((current) => [...current, emptyComponentRow()])}
-                  className="inline-flex items-center gap-2 text-sm font-semibold text-brand-700 hover:text-brand-600"
-                >
-                  <Plus className="w-4 h-4" /> Add ingredient
-                </button>
+                <div className="flex flex-wrap items-center gap-4 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setComponents((current) => [...current, emptyComponentRow()])}
+                    className="inline-flex items-center gap-2 text-sm font-semibold text-brand-700 hover:text-brand-600"
+                  >
+                    <Plus className="w-4 h-4" /> Add ingredient
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setComponents((current) => [
+                        ...current,
+                        { ...emptyComponentRow(), componentType: 'prepared_item' },
+                      ])
+                    }
+                    className="inline-flex items-center gap-2 text-sm font-semibold text-brand-700 hover:text-brand-600"
+                  >
+                    <Plus className="w-4 h-4" /> Add sauce/marination
+                  </button>
+                </div>
               </div>
 
               <textarea

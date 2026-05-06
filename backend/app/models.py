@@ -433,6 +433,41 @@ class PreparedItemComponent(db.Model):
     ingredient = db.relationship("Ingredient", back_populates="prepared_item_components")
 
 
+class PreparedItemPreparedComponent(db.Model):
+    """Prepared sauce/marination quantity used per 1 unit of another prepared item.
+
+    Example: "Sriracha chicken marination" uses "Sriracha sauce".
+    """
+
+    __tablename__ = "prepared_item_prepared_components"
+    __table_args__ = (
+        db.UniqueConstraint(
+            "prepared_item_id",
+            "component_prepared_item_id",
+            name="uq_prepared_item_prepared_component",
+        ),
+        Index("ix_prepared_item_prepared_components_prepared_item_id", "prepared_item_id"),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    prepared_item_id = db.Column(db.Integer, db.ForeignKey("prepared_items.id"), nullable=False)
+    component_prepared_item_id = db.Column(db.Integer, db.ForeignKey("prepared_items.id"), nullable=False)
+    quantity = db.Column(db.Float, nullable=False)
+    unit = db.Column(db.Enum(UnitOfMeasure), nullable=False)
+    notes = db.Column(db.String(500))
+
+    prepared_item = db.relationship(
+        "PreparedItem",
+        foreign_keys=[prepared_item_id],
+        backref=db.backref("prepared_components", cascade="all, delete-orphan"),
+    )
+    component_prepared_item = db.relationship(
+        "PreparedItem",
+        foreign_keys=[component_prepared_item_id],
+        lazy=True,
+    )
+
+
 class PreparedItemBranchStock(db.Model):
     """Per-branch on-hand quantity for batch-made sauces/marinations."""
 

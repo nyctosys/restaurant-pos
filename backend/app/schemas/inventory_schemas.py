@@ -1,6 +1,6 @@
 from __future__ import annotations
 from datetime import datetime
-from typing import Literal
+from typing import Literal, Union
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 from app.models import UnitOfMeasure
 
@@ -253,6 +253,51 @@ class PreparedItemComponentBase(BaseModel):
     _normalize_notes = field_validator("notes")(lambda cls, value: _clean_optional_text(value))
 
 
+class PreparedItemPreparedComponentBase(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    prepared_item_id: int
+    quantity: float = Field(gt=0)
+    unit: str
+    notes: str | None = None
+
+    _normalize_unit = field_validator("unit")(lambda cls, value: _normalize_bom_input_unit(value))
+    _normalize_notes = field_validator("notes")(lambda cls, value: _clean_optional_text(value))
+
+
+class PreparedItemFormulaLine(BaseModel):
+    """One line in a sauce/marination formula.
+
+    Backward compatible: if component_type is omitted, server treats it as ingredient.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+    component_type: Literal["ingredient", "prepared_item"] | None = None
+    ingredient_id: int | None = None
+    prepared_item_id: int | None = None
+    quantity: float = Field(gt=0)
+    unit: str
+    notes: str | None = None
+
+    _normalize_unit = field_validator("unit")(lambda cls, value: _normalize_bom_input_unit(value))
+    _normalize_notes = field_validator("notes")(lambda cls, value: _clean_optional_text(value))
+
+    @field_validator("component_type")
+    @classmethod
+    def normalize_component_type(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        s = str(value).strip().lower()
+        return s or None
+
+    @field_validator("ingredient_id", "prepared_item_id")
+    @classmethod
+    def normalize_optional_id(cls, value: int | None) -> int | None:
+        if value is None:
+            return None
+        iv = int(value)
+        return iv if iv > 0 else None
+
+
 class PreparedItemCreate(BaseModel):
     model_config = ConfigDict(extra="ignore")
     name: str
@@ -261,7 +306,7 @@ class PreparedItemCreate(BaseModel):
     unit: str
     minimum_stock: float = 0.0
     notes: str | None = None
-    components: list[PreparedItemComponentBase] = Field(default_factory=list)
+    components: list[PreparedItemFormulaLine] = Field(default_factory=list)
 
     _normalize_name = field_validator("name")(lambda cls, value: _clean_required_text(value))
     _normalize_sku = field_validator("sku")(lambda cls, value: _clean_optional_text(value))
@@ -278,7 +323,7 @@ class PreparedItemUpdate(BaseModel):
     minimum_stock: float | None = None
     notes: str | None = None
     is_active: bool | None = None
-    components: list[PreparedItemComponentBase] | None = None
+    components: list[PreparedItemFormulaLine] | None = None
 
     @field_validator("name")
     @classmethod

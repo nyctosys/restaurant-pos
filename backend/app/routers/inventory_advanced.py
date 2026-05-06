@@ -9,6 +9,7 @@ from app.models import (
     Ingredient,
     PreparedItem,
     PreparedItemComponent,
+    PreparedItemPreparedComponent,
     Product,
     PurchaseOrder,
     PurchaseOrderItem,
@@ -409,7 +410,26 @@ def update_ingredient(ingredient_id: int, payload: IngredientUpdate, current_use
 def _component_payload(component: PreparedItemComponent) -> dict[str, Any]:
     return {
         "id": component.id,
+        "component_type": "ingredient",
         "ingredient_id": component.ingredient_id,
+        "quantity": component.quantity,
+        "unit": component.unit.value if hasattr(component.unit, "value") else component.unit,
+        "notes": component.notes,
+    }
+
+def _prepared_component_payload(component: PreparedItemPreparedComponent) -> dict[str, Any]:
+    prepared_item = component.component_prepared_item
+    prepared_unit = (
+        prepared_item.unit.value
+        if prepared_item is not None and hasattr(prepared_item.unit, "value")
+        else (str(prepared_item.unit) if prepared_item is not None else "")
+    )
+    return {
+        "id": component.id,
+        "component_type": "prepared_item",
+        "prepared_item_id": component.component_prepared_item_id,
+        "prepared_item_name": prepared_item.name if prepared_item is not None else None,
+        "prepared_item_unit": prepared_unit,
         "quantity": component.quantity,
         "unit": component.unit.value if hasattr(component.unit, "value") else component.unit,
         "notes": component.notes,
@@ -417,6 +437,11 @@ def _component_payload(component: PreparedItemComponent) -> dict[str, Any]:
 
 
 def _prepared_item_payload(item: PreparedItem, branch_id: str) -> dict[str, Any]:
+    ingredient_lines = [_component_payload(c) for c in item.components]
+    prepared_lines = [
+        _prepared_component_payload(c)
+        for c in PreparedItemPreparedComponent.query.filter_by(prepared_item_id=item.id).all()
+    ]
     return {
         "id": item.id,
         "name": item.name,
@@ -427,27 +452,73 @@ def _prepared_item_payload(item: PreparedItem, branch_id: str) -> dict[str, Any]
         "minimum_stock": float(item.minimum_stock or 0.0),
         "average_cost": item.average_cost,
         "notes": item.notes,
-        "components": [_component_payload(c) for c in item.components],
+        "components": ingredient_lines + prepared_lines,
         "branch_id": branch_id,
     }
 
 
 def _replace_prepared_components(item: PreparedItem, components: list[Any]) -> None:
     item.components.clear()
+    PreparedItemPreparedComponent.query.filter_by(prepared_item_id=item.id).delete(synchronize_session=False)
     db.session.flush()
     for component in components:
         data = component.model_dump() if hasattr(component, "model_dump") else dict(component)
-        ingredient = db.session.get(Ingredient, int(data.get("ingredient_id", 0)))
-        if ingredient is None:
-            raise ValueError(f"Ingredient not found: {data.get('ingredient_id')}")
-        input_u = str(data.get("unit", "")).strip().lower()
-        try:
-            qty_base = to_base_unit(float(data.get("quantity", 0)), input_u, ingredient)
-        except ValueError as exc:
-            raise ValueError(str(exc)) from exc
-        data["quantity"] = qty_base
-        data["unit"] = ingredient.unit
-        item.components.append(PreparedItemComponent(**data))
+        component_type = str(data.get("component_type") or "").strip().lower()
+        if not component_type:
+            # Backward compatibility: old clients only sent ingredient_id.
+            component_type = "ingredient"
+
+        if component_type == "ingredient":
+            ingredient = db.session.get(Ingredient, int(data.get("ingredient_id", 0)))
+            if ingredient is None:
+                raise ValueError(f"Ingredient not found: {data.get('ingredient_id')}")
+            input_u = str(data.get("unit", "")).strip().lower()
+            try:
+                qty_base = to_base_unit(float(data.get("quantity", 0)), input_u, ingredient)
+            except ValueError as exc:
+                raise ValueError(str(exc)) from exc
+            data["quantity"] = qty_base
+            data["unit"] = ingredient.unit
+            data.pop("component_type", None)
+            data.pop("prepared_item_id", None)
+            item.components.append(PreparedItemComponent(**data))
+            continue
+
+        if component_type == "prepared_item":
+            component_prepared_id = int(data.get("prepared_item_id", 0) or 0)
+            if component_prepared_id <= 0:
+                raise ValueError("prepared_item_id is required for component_type=prepared_item")
+            if component_prepared_id == int(item.id):
+                raise ValueError("A sauce/marination cannot include itself in its formula")
+            component_prepared = db.session.get(PreparedItem, component_prepared_id)
+            if component_prepared is None or not component_prepared.is_active:
+                raise ValueError(f"Prepared item not found: {component_prepared_id}")
+
+            prepared_unit = (
+                component_prepared.unit.value
+                if hasattr(component_prepared.unit, "value")
+                else str(component_prepared.unit or "")
+            )
+            try:
+                qty_base = convert_quantity_to_unit(
+                    float(data.get("quantity", 0)),
+                    normalize_unit_token(str(data.get("unit", ""))),
+                    normalize_unit_token(prepared_unit),
+                )
+            except ValueError as exc:
+                raise ValueError(f"Cannot convert unit to prepared item unit ({prepared_unit}): {exc}") from exc
+
+            row = PreparedItemPreparedComponent(
+                prepared_item_id=item.id,
+                component_prepared_item_id=component_prepared_id,
+                quantity=qty_base,
+                unit=component_prepared.unit,
+                notes=data.get("notes"),
+            )
+            db.session.add(row)
+            continue
+
+        raise ValueError("component_type must be 'ingredient' or 'prepared_item'")
 
 
 @inventory_advanced_router.get("/prepared-items")
@@ -522,7 +593,9 @@ def make_prepared_batch(
     if not item or not item.is_active:
         return JSONResponse(status_code=404, content={"message": "Prepared item not found"})
     if not item.components:
-        return JSONResponse(status_code=400, content={"message": "Add ingredients before making this sauce/marination"})
+        prepared_components = PreparedItemPreparedComponent.query.filter_by(prepared_item_id=item.id).all()
+        if not prepared_components:
+            return JSONResponse(status_code=400, content={"message": "Add ingredients before making this sauce/marination"})
 
     branch_id = _resolve_inventory_branch(payload.branch_id, current_user)
     qty = float(payload.quantity)
@@ -547,6 +620,27 @@ def make_prepared_batch(
                 allow_negative=False,
             )
             sync_ingredient_master_total(ing.id)
+
+        # Deduct any child sauces/marinades used in this formula.
+        prepared_components = PreparedItemPreparedComponent.query.filter_by(prepared_item_id=item.id).all()
+        for component in prepared_components:
+            child = component.component_prepared_item
+            if child is None:
+                continue
+            needed = float(component.quantity) * qty
+            total_cost += needed * float(child.average_cost or 0.0)
+            adjust_prepared_branch_stock(
+                child.id,
+                branch_id,
+                -needed,
+                movement_type="preparation",
+                user_id=current_user.id,
+                reference_id=item.id,
+                reference_type="prepared_item",
+                reason=payload.reason or f"Used {child.name} for {item.name}",
+                allow_negative=False,
+            )
+            sync_prepared_master_total(child.id)
 
         before = get_prepared_branch_stock(item.id, branch_id)
         total_value_before = before * float(item.average_cost or 0.0)
