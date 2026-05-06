@@ -1372,6 +1372,19 @@ def _build_detailed_report(
     base_filters = _sales_report_filters(tid, start_dt, end_dt, include_archived)
     completed_filters = [*base_filters, Sale.status == "completed"]
 
+    profit_row = (
+        db.session.query(
+            func.coalesce(
+                func.sum((SaleItem.unit_price - Product.base_price) * SaleItem.quantity),
+                0,
+            )
+        )
+        .join(Sale, Sale.id == SaleItem.sale_id)
+        .join(Product, Product.id == SaleItem.product_id)
+        .filter(*completed_filters)
+        .one()
+    )
+
     totals_row = (
         db.session.query(
             func.count(Sale.id),
@@ -1477,6 +1490,7 @@ def _build_detailed_report(
         "totals": {
             "orders": int(totals_row[0] or 0),
             "received_amount": _money(totals_row[1]),
+            "profit_amount": _money(profit_row[0]),
             "discount_amount": _money(totals_row[2]),
             "tax_amount": _money(totals_row[3]),
             "delivery_charge": _money(totals_row[4]),

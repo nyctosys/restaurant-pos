@@ -42,6 +42,7 @@ type DetailedReport = {
   totals: {
     orders: number;
     received_amount: number;
+    profit_amount?: number;
     discount_amount: number;
     tax_amount: number;
     delivery_charge: number;
@@ -346,8 +347,9 @@ export default function Reports() {
         {/* Analytics + tables */}
         <div className="page-padding flex-1 min-h-0 overflow-auto flex flex-col gap-8 lg:gap-10">
           <section className="flex shrink-0 flex-col gap-4">
-            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 lg:gap-5 shrink-0">
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-4 lg:gap-5 shrink-0">
               <MetricCard title="Received amount" amount={report?.totals.received_amount ?? 0} orders={report?.totals.orders ?? 0} icon={ReceiptText} />
+              <MetricCard title="Profit" amount={report?.totals.profit_amount ?? 0} icon={Package} detail="Sell price − base price" />
               <MetricCard title="Cash orders" amount={metric(report?.payment_methods, 'cash').amount} orders={metric(report?.payment_methods, 'cash').orders} icon={Banknote} tone="cash" />
               <MetricCard title="Card orders" amount={metric(report?.payment_methods, 'card').amount} orders={metric(report?.payment_methods, 'card').orders} icon={CreditCard} tone="online" />
               <MetricCard title="Online transfer" amount={metric(report?.payment_methods, 'online_transfer').amount} orders={metric(report?.payment_methods, 'online_transfer').orders} icon={Smartphone} tone="online" />

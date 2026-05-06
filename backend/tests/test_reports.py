@@ -48,6 +48,7 @@ def test_detailed_report_groups_payment_methods_and_order_types(client, app):
     data = res.get_json()
     assert data["totals"]["orders"] == 4
     assert data["totals"]["received_amount"] == 1050.0
+    assert data["totals"]["profit_amount"] == 0.0
     assert data["totals"]["refunded_orders"] == 1
     assert data["totals"]["open_orders"] == 1
     assert data["payment_methods"]["cash"] == {"orders": 2, "amount": 350.0}
