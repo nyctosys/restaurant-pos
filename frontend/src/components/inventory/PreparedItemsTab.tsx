@@ -374,7 +374,6 @@ export default function PreparedItemsTab() {
     }
 
     setSubmitting(true);
-    const preparedNameToId = new Map<string, number>();
     const payloadComponents: Array<
       | { component_type: 'ingredient'; ingredient_id: number; quantity: number; unit: string }
       | { component_type: 'prepared_item'; prepared_item_id: number; quantity: number; unit: string }
@@ -404,30 +403,12 @@ export default function PreparedItemsTab() {
           continue;
         }
 
-        const preparedNameKey = (row.preparedItemName || '').trim().toLowerCase();
-        if (preparedNameKey && preparedNameKey === trimmedName.trim().toLowerCase()) {
+        const preparedId = Number.parseInt(row.preparedItemId, 10);
+        if (!Number.isFinite(preparedId) || preparedId <= 0) continue;
+        if (editingItem && preparedId === editingItem.id) {
           showToast('A sauce/marination cannot include itself in its formula', 'error');
           setSubmitting(false);
           return;
-        }
-
-        const selectedExisting = findPreparedItemForRow(row);
-        let preparedId: number | null = selectedExisting?.id ?? null;
-        if (!preparedId && preparedNameKey) {
-          preparedId = preparedNameToId.get(preparedNameKey) ?? null;
-        }
-
-        if (!preparedId) {
-          if (!preparedNameKey) continue;
-          const created = await post<{ id: number }>('/inventory-advanced/prepared-items', {
-            name: row.preparedItemName.trim(),
-            kind: 'sauce',
-            unit,
-            minimum_stock: 0,
-            components: [],
-          });
-          preparedId = created.id;
-          preparedNameToId.set(preparedNameKey, preparedId);
         }
 
         const prepared = items.find((it) => it.id === preparedId);
