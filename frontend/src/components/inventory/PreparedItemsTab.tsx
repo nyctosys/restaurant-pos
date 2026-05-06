@@ -79,6 +79,70 @@ function formatCostPerYield(amount: number, unit: string) {
   return `${formatCurrency(amount)} / ${formatYieldUnit(unit)}`;
 }
 
+type PreparedCostEstimate = {
+  costPerUnit: number;
+  ok: boolean;
+};
+
+function estimatePreparedCostPerUnit(
+  item: PreparedItem,
+  allItems: PreparedItem[],
+  allIngredients: Ingredient[],
+  _seen: Set<number> = new Set()
+): PreparedCostEstimate {
+  const baseUnit = normalizeUnitToken(item.unit || '');
+  if (!baseUnit) return { costPerUnit: 0, ok: false };
+  if (_seen.has(item.id)) return { costPerUnit: 0, ok: false };
+  _seen.add(item.id);
+
+  let totalCost = 0;
+  let totalYield = 0;
+
+  for (const row of item.components || []) {
+    const kind = (row.component_type || 'ingredient').toLowerCase();
+    const qty = Number(row.quantity || 0);
+    if (!Number.isFinite(qty) || qty <= 0) continue;
+
+    if (kind === 'prepared_item') {
+      const childId = Number(row.prepared_item_id || 0);
+      const child = allItems.find((x) => x.id === childId);
+      if (!child) continue;
+
+      let childCost = Number(child.average_cost || 0);
+      if (!(childCost > 0) && (child.components?.length || 0) > 0) {
+        const est = estimatePreparedCostPerUnit(child, allItems, allIngredients, new Set(_seen));
+        if (est.ok) childCost = est.costPerUnit;
+      }
+      totalCost += qty * Math.max(0, Number(childCost || 0));
+
+      try {
+        const qInUnit = quantityToStorageBase(qty, normalizeUnitToken(child.unit || row.unit || ''), baseUnit);
+        if (Number.isFinite(qInUnit) && qInUnit > 0) totalYield += qInUnit;
+      } catch {
+        // Keep yield best-effort; UI preview behaves similarly.
+      }
+      continue;
+    }
+
+    const ingId = Number(row.ingredient_id || 0);
+    const ing = allIngredients.find((x) => x.id === ingId);
+    if (!ing) continue;
+    totalCost += qty * Math.max(0, Number(ing.average_cost || 0));
+
+    try {
+      const qInUnit = quantityToStorageBase(qty, normalizeUnitToken(ing.unit || row.unit || ''), baseUnit);
+      if (Number.isFinite(qInUnit) && qInUnit > 0) totalYield += qInUnit;
+    } catch {
+      // Keep yield best-effort; UI preview behaves similarly.
+    }
+  }
+
+  if (!(totalYield > 0)) return { costPerUnit: 0, ok: false };
+  const costPerUnit = totalCost / totalYield;
+  if (!Number.isFinite(costPerUnit) || costPerUnit < 0) return { costPerUnit: 0, ok: false };
+  return { costPerUnit, ok: true };
+}
+
 function getPerKgPrice(ingredient: Ingredient): number | null {
   const unit = (ingredient.unit || '').toLowerCase();
   const cost = Number(ingredient.average_cost || 0);
@@ -665,6 +729,13 @@ export default function PreparedItemsTab() {
             <tbody>
               {sortedItems.map((item) => {
                 const isLowStock = item.current_stock <= (item.minimum_stock || 0);
+                const fallbackCost =
+                  Number(item.average_cost || 0) > 0
+                    ? Number(item.average_cost || 0)
+                    : (() => {
+                        const est = estimatePreparedCostPerUnit(item, items, ingredients);
+                        return est.ok ? est.costPerUnit : 0;
+                      })();
 
                 return (
                 <tr key={item.id} className="cursor-pointer" onClick={() => openEdit(item)}>
@@ -682,7 +753,7 @@ export default function PreparedItemsTab() {
                     </div>
                   </td>
                   <td className="px-4 py-3 text-right text-soot-700">
-                    {formatCostPerYield(item.average_cost, item.unit)}
+                    {formatCostPerYield(fallbackCost, item.unit)}
                   </td>
                   <td className="px-4 py-3 text-soot-600">
                     {item.components.length} ingredient{item.components.length === 1 ? '' : 's'}
