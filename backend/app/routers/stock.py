@@ -6,7 +6,7 @@ from typing import Any
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
-from app.models import Ingredient, IngredientBranchStock, StockMovement, User, db
+from app.models import Ingredient, PreparedItem, IngredientBranchStock, StockMovement, User, db
 from app.schemas.inventory_schemas import BulkRestockRequest
 from app.services.branch_ingredient_stock import adjust_branch_ingredient_stock
 from app.services.units import normalize_unit_token, to_base_unit
@@ -14,6 +14,8 @@ from app.services.ingredient_costing import apply_ingredient_purchase_cost
 from app.services.ingredient_master_stock import sync_ingredient_master_total
 from app.services.branch_scope import resolve_terminal_branch_id
 from app.services.sync_outbox import enqueue_sync_event
+from app.services.prepared_item_stock import adjust_prepared_branch_stock, sync_prepared_master_total
+from app.services.unit_conversion import convert_quantity_to_unit
 from app.deps import get_current_user
 
 stock_router = APIRouter(prefix="/api/stock", tags=["stock"])
@@ -119,6 +121,58 @@ def update_ingredient_stock(payload: dict[str, Any] | None = None, current_user:
                 "quantity_after": qty_after,
             },
         )
+        db.session.commit()
+        return {"message": "Stock updated", "stock_level": qty_after}
+    except Exception as exc:
+        db.session.rollback()
+        return JSONResponse(status_code=400, content={"message": str(exc)})
+
+
+@stock_router.post("/prepared-update")
+def update_prepared_item_stock(payload: dict[str, Any] | None = None, current_user: User = Depends(get_current_user)):
+    """Adjust prepared item (sauce/marination) quantity at a branch (creates a PreparedItemStockMovement)."""
+    data = payload or {}
+    branch_id = _terminal_branch_id(current_user)
+    prepared_item_id = data.get("prepared_item_id")
+    stock_delta = data.get("stock_delta", 0)
+    try:
+        raw_delta = float(stock_delta)
+    except (TypeError, ValueError):
+        return JSONResponse(status_code=400, content={"message": "stock_delta must be a number"})
+    if not prepared_item_id:
+        return JSONResponse(status_code=400, content={"message": "prepared_item_id required"})
+    item = db.session.get(PreparedItem, int(prepared_item_id))
+    if not item:
+        return JSONResponse(status_code=404, content={"message": "Prepared item not found"})
+
+    item_unit = item.unit.value if hasattr(item.unit, "value") else str(item.unit or "")
+    input_u = str(data.get("input_unit") or "").strip().lower()
+    if input_u:
+        try:
+            sign = -1.0 if raw_delta < 0 else 1.0
+            delta = sign * convert_quantity_to_unit(
+                abs(raw_delta),
+                normalize_unit_token(input_u),
+                normalize_unit_token(item_unit),
+            )
+        except ValueError as exc:
+            return JSONResponse(status_code=400, content={"message": str(exc)})
+    else:
+        delta = raw_delta
+
+    try:
+        _, qty_after = adjust_prepared_branch_stock(
+            int(prepared_item_id),
+            branch_id,
+            delta,
+            movement_type="adjustment",
+            user_id=current_user.id,
+            reference_id=None,
+            reference_type="manual_adjustment",
+            reason=data.get("reason") or "Manual stock adjustment",
+            allow_negative=False,
+        )
+        sync_prepared_master_total(int(prepared_item_id))
         db.session.commit()
         return {"message": "Stock updated", "stock_level": qty_after}
     except Exception as exc:

@@ -305,6 +305,7 @@ class PreparedItemCreate(BaseModel):
     kind: Literal["sauce", "marination"] = "sauce"
     unit: str
     minimum_stock: float = 0.0
+    average_cost: float | None = None
     notes: str | None = None
     components: list[PreparedItemFormulaLine] = Field(default_factory=list)
 
@@ -321,6 +322,7 @@ class PreparedItemUpdate(BaseModel):
     kind: Literal["sauce", "marination"] | None = None
     unit: str | None = None
     minimum_stock: float | None = None
+    average_cost: float | None = None
     notes: str | None = None
     is_active: bool | None = None
     components: list[PreparedItemFormulaLine] | None = None

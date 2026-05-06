@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, Beaker, Loader2, Plus, Save, X } from 'lucide-react';
+import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, Beaker, Loader2, Plus, Save, Scale, X } from 'lucide-react';
 import { get, getUserMessage, post, put } from '../../api';
 import SearchableSelect from '../SearchableSelect';
 import { showToast } from '../Toast';
@@ -117,12 +117,21 @@ export default function PreparedItemsTab() {
   const [batchQuantity, setBatchQuantity] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
+  const [stockAdjustItem, setStockAdjustItem] = useState<PreparedItem | null>(null);
+  const [stockAdjustDirection, setStockAdjustDirection] = useState<'add' | 'remove'>('add');
+  const [stockAdjustQty, setStockAdjustQty] = useState('');
+  const [stockAdjustUnit, setStockAdjustUnit] = useState('');
+  const [stockAdjustReason, setStockAdjustReason] = useState('');
+  const [stockAdjustError, setStockAdjustError] = useState('');
+  const [stockAdjustSubmitting, setStockAdjustSubmitting] = useState(false);
+
   const loadData = async () => {
     setLoading(true);
     try {
       const [ingRes, preparedRes] = await Promise.all([
-        get<{ ingredients: Ingredient[] }>('/inventory-advanced/ingredients'),
-        get<{ prepared_items: PreparedItem[] }>('/inventory-advanced/prepared-items'),
+        // Inventory-advanced endpoints are cached; force refresh so costs/stock reflect saves immediately.
+        get<{ ingredients: Ingredient[] }>('/inventory-advanced/ingredients', { forceRefresh: true, cacheTtlMs: 0 }),
+        get<{ prepared_items: PreparedItem[] }>('/inventory-advanced/prepared-items', { forceRefresh: true, cacheTtlMs: 0 }),
       ]);
       setIngredients(ingRes.ingredients || []);
       setItems(preparedRes.prepared_items || []);
@@ -181,6 +190,56 @@ export default function PreparedItemsTab() {
         : [emptyComponentRow()]
     );
     setShowForm(true);
+  };
+
+  const handleOpenStockAdjust = (item: PreparedItem) => {
+    const opts = getSelectablePreparedInputUnits(item.unit);
+    const defaultUnit = opts.length ? (opts.includes(item.unit) ? item.unit : opts[0]) : item.unit;
+    setStockAdjustItem(item);
+    setStockAdjustDirection('add');
+    setStockAdjustQty('');
+    setStockAdjustUnit(defaultUnit);
+    setStockAdjustReason('');
+    setStockAdjustError('');
+  };
+
+  const handleCloseStockAdjust = () => {
+    setStockAdjustItem(null);
+    setStockAdjustError('');
+    setStockAdjustQty('');
+    setStockAdjustReason('');
+  };
+
+  const handleSubmitStockAdjust = async (event: React.FormEvent) => {
+    event.preventDefault();
+    const item = stockAdjustItem;
+    if (!item) return;
+
+    const qty = Number.parseFloat(stockAdjustQty.trim());
+    if (!Number.isFinite(qty) || qty <= 0) {
+      setStockAdjustError('Enter a positive quantity.');
+      return;
+    }
+
+    const signed = stockAdjustDirection === 'add' ? qty : -qty;
+
+    setStockAdjustSubmitting(true);
+    setStockAdjustError('');
+    try {
+      await post('/stock/prepared-update', {
+        prepared_item_id: item.id,
+        stock_delta: signed,
+        input_unit: stockAdjustUnit || item.unit,
+        reason: stockAdjustReason.trim() || undefined,
+      });
+      showToast('Stock updated', 'success');
+      handleCloseStockAdjust();
+      await loadData();
+    } catch (e) {
+      setStockAdjustError(getUserMessage(e));
+    } finally {
+      setStockAdjustSubmitting(false);
+    }
   };
 
   const updateComponent = (index: number, patch: Partial<ComponentRow>) => {
@@ -446,6 +505,9 @@ export default function PreparedItemsTab() {
         sku: (sku || nextSku).trim() || undefined,
         kind,
         unit,
+        // Persist the UI's computed formula cost so list/table reflects immediately and
+        // nested formulas reuse the correct unit price even when server-side yield estimation is ambiguous.
+        average_cost: Number.isFinite(formulaCostPerUnit) ? Math.max(0, formulaCostPerUnit) : 0,
         notes: notes.trim() || undefined,
         minimum_stock: Number.parseFloat(minimumStock) || 0,
         components: payloadComponents,
@@ -529,7 +591,7 @@ export default function PreparedItemsTab() {
         )}
 
         <div className="app-table-scroll min-h-0 min-w-0 flex-1 overflow-x-auto overflow-y-auto overscroll-contain pb-3">
-          <table className="app-table min-w-[640px] text-sm">
+          <table className="app-table min-w-[740px] text-sm">
             <thead>
               <tr>
                 <th
@@ -597,6 +659,7 @@ export default function PreparedItemsTab() {
                     {renderSortIcon('formula')}
                   </button>
                 </th>
+                <th className="sticky top-0 z-10 text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -624,12 +687,27 @@ export default function PreparedItemsTab() {
                   <td className="px-4 py-3 text-soot-600">
                     {item.components.length} ingredient{item.components.length === 1 ? '' : 's'}
                   </td>
+                  <td className="px-4 py-3 text-right">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        handleOpenStockAdjust(item);
+                      }}
+                      className="inline-flex h-9 w-9 items-center justify-center rounded-full text-soot-500 transition-colors hover:bg-brand-50 hover:text-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+                      title="Adjust stock"
+                      aria-label={`Adjust stock for ${item.name}`}
+                    >
+                      <Scale className="w-4 h-4" aria-hidden="true" />
+                    </button>
+                  </td>
                 </tr>
               );
               })}
               {items.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-4 py-10 text-center text-soot-500">
+                  <td colSpan={6} className="px-4 py-10 text-center text-soot-500">
                     No marinations or sauces yet.
                   </td>
                 </tr>
@@ -931,6 +1009,136 @@ export default function PreparedItemsTab() {
               </button>
             </div>
           </form>
+        </div>
+      )}
+
+      {stockAdjustItem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 glass-overlay overflow-y-auto">
+          <div className="glass-floating w-full max-w-md my-auto flex flex-col max-h-[90vh] overflow-hidden">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-neutral-200/60 bg-white/25 shrink-0">
+              <h3 className="text-lg font-bold text-neutral-900">Adjust stock</h3>
+              <button
+                type="button"
+                onClick={handleCloseStockAdjust}
+                className="p-1.5 rounded-[8px] hover:bg-neutral-200 transition-colors"
+                aria-label="Close"
+              >
+                <X className="w-5 h-5 text-neutral-500" />
+              </button>
+            </div>
+            <form onSubmit={handleSubmitStockAdjust} className="p-6 space-y-4 overflow-y-auto min-h-0 flex-1">
+              {stockAdjustError && (
+                <div className="bg-red-50 border border-red-200 text-red-700 rounded-[8px] px-4 py-2 text-sm font-medium">
+                  {stockAdjustError}
+                </div>
+              )}
+
+              <div>
+                <p className="text-sm font-semibold text-neutral-900">{stockAdjustItem.name}</p>
+                <p className="text-xs text-neutral-500 mt-1">
+                  Current:{' '}
+                  <span className="font-medium text-neutral-800 tabular-nums">
+                    {formatBaseQuantityGlobal(stockAdjustItem.current_stock, stockAdjustItem.unit)}
+                  </span>{' '}
+                  at this branch.
+                </p>
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setStockAdjustDirection('add')}
+                  className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium border transition-colors touch-target ${
+                    stockAdjustDirection === 'add'
+                      ? 'border-brand-500 bg-brand-50 text-brand-900'
+                      : 'border-neutral-200 text-neutral-600 hover:bg-white/60'
+                  }`}
+                >
+                  Add
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStockAdjustDirection('remove')}
+                  className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium border transition-colors touch-target ${
+                    stockAdjustDirection === 'remove'
+                      ? 'border-brand-500 bg-brand-50 text-brand-900'
+                      : 'border-neutral-200 text-neutral-600 hover:bg-white/60'
+                  }`}
+                >
+                  Remove
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-neutral-700 mb-1" htmlFor="prep-stock-adj-qty">
+                    Quantity
+                  </label>
+                  <input
+                    id="prep-stock-adj-qty"
+                    type="number"
+                    step="any"
+                    min="0"
+                    value={stockAdjustQty}
+                    onChange={(e) => setStockAdjustQty(e.target.value)}
+                    className="w-full px-3 py-2.5 glass-card text-sm tabular-nums focus:ring-2 focus:ring-brand-500 focus:outline-none"
+                    placeholder="e.g. 2.5"
+                    autoComplete="off"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-neutral-700 mb-1" htmlFor="prep-stock-adj-unit">
+                    Unit
+                  </label>
+                  <select
+                    id="prep-stock-adj-unit"
+                    value={stockAdjustUnit}
+                    onChange={(e) => setStockAdjustUnit(e.target.value)}
+                    className="w-full px-3 py-2.5 glass-card text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none"
+                  >
+                    {getSelectablePreparedInputUnits(stockAdjustItem.unit).map((u) => (
+                      <option key={u} value={u}>
+                        {u}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-neutral-700 mb-1" htmlFor="prep-stock-adj-reason">
+                  Note (optional)
+                </label>
+                <input
+                  id="prep-stock-adj-reason"
+                  type="text"
+                  value={stockAdjustReason}
+                  onChange={(e) => setStockAdjustReason(e.target.value)}
+                  className="w-full px-3 py-2.5 glass-card text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none"
+                  placeholder="e.g. Stock take correction, wastage"
+                  autoComplete="off"
+                />
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={handleCloseStockAdjust}
+                  className="flex-1 px-4 py-2.5 border border-neutral-200 rounded-[8px] text-sm font-medium text-neutral-600 hover:bg-neutral-50 transition-colors touch-target"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={stockAdjustSubmitting}
+                  className="flex-1 px-4 py-2.5 bg-brand-700 text-white rounded-[8px] text-sm font-medium hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 touch-target"
+                >
+                  {stockAdjustSubmitting && <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />}
+                  Update stock
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
     </div>

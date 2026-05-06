@@ -34,6 +34,7 @@ from app.services.prepared_item_stock import (
     seed_prepared_branch_stocks_for_new_item,
     sync_prepared_master_total,
 )
+from app.services.prepared_item_costing import compute_prepared_item_average_cost
 from app.services.unit_conversion import convert_quantity_to_unit, normalize_po_line_to_ingredient_base
 from app.services.units import normalize_unit_token, to_base_unit
 from app.services.product_pricing import recalculate_product_cost
@@ -535,6 +536,7 @@ def list_prepared_items(
 def create_prepared_item(payload: PreparedItemCreate, current_user: User = Depends(get_current_user)):
     data = payload.model_dump()
     components = data.pop("components", [])
+    provided_avg_cost = data.pop("average_cost", None)
     sku = (data.get("sku") or "").strip() or None
     if sku and PreparedItem.query.filter_by(sku=sku).first():
         return JSONResponse(status_code=409, content={"message": "Prepared item with this SKU already exists"})
@@ -547,6 +549,23 @@ def create_prepared_item(payload: PreparedItemCreate, current_user: User = Depen
     except ValueError as exc:
         db.session.rollback()
         return JSONResponse(status_code=400, content={"message": str(exc)})
+
+    # Ensure pending prepared-item component rows are visible to the costing query.
+    db.session.flush()
+
+    # Prefer client-provided formula cost (matches UI preview); otherwise compute server-side.
+    try:
+        if provided_avg_cost is not None and float(provided_avg_cost) >= 0:
+            item.average_cost = float(provided_avg_cost)
+        else:
+            computed = compute_prepared_item_average_cost(item)
+            if computed is not None:
+                item.average_cost = computed
+    except Exception:
+        computed = compute_prepared_item_average_cost(item)
+        if computed is not None:
+            item.average_cost = computed
+
     seed_prepared_branch_stocks_for_new_item(item.id, 0.0)
     db.session.commit()
     return {"id": item.id, "message": "Prepared sauce/marination created"}
@@ -563,6 +582,7 @@ def update_prepared_item(
         return JSONResponse(status_code=404, content={"message": "Prepared item not found"})
     data = payload.model_dump(exclude_unset=True)
     components = data.pop("components", None)
+    provided_avg_cost = data.pop("average_cost", None)
     if "sku" in data:
         sku = (data.get("sku") or "").strip() or None
         existing = PreparedItem.query.filter_by(sku=sku).first() if sku else None
@@ -577,8 +597,28 @@ def update_prepared_item(
         except ValueError as exc:
             db.session.rollback()
             return JSONResponse(status_code=400, content={"message": str(exc)})
-    if "average_cost" in data:
+
+    db.session.flush()
+
+    changed_cost = False
+    try:
+        if provided_avg_cost is not None and float(provided_avg_cost) >= 0:
+            item.average_cost = float(provided_avg_cost)
+            changed_cost = True
+        else:
+            computed = compute_prepared_item_average_cost(item)
+            if computed is not None:
+                item.average_cost = computed
+                changed_cost = True
+    except Exception:
+        computed = compute_prepared_item_average_cost(item)
+        if computed is not None:
+            item.average_cost = computed
+            changed_cost = True
+
+    if changed_cost:
         _recalculate_products_using_prepared_item(item.id)
+
     db.session.commit()
     return {"message": "Prepared sauce/marination updated"}
 
