@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
 from app.models import db, User, Product, ComboItem, SaleItem
-from app.services.product_pricing import effective_sale_price
+from app.services.product_pricing import calculate_bom_cost_for_variant, compute_deal_base_cost, effective_sale_price
 from app.services.recipe_variants import (
     combo_category_label,
     normalize_combo_category_name,
@@ -58,11 +58,14 @@ def _deal_to_dict(deal: Product) -> dict:
                 "variant_key": (getattr(ci, "variant_key", None) or "").strip(),
             }
         )
+    dynamic_base = compute_deal_base_cost(deal)
+    if dynamic_base > 0 and float(deal.base_price or 0) != dynamic_base:
+        deal.base_price = dynamic_base
     return {
         "id": deal.id,
         "sku": deal.sku,
         "title": deal.title,
-        "base_price": float(deal.base_price),
+        "base_price": dynamic_base,
         "sale_price": effective_sale_price(deal),
         "section": (deal.section or "").strip() or "Deals",
         "variants": [],
@@ -72,11 +75,17 @@ def _deal_to_dict(deal: Product) -> dict:
 
 
 def _list_deals_impl(current_user: User, include_archived: str | None = None) -> dict[str, list[dict]]:
-    # Returns all products that are deals (restaurant menu promotions).
     query = Product.query.filter_by(is_deal=True)
     if not yes(include_archived):
         query = query.filter(Product.archived_at == None)  # noqa: E711
-    return {"deals": [_deal_to_dict(deal) for deal in query.all()]}
+    deals = query.all()
+    result = [_deal_to_dict(deal) for deal in deals]
+    if db.session.dirty:
+        try:
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+    return {"deals": result}
 
 
 def _validate_deal_payload(payload: DealCreate, deal_id: int | None = None) -> tuple[dict[str, object], list[dict[str, object]]] | JSONResponse:
@@ -193,6 +202,37 @@ def _replace_combo_items(deal: Product, combo_items: list[dict[str, object]]) ->
         )
 
 
+def _calculate_deal_base_cost(combo_items: list[dict[str, object]], deal_id: int | None = None) -> float:
+    """
+    Base cost is used for profit reporting: profit = sale price - base cost.
+
+    We can only compute a deterministic base cost from *fixed* product combo lines.
+    Category-choice lines are resolved at sale time, so they are excluded here.
+    """
+    total = 0.0
+    for ci in combo_items:
+        if str(ci.get("selection_type") or "").strip() != "product":
+            continue
+        product_id = ci.get("product_id")
+        if product_id is None:
+            continue
+        try:
+            pid = int(product_id)
+        except (TypeError, ValueError):
+            continue
+        if deal_id is not None and pid == int(deal_id):
+            continue
+        product = db.session.get(Product, pid)
+        if product is None or getattr(product, "is_deal", False):
+            continue
+        qty = int(ci.get("quantity") or 0)
+        if qty <= 0:
+            continue
+        variant_key = str(ci.get("variant_key") or "").strip()
+        total += calculate_bom_cost_for_variant(product, variant_key) * qty
+    return round(max(total, 0.0), 2)
+
+
 def _create_deal_impl(payload: DealCreate, current_user: User) -> dict[str, object]:
     validated = _validate_deal_payload(payload)
     if isinstance(validated, JSONResponse):
@@ -206,7 +246,7 @@ def _create_deal_impl(payload: DealCreate, current_user: User) -> dict[str, obje
     combo = Product(
         sku=deal_data["sku"],
         title=deal_data["title"],
-        base_price=0,
+        base_price=_calculate_deal_base_cost(normalized_combo_items),
         sale_price=deal_data["sale_price"],
         variants=deal_data["variants"],
         is_deal=True,
@@ -232,7 +272,7 @@ def _update_deal_impl(deal_id: int, payload: DealCreate, current_user: User) -> 
 
     deal.sku = deal_data["sku"]
     deal.title = deal_data["title"]
-    deal.base_price = 0
+    deal.base_price = _calculate_deal_base_cost(normalized_combo_items, deal_id=deal_id)
     deal.sale_price = deal_data["sale_price"]
     deal.variants = deal_data["variants"]
     deal.section = "Deals"

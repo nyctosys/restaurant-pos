@@ -37,6 +37,7 @@ from app.services.printer_background import (
     run_print_kot_modification_job as _run_print_kot_modification_job,
 )
 from app.services.product_pricing import effective_sale_price_for_variant
+from app.services.product_pricing import calculate_bom_cost_for_variant
 from app.services.recipe_variants import (
     combo_category_label,
     combo_items_for_variant,
@@ -1372,24 +1373,37 @@ def _build_detailed_report(
     base_filters = _sales_report_filters(tid, start_dt, end_dt, include_archived)
     completed_filters = [*base_filters, Sale.status == "completed"]
 
-    profit_row = (
-        db.session.query(
-            func.coalesce(
-                func.sum(
-                    (SaleItem.unit_price - func.coalesce(Product.base_price, 0))
-                    * SaleItem.quantity
-                ),
-                0,
-            )
-        )
+    # Profit needs special handling for deals:
+    # - Revenue is captured on the deal parent line (unit_price > 0).
+    # - Cost should come from the deal child lines (unit_price = 0) using each child's BOM cost + variant.
+    #
+    # We compute profit in Python so it's variant-aware and doesn't depend on `Product.base_price` for deals.
+    profit_amount = 0.0
+    profit_rows = (
+        db.session.query(SaleItem, Product)
         .join(Sale, Sale.id == SaleItem.sale_id)
-        # Outer join so old rows with missing/deleted products don't zero-out profit.
         .outerjoin(Product, Product.id == SaleItem.product_id)
-        # Deals create child lines with unit_price=0; those should not affect profit since
-        # revenue is captured on the deal parent line.
-        .filter(*completed_filters, SaleItem.parent_sale_item_id == None)  # noqa: E711
-        .one()
+        .filter(*completed_filters)
+        .all()
     )
+    for sale_item, product in profit_rows:
+        qty = int(getattr(sale_item, "quantity", 0) or 0)
+        if qty <= 0:
+            continue
+        unit_price = float(getattr(sale_item, "unit_price", 0.0) or 0.0)
+        revenue = unit_price * qty
+
+        # Parent deal lines: cost is computed from their child lines, so cost here is 0 to avoid double counting.
+        if getattr(sale_item, "parent_sale_item_id", None) is None and product is not None and getattr(product, "is_deal", False):
+            profit_amount += revenue
+            continue
+
+        cost = 0.0
+        if product is not None:
+            variant_key = str(getattr(sale_item, "variant_sku_suffix", "") or "").strip()
+            cost = calculate_bom_cost_for_variant(product, variant_key) * qty
+
+        profit_amount += revenue - cost
 
     totals_row = (
         db.session.query(
@@ -1496,7 +1510,7 @@ def _build_detailed_report(
         "totals": {
             "orders": int(totals_row[0] or 0),
             "received_amount": _money(totals_row[1]),
-            "profit_amount": _money(profit_row[0]),
+            "profit_amount": _money(profit_amount),
             "discount_amount": _money(totals_row[2]),
             "tax_amount": _money(totals_row[3]),
             "delivery_charge": _money(totals_row[4]),

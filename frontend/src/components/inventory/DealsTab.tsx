@@ -102,6 +102,27 @@ export default function DealsTab() {
     setFormSkuTouched(false);
   };
 
+  const estimatedBaseCost = useMemo(() => {
+    const cost = formData.combo_items.reduce((sum, item) => {
+      const selectionType = item.selection_type || 'product';
+      if (selectionType !== 'product') return sum;
+      const productId = Number(item.product_id);
+      const quantity = Number(item.quantity) || 0;
+      if (!Number.isFinite(productId) || productId <= 0 || quantity <= 0) return sum;
+      const product = products.find((p) => p.id === productId);
+      if (!product) return sum;
+
+      const variantKey = (item.variant_key || '').trim();
+      const variantCost =
+        variantKey && Array.isArray(product.variants)
+          ? product.variants.find((v) => (v.name || '').trim().toLowerCase() === variantKey.toLowerCase())?.basePrice
+          : undefined;
+      const unitCost = Number.isFinite(Number(variantCost)) && Number(variantCost) > 0 ? Number(variantCost) : product.base_price;
+      return sum + unitCost * quantity;
+    }, 0);
+    return Math.max(0, Math.round(cost * 100) / 100);
+  }, [formData.combo_items, products]);
+
   const buildPayload = () => {
     return {
       title: formData.title,
@@ -437,6 +458,10 @@ export default function DealsTab() {
                   className="w-full bg-white/50 border border-soot-200 rounded-[11px] px-4 py-3 focus:ring-2 focus:ring-brand-500 transition-all font-medium touch-target outline-none"
                   placeholder="0.00"
                 />
+                <p className="text-xs text-soot-500 mt-1.5">
+                  Estimated base cost: <span className="font-semibold text-soot-700">{formatCurrency(estimatedBaseCost)}</span>
+                  <span className="text-soot-400"> (uses current item costs; final deal base cost is calculated from BOM on save)</span>
+                </p>
               </div>
             </div>
 
