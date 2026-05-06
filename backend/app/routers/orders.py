@@ -1385,7 +1385,9 @@ def _build_detailed_report(
         .join(Sale, Sale.id == SaleItem.sale_id)
         # Outer join so old rows with missing/deleted products don't zero-out profit.
         .outerjoin(Product, Product.id == SaleItem.product_id)
-        .filter(*completed_filters)
+        # Deals create child lines with unit_price=0; those should not affect profit since
+        # revenue is captured on the deal parent line.
+        .filter(*completed_filters, SaleItem.parent_sale_item_id == None)  # noqa: E711
         .one()
     )
 
