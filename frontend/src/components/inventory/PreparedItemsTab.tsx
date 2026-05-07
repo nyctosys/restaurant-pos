@@ -19,7 +19,9 @@ type Ingredient = {
 };
 
 type PreparedComponent = {
-  ingredient_id: number;
+  ingredient_id?: number;
+  prepared_item_id?: number;
+  component_type?: string;
   quantity: number;
   unit: string;
   notes?: string;
@@ -116,9 +118,15 @@ export default function PreparedItemsTab() {
     setKind(item.kind);
     setUnit(item.unit);
     setNotes(item.notes || '');
+    const editableComponents = item.components.filter(
+      (component) =>
+        component.ingredient_id &&
+        (component.component_type !== 'prepared_item' ||
+          Number(component.prepared_item_id || 0) !== item.id)
+    );
     setComponents(
-      item.components.length
-        ? item.components.map((component) => ({
+      editableComponents.length
+        ? editableComponents.map((component) => ({
             ingredientId: String(component.ingredient_id),
             quantity: String(component.quantity),
           }))
